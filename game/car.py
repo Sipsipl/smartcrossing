@@ -1,5 +1,6 @@
 import math
 import pygame
+from game.config import WIDTH, HEIGHT
 
 class Car:
     def __init__(self, x, y, width, height, color):
@@ -29,8 +30,21 @@ class Car:
         angle_radians = math.radians(self.angle)
 
         # Update the car's position and angle based on its speed and angle
-        self.x += self.speed * math.cos(angle_radians) * dt
-        self.y -= self.speed * math.sin(angle_radians) * dt
+        new_x = self.x + self.speed * math.cos(angle_radians) * dt
+        new_y = self.y - self.speed * math.sin(angle_radians) * dt
+
+        # Check if the new position is within the screen boundaries
+        if new_x - self.width / 2 < 0:
+            new_x = self.width / 2
+        elif new_x + self.width / 2 > WIDTH:
+            new_x = WIDTH - self.width / 2
+
+        if new_y - self.height / 2 < 0:
+            new_y = self.height / 2
+        elif new_y + self.height / 2 > HEIGHT:
+            new_y = HEIGHT - self.height / 2
+
+        self.x, self.y = new_x, new_y
 
     def draw(self, surface):
         # Create a new surface for the car
