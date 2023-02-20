@@ -15,6 +15,8 @@ class Car:
         self.rect = pygame.Rect(self.x, self.y, self.width, self.height)
 
     def update(self, keys, dt):
+        '''
+            def update(self, keys, dt):
         # Calculate the car's speed and angle based on the arrow keys
         if keys[pygame.K_UP]:
             self.speed += 1
@@ -28,6 +30,24 @@ class Car:
             self.angle_change = self.turning_speed
         elif keys[pygame.K_RIGHT]:
             self.angle_change = -self.turning_speed
+        else:
+            self.angle_change = 0'''
+        
+        # Turn left when the left arrow key is pressed
+        if keys[pygame.K_LEFT]:
+            self.turn_left()
+        # Turn right when the right arrow key is pressed
+        elif keys[pygame.K_RIGHT]:
+            self.turn_right()
+        else:
+            self.speed *= 0.95
+
+        # Accelerate when the up arrow key is pressed
+        if keys[pygame.K_UP]:
+            self.accelerate()
+        # Brake when the down arrow key is pressed
+        elif keys[pygame.K_DOWN]:
+            self.brake()
         else:
             self.angle_change = 0
 
@@ -58,6 +78,17 @@ class Car:
         self.rect.x, self.rect.y = self.x - self.width/2, self.y - self.height/2
         self.rect.width, self.rect.height = self.width, self.height
 
+    def turn_left(self):
+        self.angle_change = self.turning_speed
+
+    def turn_right(self):
+        self.angle_change = -self.turning_speed
+
+    def accelerate(self):
+        self.speed += 1
+
+    def brake(self):
+        self.speed -= 1
 
     def draw(self, surface):
         # Create a new surface for the car
@@ -77,3 +108,4 @@ class Car:
 
         # Draw the car surface to the screen
         surface.blit(rotated_car_surface, rect)
+
