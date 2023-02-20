@@ -12,26 +12,12 @@ class Car:
         self.angle = 0
         self.speed = 0
         self.turning_speed = 30
+        self.max_speed = 10
+        self.min_speed = 0
+        self.reverse_speed = -3
         self.rect = pygame.Rect(self.x, self.y, self.width, self.height)
 
     def update(self, keys, dt):
-        '''
-            def update(self, keys, dt):
-        # Calculate the car's speed and angle based on the arrow keys
-        if keys[pygame.K_UP]:
-            self.speed += 1
-        elif keys[pygame.K_DOWN]:
-            self.speed -= 1
-        else:
-            self.speed *= 0.95
-
-        # Calculate the change in angle based on the arrow keys
-        if keys[pygame.K_LEFT]:
-            self.angle_change = self.turning_speed
-        elif keys[pygame.K_RIGHT]:
-            self.angle_change = -self.turning_speed
-        else:
-            self.angle_change = 0'''
         
         # Turn left when the left arrow key is pressed
         if keys[pygame.K_LEFT]:
@@ -86,9 +72,14 @@ class Car:
 
     def accelerate(self):
         self.speed += 1
+        if self.speed > self.max_speed:
+            self.speed = self.max_speed
 
     def brake(self):
-        self.speed -= 1
+        if self.speed > self.min_speed:
+            self.speed -= 1
+        else:
+            self.speed = self.reverse_speed
 
     def draw(self, surface):
         # Create a new surface for the car
