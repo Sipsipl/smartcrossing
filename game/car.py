@@ -12,7 +12,7 @@ class Car:
         self.angle = 0
         self.speed = 0
         self.turning_speed = 30
-        self.max_speed = 10
+        self.max_speed = 100
         self.min_speed = 0
         self.reverse_speed = -3
         self.rect = pygame.Rect(self.x, self.y, self.width, self.height)
@@ -26,7 +26,7 @@ class Car:
         elif keys[pygame.K_RIGHT]:
             self.turn_right()
         else:
-            self.speed *= 0.95
+            self.angle_change = 0
 
         # Accelerate when the up arrow key is pressed
         if keys[pygame.K_UP]:
@@ -35,7 +35,7 @@ class Car:
         elif keys[pygame.K_DOWN]:
             self.brake()
         else:
-            self.angle_change = 0
+            self.speed *= 0.95
 
         # Gradually update the angle
         self.angle += self.angle_change * dt
