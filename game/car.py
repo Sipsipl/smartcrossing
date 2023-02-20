@@ -11,6 +11,7 @@ class Car:
         self.color = color
         self.angle = 0
         self.speed = 0
+        self.turning_speed = 30
 
     def update(self, keys, dt):
         # Calculate the car's speed and angle based on the arrow keys
@@ -21,15 +22,21 @@ class Car:
         else:
             self.speed *= 0.95
 
+        # Calculate the change in angle based on the arrow keys
         if keys[pygame.K_LEFT]:
-            self.angle += 5
+            self.angle_change = self.turning_speed
         elif keys[pygame.K_RIGHT]:
-            self.angle -= 5
+            self.angle_change = -self.turning_speed
+        else:
+            self.angle_change = 0
+
+        # Gradually update the angle
+        self.angle += self.angle_change * dt
 
         # Convert the angle to radians
         angle_radians = math.radians(self.angle)
 
-        # Update the car's position and angle based on its speed and angle
+        # Update the car's position based on its speed and angle
         new_x = self.x + self.speed * math.cos(angle_radians) * dt
         new_y = self.y - self.speed * math.sin(angle_radians) * dt
 

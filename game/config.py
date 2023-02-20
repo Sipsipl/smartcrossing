@@ -1,3 +1,3 @@
 WIDTH = 640
 HEIGHT = 480
-FPS = 30
+FPS = 120
