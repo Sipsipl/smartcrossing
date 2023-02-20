@@ -54,6 +54,11 @@ class Car:
 
         self.x, self.y = new_x, new_y
 
+        # Update the self.rect object to reflect the car's new position and size
+        self.rect.x, self.rect.y = self.x - self.width/2, self.y - self.height/2
+        self.rect.width, self.rect.height = self.width, self.height
+
+
     def draw(self, surface):
         # Create a new surface for the car
         car_surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
