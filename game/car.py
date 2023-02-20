@@ -12,6 +12,7 @@ class Car:
         self.angle = 0
         self.speed = 0
         self.turning_speed = 30
+        self.rect = pygame.Rect(self.x, self.y, self.width, self.height)
 
     def update(self, keys, dt):
         # Calculate the car's speed and angle based on the arrow keys

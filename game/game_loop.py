@@ -1,7 +1,9 @@
+# game_loop.py
 import pygame
 from game.car import Car
 from game.obstacle import Obstacle
 from game.road import Road
+from game.goal import Goal
 from game.config import *
 
 # Initialize Pygame
@@ -16,8 +18,9 @@ clock = pygame.time.Clock()
 
 # Create the game entities
 car = Car(x=0, y=0, width=100, height=50, color=(255, 0, 0))
-obstacle = Obstacle(x=100, y=100, width=50, height=50, color=(0, 255, 0))
+obstacle = Obstacle(x=100, y=100, width=50, height=50, color=(0, 0, 0))
 road = Road(x=0, y=300, width=600, height=50, color=(128, 128, 128))
+goal = Goal(x=500, y=300, width=100, height=50, color=(0, 255, 0))
 
 # Game loop
 running = True
@@ -37,11 +40,17 @@ while running:
     car.update(keys, dt)
     obstacle.update()
     road.update()
+    goal.update()
+
+    # Check for collisions with the goal
+    if car.rect.colliderect(goal.rect):
+        print("Goal achieved!")
 
     # Render graphics
     screen.fill((255, 255, 255))
     road.draw(screen)
     obstacle.draw(screen)
+    goal.draw(screen)
     car.draw(screen)
 
     # Update the display
@@ -50,4 +59,3 @@ while running:
 # Quit the game
 pygame.quit()
 exit()
-
