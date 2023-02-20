@@ -2,11 +2,7 @@ import pygame
 from game.car import Car
 from game.obstacle import Obstacle
 from game.road import Road
-
-# Define the game constants
-WIDTH = 640
-HEIGHT = 480
-FPS = 30
+from game.config import *
 
 # Initialize Pygame
 pygame.init()
