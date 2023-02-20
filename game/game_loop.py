@@ -29,7 +29,17 @@ while running:
     # Handle events
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
-            running = False
+            # Quit the game
+            pygame.quit()
+            exit()
+
+     # Get the current state of the arrow keys
+    keys = pygame.key.get_pressed()
+
+    # Update game state
+    car.update(keys)
+    obstacle.update()
+    road.update()
 
     # Render graphics
     screen.fill((255, 255, 255))
