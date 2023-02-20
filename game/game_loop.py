@@ -19,7 +19,7 @@ pygame.display.set_caption("Smart Crossing")
 clock = pygame.time.Clock()
 
 # Create the game entities
-car = Car(x=0, y=0, width=50, height=100, color=(255, 0, 0))
+car = Car(x=0, y=0, width=100, height=50, color=(255, 0, 0))
 obstacle = Obstacle(x=100, y=100, width=50, height=50, color=(0, 255, 0))
 road = Road(x=0, y=300, width=600, height=50, color=(128, 128, 128))
 
@@ -33,11 +33,12 @@ while running:
             pygame.quit()
             exit()
 
-     # Get the current state of the arrow keys
+    # Get the current state of the arrow keys
     keys = pygame.key.get_pressed()
 
     # Update game state
-    car.update(keys)
+    dt = clock.tick(FPS) / 1000.0
+    car.update(keys, dt)
     obstacle.update()
     road.update()
 
@@ -50,9 +51,7 @@ while running:
     # Update the display
     pygame.display.update()
 
-    # Wait for next frame
-    clock.tick(FPS)
-
 # Quit the game
 pygame.quit()
 exit()
+
