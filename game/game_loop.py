@@ -19,23 +19,17 @@ pygame.display.set_caption("Smart Crossing")
 clock = pygame.time.Clock()
 
 # Create the game entities
-car = Car(x=0, y=0, width=50, height=50, color=(255, 0, 0))
+car = Car(x=0, y=0, width=50, height=100, color=(255, 0, 0))
 obstacle = Obstacle(x=100, y=100, width=50, height=50, color=(0, 255, 0))
 road = Road(x=0, y=300, width=600, height=50, color=(128, 128, 128))
 
 # Game loop
-while True:
+running = True
+while running:
     # Handle events
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
-            # Quit the game
-            pygame.quit()
-            exit()
-
-    # Update game state
-    car.update()
-    obstacle.update()
-    road.update()
+            running = False
 
     # Render graphics
     screen.fill((255, 255, 255))
@@ -48,3 +42,7 @@ while True:
 
     # Wait for next frame
     clock.tick(FPS)
+
+# Quit the game
+pygame.quit()
+exit()
