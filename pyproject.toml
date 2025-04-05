@@ -1,0 +1,14 @@
+[tool.poetry]
+name = "smartcrossing"
+version = "0.1.0"
+description = "A traffic management system designed to optimize traffic flow and enhance pedestrian safety"
+authors = ["Your Name <your.email@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.13.2"
+pygame = "^2.5.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
