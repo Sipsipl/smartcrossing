@@ -6,7 +6,7 @@ class Goal:
         self.color = color
 
     def draw(self, screen):
-        pygame.draw.rect(screen, self.color, self.rect)
+        pygame.draw.circle(screen, self.color, self.rect.center, self.rect.width // 2)
 
     def update(self):
         pass

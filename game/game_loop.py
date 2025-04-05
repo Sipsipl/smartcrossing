@@ -19,10 +19,10 @@ class GameLoop:
         self.clock = pygame.time.Clock()
 
         # Create the game entities
-        self.car = Car(x=0, y=0, width=100, height=50, color=(255, 0, 0))
-        self.obstacle = Obstacle(x=100, y=100, width=50, height=50, color=(0, 0, 0))
-        self.road = Road(x=0, y=300, width=600, height=50, color=(128, 128, 128))
-        self.goal = Goal(x=500, y=300, width=100, height=50, color=(0, 255, 0))
+        self.car = Car(x=0, y=0, width=160, height=80, color=(255, 0, 0))
+        self.obstacle = Obstacle(x=160, y=160, width=80, height=80, color=(0, 0, 0))
+        self.road = Road(x=0, y=480, width=1024, height=80, color=(128, 128, 128))
+        self.goal = Goal(x=800, y=480, width=160, height=80, color=(0, 255, 0))
 
     def run(self):
         running = True
