@@ -112,6 +112,38 @@ The training process follows this hierarchical structure:
 
 Each training run consists of 500 episodes. During each episode, the agent interacts with the environment at 60 frames per second until it either reaches the goal or collides with an obstacle. Every 10 episodes, the agent is evaluated without exploration to measure its true performance. The best performing model is saved throughout training, and the final model is saved when training completes.
 
+## Training Time Estimation
+
+Based on empirical observations, here's an estimate of the training duration:
+
+### With Rendering (60 FPS)
+- Average episode duration: ~44 seconds
+- Total training episodes: 500
+- Evaluation episodes: 50 (5 episodes every 10 training episodes)
+- Estimated total training time: ~9.2 hours
+  - Base training: 500 episodes × 44 seconds ≈ 6.1 hours
+  - Evaluation time: 50 episodes × 44 seconds ≈ 3.1 hours
+
+### Without Rendering
+- Average episode duration: ~0.23 seconds
+- Total training episodes: 500
+- Evaluation episodes: 50 (5 episodes every 10 training episodes)
+- Estimated total training time: ~2.9 minutes
+  - Base training: 500 episodes × 0.23 seconds ≈ 1.9 minutes
+  - Evaluation time: 50 episodes × 0.23 seconds ≈ 1.0 minutes
+
+Note: The actual training time may vary depending on:
+- Agent's learning progress and path choices
+- System performance and load
+- Whether the agent reaches the goal quickly or takes longer paths
+- Additional overhead from checkpoints and model saving
+
+The environment can run in two modes:
+1. Visualization mode (60 FPS): Slower but allows real-time visualization of the agent's behavior
+2. Headless mode (no rendering): Approximately 191 times faster, ideal for training
+
+For fastest training, use headless mode by setting `render_mode=None` when creating the environment.
+
 ## Belohnungssystem
 
 Das Belohnungssystem des KI-Agenten funktioniert wie folgt:

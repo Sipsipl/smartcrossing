@@ -100,9 +100,9 @@ class SmartCrossingEnv(gym.Env):
             
             # Update game state
             if self.render_mode == "human":
-                dt = self.clock.tick(60) / 1000.0  # Use actual time delta
+                dt = self.clock.tick(60) / 1000.0  # Use actual time delta for rendering
             else:
-                dt = 1.0 / 60.0  # Fixed timestep for non-rendering mode
+                dt = 0.016  # Use a small fixed timestep (1/60) when not rendering
             
             # Update car based on current action
             self.game.car.update(keys, dt)
