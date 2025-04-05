@@ -13,13 +13,15 @@ class SmartCrossingEnv(gym.Env):
     """Custom Environment that follows gym interface"""
     metadata = {"render_modes": ["human"], "render_fps": 60}
 
-    def __init__(self, render_mode=None):
+    def __init__(self, render_mode=None, max_steps=1000):
         super().__init__()
         
         # Initialize the game
         self.game = None
         self.render_mode = render_mode
         self.clock = None
+        self.max_steps = max_steps
+        self.steps = 0
         
         # Initialize pygame if we're rendering
         if self.render_mode == "human":
@@ -51,6 +53,7 @@ class SmartCrossingEnv(gym.Env):
             logger.debug("Resetting environment")
             # Reset the game to initial state
             self.game = GameLoop()
+            self.steps = 0
             
             # Get initial observation
             observation = self._get_obs()
@@ -74,6 +77,8 @@ class SmartCrossingEnv(gym.Env):
 
     def step(self, action):
         try:
+            self.steps += 1
+            
             # Map actions to game controls
             keys = {pygame.K_LEFT: False, pygame.K_RIGHT: False, 
                     pygame.K_UP: False, pygame.K_DOWN: False}
@@ -110,7 +115,7 @@ class SmartCrossingEnv(gym.Env):
             
             # Check if episode is done
             terminated = self._is_terminated()
-            truncated = False
+            truncated = self.steps >= self.max_steps
             
             # Get observation and info
             observation = self._get_obs()

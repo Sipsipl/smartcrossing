@@ -24,6 +24,7 @@ class GameState:
         self.score: int = 0
         self.time: float = 0
         self.goals_reached: int = 0
+        self.frame_count: int = 0  # Add frame counter
 
 class GameLoop:
     """Main game loop handling updates and rendering"""
@@ -213,7 +214,12 @@ class GameLoop:
             pygame.display.flip()  # Use flip() instead of update() for double buffering
             pygame.event.pump()  # Keep the window responsive
             
-            logger.debug("Frame rendered successfully")
+            # Increment frame counter
+            self.state.frame_count += 1
+            
+            # Log render status every 1000 frames
+            if self.state.frame_count % 1000 == 0:
+                logger.debug(f"Frame {self.state.frame_count} rendered successfully")
         
         except Exception as e:
             logger.error(f"Failed to render game state: {str(e)}")

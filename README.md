@@ -83,3 +83,31 @@ The reinforcement learning component will be implemented in the following stages
    - PyTorch: Neural network implementation
    - Gymnasium: Environment structure
    - Weights and Biases: Training visualization
+
+## Training Process
+
+The training process follows this hierarchical structure:
+
+```
+📦 Run (500 Episoden)
+│
+├── 🔁 Episode
+│   ├─ 🔄 Step/Frame (60 FPS)
+│   │    ├─ Aktion wählen (agent.select_action)
+│   │    ├─ Umgebung aktualisieren (env.step)
+│   │    ├─ Belohnung berechnen
+│   │    ├─ Neuen Zustand beobachten
+│   │    ├─ Erfahrung im Replay Buffer speichern
+│   │    └─ Training durchführen (wenn Buffer > 64)
+│   └─ 🏁 Episode Ende: Ziel erreicht oder Kollision
+│
+├── 📊 Evaluation (alle 10 Episoden)
+│   ├─ 5 Evaluierungsepisoden
+│   └─ Ohne Exploration (ε = 0)
+│
+└── 💾 Modell-Speicherung
+    ├─ Bestes Modell (best_model.pt)
+    └─ Finales Modell (final_model.pt)
+```
+
+Each training run consists of 500 episodes. During each episode, the agent interacts with the environment at 60 frames per second until it either reaches the goal or collides with an obstacle. Every 10 episodes, the agent is evaluated without exploration to measure its true performance. The best performing model is saved throughout training, and the final model is saved when training completes.

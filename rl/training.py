@@ -73,7 +73,7 @@ def train(num_episodes: int = 1000, eval_interval: int = 10):
                         
                         step += 1
                         if step % 100 == 0:  # Log every 100 steps
-                            logger.debug(f"Episode {episode + 1}, Step {step}: Reward={reward:.2f}, Loss={loss if loss else 'None'}")
+                            logger.info(f"Episode {episode + 1}, Step {step}: Reward={reward:.2f}, Loss={loss if loss else 'None'}")
                     
                     except Exception as e:
                         logger.error(f"Error during training step: {str(e)}")
