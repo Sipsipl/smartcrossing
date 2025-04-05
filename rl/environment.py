@@ -78,10 +78,10 @@ class SmartCrossingEnv(gym.Env):
             car.y,
             car.angle,
             car.speed,
-            goal.x,
-            goal.y,
-            obstacle.x,
-            obstacle.y,
+            goal.rect.centerx,
+            goal.rect.centery,
+            obstacle.rect.centerx,
+            obstacle.rect.centery,
         ], dtype=np.float32)
 
     def _get_info(self):
@@ -91,8 +91,8 @@ class SmartCrossingEnv(gym.Env):
         
         # Calculate distance to goal
         distance_to_goal = np.sqrt(
-            (car.x - goal.x) ** 2 + 
-            (car.y - goal.y) ** 2
+            (car.x - goal.rect.centerx) ** 2 + 
+            (car.y - goal.rect.centery) ** 2
         )
         
         return {
@@ -118,7 +118,10 @@ class SmartCrossingEnv(gym.Env):
         reward -= 0.1
         
         # Reward for getting closer to goal (based on previous distance)
-        current_distance = np.sqrt((car.x - goal.x) ** 2 + (car.y - goal.y) ** 2)
+        current_distance = np.sqrt(
+            (car.x - goal.rect.centerx) ** 2 + 
+            (car.y - goal.rect.centery) ** 2
+        )
         if hasattr(self, '_previous_distance'):
             reward += (self._previous_distance - current_distance) * 0.1
         self._previous_distance = current_distance
