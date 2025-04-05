@@ -1,12 +1,9 @@
 import pygame
+from game.game_objects import StaticGameObject
 
-class Goal:
-    def __init__(self, x, y, width, height, color):
-        self.rect = pygame.Rect(x, y, width, height)
-        self.color = color
-
-    def draw(self, screen):
-        pygame.draw.circle(screen, self.color, self.rect.center, self.rect.width // 2)
-
-    def update(self):
-        pass
+class Goal(StaticGameObject):
+    """Goal that the car needs to reach"""
+    def __init__(self, x: float, y: float, width: float, height: float, color: tuple[int, int, int]):
+        # Make width and height equal for a perfect circle
+        size = min(width, height)
+        super().__init__(x, y, size, size, color, shape='circle')
