@@ -4,13 +4,15 @@ version = "0.1.0"
 description = "A traffic management system designed to optimize traffic flow and enhance pedestrian safety"
 authors = ["Your Name <your.email@example.com>"]
 readme = "README.md"
-packages = [{include = "game"}]
+packages = [{include = "game"}, {include = "rl"}]
 
 [tool.poetry.dependencies]
 python = "^3.13.2"
 pygame = "^2.5.2"
 gymnasium = "^1.1.1"
 numpy = "^2.2.4"
+torch = "^2.6.0"
+tensorboard = "^2.19.0"
 
 [build-system]
 requires = ["poetry-core"]
