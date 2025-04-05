@@ -4,15 +4,31 @@
     // Weitere Informationen finden Sie unter https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-        
         {
-            "name": "Python: Poetry Run",
-            "type": "python",
+            "name": "Play Game",
+            "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/main.py",
+            "args": ["--mode", "play"],
             "console": "integratedTerminal",
-            "justMyCode": true,
-            "python": "${command:python.interpreterPath}"
+            "justMyCode": true
+        },
+        {
+            "name": "Train RL Agent",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "args": ["--mode", "train"],
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Test RL Agent",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/rl/test_agent.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
         }
     ]
 }

@@ -15,6 +15,10 @@ class SmartCrossingEnv(gym.Env):
         self.game = None
         self.render_mode = render_mode
         
+        # Initialize pygame if we're rendering
+        if self.render_mode == "human":
+            pygame.init()
+        
         # Define action space (Discrete: 0=nothing, 1=left, 2=right, 3=accelerate, 4=brake)
         self.action_space = spaces.Discrete(5)
         
@@ -33,6 +37,10 @@ class SmartCrossingEnv(gym.Env):
         # Get initial observation
         observation = self._get_obs()
         info = self._get_info()
+        
+        # Render initial state if needed
+        if self.render_mode == "human":
+            self.render()
         
         return observation, info
 
@@ -64,6 +72,10 @@ class SmartCrossingEnv(gym.Env):
         # Get observation and info
         observation = self._get_obs()
         info = self._get_info()
+        
+        # Render if needed
+        if self.render_mode == "human":
+            self.render()
         
         return observation, reward, terminated, truncated, info
 

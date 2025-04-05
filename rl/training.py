@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 import numpy as np
 import torch
-from torch.utils.tensorboard import SummaryWriter
+import wandb
 from .environment import SmartCrossingEnv
 from .agent import DQNAgent
 
@@ -13,16 +13,26 @@ def train(num_episodes: int = 1000, eval_interval: int = 10):
         num_episodes: Number of episodes to train for
         eval_interval: Number of episodes between evaluations
     """
+    # Initialize wandb
+    wandb.init(
+        project="smartcrossing",
+        config={
+            "num_episodes": num_episodes,
+            "eval_interval": eval_interval,
+            "architecture": "DQN",
+            "gamma": 0.99,
+            "epsilon_start": 1.0,
+            "epsilon_end": 0.01,
+            "epsilon_decay": 0.995,
+            "batch_size": 64,
+        }
+    )
+    
     # Create environment and agent
-    env = SmartCrossingEnv()
+    env = SmartCrossingEnv(render_mode="human")  # Enable rendering
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
     agent = DQNAgent(state_dim, action_dim)
-    
-    # Set up logging
-    current_time = datetime.now().strftime('%Y%m%d-%H%M%S')
-    log_dir = os.path.join('runs', f'DQN_{current_time}')
-    writer = SummaryWriter(log_dir)
     
     # Training loop
     best_eval_reward = float('-inf')
@@ -46,21 +56,29 @@ def train(num_episodes: int = 1000, eval_interval: int = 10):
             # Update state and reward
             state = next_state
             episode_reward += reward
+            
+            # Render the environment
+            env.render()
         
         # Log training metrics
         episode_rewards.append(episode_reward)
-        writer.add_scalar('Training/Episode Reward', episode_reward, episode)
+        metrics = {
+            "train/episode_reward": episode_reward,
+            "train/epsilon": agent.epsilon,
+        }
         if loss is not None:
-            writer.add_scalar('Training/Loss', loss, episode)
+            metrics["train/loss"] = loss
+        wandb.log(metrics)
         
         # Evaluate and save best model
         if (episode + 1) % eval_interval == 0:
             eval_reward = evaluate(env, agent)
-            writer.add_scalar('Evaluation/Episode Reward', eval_reward, episode)
+            wandb.log({"eval/episode_reward": eval_reward})
             
             if eval_reward > best_eval_reward:
                 best_eval_reward = eval_reward
                 agent.save('models/best_model.pt')
+                wandb.save('models/best_model.pt')
             
             print(f"Episode {episode + 1}/{num_episodes}")
             print(f"Average Training Reward: {np.mean(episode_rewards[-eval_interval:]):.2f}")
@@ -70,7 +88,8 @@ def train(num_episodes: int = 1000, eval_interval: int = 10):
     
     # Final save
     agent.save('models/final_model.pt')
-    writer.close()
+    wandb.save('models/final_model.pt')
+    wandb.finish()
     env.close()
 
 def evaluate(env: SmartCrossingEnv, agent: DQNAgent, num_episodes: int = 5) -> float:
@@ -96,6 +115,7 @@ def evaluate(env: SmartCrossingEnv, agent: DQNAgent, num_episodes: int = 5) -> f
             done = terminated or truncated
             episode_reward += reward
             state = next_state
+            env.render()  # Enable rendering during evaluation too
         
         rewards.append(episode_reward)
     
