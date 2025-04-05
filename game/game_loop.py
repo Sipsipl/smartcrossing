@@ -94,27 +94,37 @@ class GameLoop:
     def handle_events(self) -> None:
         """Handle pygame events"""
         try:
-            if pygame.get_init() and pygame.display.get_init():
-                # Process events
-                for event in pygame.event.get():
-                    if event.type == pygame.QUIT:
-                        self.state.running = False
-                        logger.info("Received quit event")
-                        pygame.quit()
-                    elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                        self.state.running = False
-                        logger.info("Received escape key press")
-                        pygame.quit()
-                
-                # Keep the window responsive
-                pygame.event.pump()
-            else:
-                logger.warning("Pygame or display not initialized, skipping event handling")
+            # Check if Pygame and display are initialized
+            if not pygame.get_init() or not pygame.display.get_init():
+                logger.warning("Pygame or display not initialized, reinitializing...")
+                if not pygame.get_init():
+                    pygame.init()
+                if not pygame.display.get_init():
+                    pygame.display.init()
+                # Recreate the screen if needed
+                if not hasattr(self, 'screen') or self.screen is None:
+                    self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+                    pygame.display.set_caption("Smart Crossing")
+            
+            # Process events
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.state.running = False
+                    logger.info("Received quit event")
+                    # Don't quit pygame here, let the run method handle cleanup
+                elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    self.state.running = False
+                    logger.info("Received escape key press")
+                    # Don't quit pygame here, let the run method handle cleanup
+            
+            # Keep the window responsive
+            pygame.event.pump()
         
         except Exception as e:
             logger.error(f"Failed to handle events: {str(e)}")
             logger.debug(traceback.format_exc())
-            raise
+            # Don't raise the exception, just log it and continue
+            # This prevents the game from crashing due to event handling issues
 
     def update(self, dt: float) -> None:
         """Update game state
@@ -164,7 +174,9 @@ class GameLoop:
             if self.car.check_collision(self.obstacle):
                 self.state.score -= 50
                 logger.debug("Collision with obstacle")
-                self.state.running = False  # End episode on collision
+                # Reset car position instead of ending the game
+                self.car.reset_position()
+                # Optional: Add a small delay or visual feedback here
         
         except Exception as e:
             logger.error(f"Failed to handle collisions: {str(e)}")
@@ -174,30 +186,40 @@ class GameLoop:
     def render(self) -> None:
         """Render the game state"""
         try:
-            if pygame.get_init() and pygame.display.get_init():
-                # Clear screen
-                self.screen.fill((255, 255, 255))
-                
-                # Draw static objects first
-                for obj in self.static_objects:
-                    obj.draw(self.screen)
-                
-                # Draw dynamic objects on top
-                for obj in self.dynamic_objects:
-                    obj.draw(self.screen)
-                
-                # Update display
-                pygame.display.flip()  # Use flip() instead of update() for double buffering
-                pygame.event.pump()  # Keep the window responsive
-                
-                logger.debug("Frame rendered successfully")
-            else:
-                logger.warning("Pygame or display not initialized, skipping render")
+            # Check if Pygame and display are initialized
+            if not pygame.get_init() or not pygame.display.get_init():
+                logger.warning("Pygame or display not initialized, reinitializing...")
+                if not pygame.get_init():
+                    pygame.init()
+                if not pygame.display.get_init():
+                    pygame.display.init()
+                # Recreate the screen if needed
+                if not hasattr(self, 'screen') or self.screen is None:
+                    self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+                    pygame.display.set_caption("Smart Crossing")
+            
+            # Clear screen
+            self.screen.fill((255, 255, 255))
+            
+            # Draw static objects first
+            for obj in self.static_objects:
+                obj.draw(self.screen)
+            
+            # Draw dynamic objects on top
+            for obj in self.dynamic_objects:
+                obj.draw(self.screen)
+            
+            # Update display
+            pygame.display.flip()  # Use flip() instead of update() for double buffering
+            pygame.event.pump()  # Keep the window responsive
+            
+            logger.debug("Frame rendered successfully")
         
         except Exception as e:
             logger.error(f"Failed to render game state: {str(e)}")
             logger.debug(traceback.format_exc())
-            raise
+            # Don't raise the exception, just log it and continue
+            # This prevents the game from crashing due to render issues
 
     def run(self) -> None:
         """Main game loop"""
@@ -222,8 +244,12 @@ class GameLoop:
         
         finally:
             # Cleanup
-            if pygame.display.get_init():
-                pygame.display.quit()
-            if pygame.get_init():
-                pygame.quit()
-            logger.info("Pygame resources cleaned up")
+            try:
+                if pygame.display.get_init():
+                    pygame.display.quit()
+                if pygame.get_init():
+                    pygame.quit()
+                logger.info("Pygame resources cleaned up")
+            except Exception as e:
+                logger.error(f"Error during cleanup: {str(e)}")
+                logger.debug(traceback.format_exc())

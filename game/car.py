@@ -7,6 +7,9 @@ class Car(DynamicGameObject):
     """A car that can be controlled by the player or AI"""
     def __init__(self, x: float, y: float, width: float, height: float, color: tuple[int, int, int]):
         super().__init__(x, y, width, height, color)
+        # Store initial position for reset
+        self.initial_x = x
+        self.initial_y = y
         # Position tracking (needed for accurate movement)
         self.x = x
         self.y = y
@@ -69,6 +72,20 @@ class Car(DynamicGameObject):
         elif self.y + self.rect.height/2 > HEIGHT:
             self.y = HEIGHT - self.rect.height/2
 
+        # Update rect position
+        self.rect.centerx = self.x
+        self.rect.centery = self.y
+
+    def reset_position(self) -> None:
+        """Reset the car to its initial position and state"""
+        # Reset position
+        self.x = self.initial_x
+        self.y = self.initial_y
+        
+        # Reset speed and angle
+        self.speed = 0
+        self.angle = 0
+        
         # Update rect position
         self.rect.centerx = self.x
         self.rect.centery = self.y

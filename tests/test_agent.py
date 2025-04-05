@@ -1,13 +1,12 @@
 import numpy as np
 import torch
-from .environment import SmartCrossingEnv
-from .agent import DQNAgent, ReplayBuffer
-from .models import DQN
+import os
+from rl.environment import SmartCrossingEnv
+from rl.agent import DQNAgent, ReplayBuffer
+from rl.models import DQN
 
 def test_dqn_model():
     """Test DQN model initialization and forward pass"""
-    print("\nTesting DQN Model...")
-    
     # Create model
     input_dim = 8  # State dimension
     output_dim = 5  # Action dimension
@@ -20,12 +19,9 @@ def test_dqn_model():
     
     # Verify output shape
     assert output.shape == (batch_size, output_dim), f"Expected shape {(batch_size, output_dim)}, got {output.shape}"
-    print("✓ Model initialization and forward pass tests passed")
 
 def test_replay_buffer():
     """Test replay buffer functionality"""
-    print("\nTesting Replay Buffer...")
-    
     # Create buffer
     buffer = ReplayBuffer(capacity=100)
     
@@ -48,12 +44,9 @@ def test_replay_buffer():
     assert rewards.shape == (batch_size,), f"Expected reward shape (4,), got {rewards.shape}"
     assert next_states.shape == (batch_size, 8), f"Expected next_state shape (4, 8), got {next_states.shape}"
     assert dones.shape == (batch_size,), f"Expected done shape (4,), got {dones.shape}"
-    print("✓ Replay buffer tests passed")
 
 def test_agent():
     """Test DQN agent functionality"""
-    print("\nTesting DQN Agent...")
-    
     # Create environment and agent
     env = SmartCrossingEnv()
     state_dim = env.observation_space.shape[0]
@@ -82,45 +75,22 @@ def test_agent():
     # Test training step
     loss = agent.train_step()
     assert loss is not None, "Training step failed to return loss"
-    print("✓ Agent initialization and training tests passed")
 
-def test_save_load():
+def test_save_load(test_models_dir):
     """Test model saving and loading"""
-    print("\nTesting Save/Load functionality...")
-    
     # Create agent and save
     env = SmartCrossingEnv()
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
     agent = DQNAgent(state_dim, action_dim)
     
-    import os
-    os.makedirs('test_models', exist_ok=True)
-    agent.save('test_models/test_model.pt')
+    model_path = os.path.join(test_models_dir, 'test_model.pt')
+    agent.save(model_path)
     
     # Create new agent and load
     new_agent = DQNAgent(state_dim, action_dim)
-    new_agent.load('test_models/test_model.pt')
+    new_agent.load(model_path)
     
     # Verify weights are the same
     for p1, p2 in zip(agent.policy_net.parameters(), new_agent.policy_net.parameters()):
         assert torch.equal(p1, p2), "Model parameters don't match after loading"
-    
-    # Cleanup
-    os.remove('test_models/test_model.pt')
-    os.rmdir('test_models')
-    print("✓ Save/Load tests passed")
-
-def main():
-    """Run all tests"""
-    print("Running DQN agent tests...\n")
-    
-    test_dqn_model()
-    test_replay_buffer()
-    test_agent()
-    test_save_load()
-    
-    print("\nAll tests completed successfully!")
-
-if __name__ == "__main__":
-    main()

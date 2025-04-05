@@ -1,6 +1,6 @@
 import numpy as np
 import gymnasium as gym
-from environment import SmartCrossingEnv
+from rl.environment import SmartCrossingEnv
 
 def test_environment_initialization():
     """Test environment initialization and spaces"""
@@ -12,8 +12,6 @@ def test_environment_initialization():
     # Test observation space
     assert env.observation_space.shape == (8,), f"Expected 8-dim observation, got {env.observation_space.shape}"
     assert env.observation_space.dtype == np.float32, f"Expected float32 dtype, got {env.observation_space.dtype}"
-    
-    print("✓ Environment initialization tests passed")
 
 def test_reset():
     """Test environment reset functionality"""
@@ -26,8 +24,6 @@ def test_reset():
     # Test info contains distance_to_goal
     assert "distance_to_goal" in info, "Info missing distance_to_goal"
     assert isinstance(info["distance_to_goal"], (int, float)), "distance_to_goal should be numeric"
-    
-    print("✓ Reset functionality tests passed")
 
 def test_step():
     """Test environment step function"""
@@ -50,8 +46,6 @@ def test_step():
         
         # Test info contains required fields
         assert "distance_to_goal" in info, f"Info missing distance_to_goal for action {action}"
-    
-    print("✓ Step function tests passed")
 
 def test_episode():
     """Test a full episode"""
@@ -73,21 +67,6 @@ def test_episode():
         if terminated or truncated:
             break
     
-    print(f"✓ Episode test completed:")
-    print(f"  Steps taken: {steps}")
-    print(f"  Total reward: {episode_reward:.2f}")
-    print(f"  Final distance to goal: {info['distance_to_goal']:.2f}")
-
-def main():
-    """Run all tests"""
-    print("Running environment tests...\n")
-    
-    test_environment_initialization()
-    test_reset()
-    test_step()
-    test_episode()
-    
-    print("\nAll tests completed successfully!")
-
-if __name__ == "__main__":
-    main()
+    # Verify episode completed
+    assert steps > 0, "Episode should have taken at least one step"
+    assert steps <= max_steps, f"Episode should not exceed {max_steps} steps"
