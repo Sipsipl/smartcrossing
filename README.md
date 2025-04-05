@@ -41,3 +41,45 @@ To update dependencies:
 ```bash
 poetry update
 ```
+
+
+## Plan to implement RL component
+
+The reinforcement learning component will be implemented in the following stages:
+
+1. **Project Structure**
+   - Create new `rl` module with:
+     - `agent.py`: Implementation of the RL agent
+     - `environment.py`: Game environment wrapper for RL
+     - `models.py`: Neural network models
+     - `training.py`: Training loop and utilities
+
+2. **Environment Implementation**
+   - Wrap existing game into a Gym-like environment
+   - Define:
+     - State space: Car position, velocity, distance to goal, obstacles
+     - Action space: Discrete actions (accelerate, brake, steer left/right)
+     - Reward function: Based on goal reaching, collision avoidance, time
+     - Reset and step functions
+
+3. **Agent Implementation**
+   - Implement DQN (Deep Q-Network) agent
+   - Key components:
+     - Experience replay buffer
+     - Target network for stable learning
+     - Epsilon-greedy exploration
+
+4. **Game Loop Integration**
+   - Support both manual and agent control modes
+   - Add visualization of agent's decision-making
+
+5. **Training Pipeline**
+   - Episode management
+   - Model checkpointing
+   - Performance metrics logging
+   - Multiple training scenarios
+
+6. **Dependencies**
+   - PyTorch: Neural network implementation
+   - Gymnasium: Environment structure
+   - Tensorboard: Training visualization
