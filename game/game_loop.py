@@ -30,8 +30,13 @@ class GameLoop:
     def __init__(self):
         """Initialize the game"""
         try:
-            # Initialize Pygame
-            pygame.init()
+            # Initialize Pygame only if not already initialized
+            if not pygame.get_init():
+                pygame.init()
+            
+            # Initialize display module if not already initialized
+            if not pygame.display.get_init():
+                pygame.display.init()
             
             # Set up the game window
             self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -89,15 +94,22 @@ class GameLoop:
     def handle_events(self) -> None:
         """Handle pygame events"""
         try:
-            # Process events
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.state.running = False
-                    logger.info("Received quit event")
-                    pygame.quit()
-            
-            # Keep the window responsive
-            pygame.event.pump()
+            if pygame.get_init() and pygame.display.get_init():
+                # Process events
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        self.state.running = False
+                        logger.info("Received quit event")
+                        pygame.quit()
+                    elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                        self.state.running = False
+                        logger.info("Received escape key press")
+                        pygame.quit()
+                
+                # Keep the window responsive
+                pygame.event.pump()
+            else:
+                logger.warning("Pygame or display not initialized, skipping event handling")
         
         except Exception as e:
             logger.error(f"Failed to handle events: {str(e)}")
@@ -162,22 +174,25 @@ class GameLoop:
     def render(self) -> None:
         """Render the game state"""
         try:
-            # Clear screen
-            self.screen.fill((255, 255, 255))
-            
-            # Draw static objects first
-            for obj in self.static_objects:
-                obj.draw(self.screen)
-            
-            # Draw dynamic objects on top
-            for obj in self.dynamic_objects:
-                obj.draw(self.screen)
-            
-            # Update display
-            pygame.display.flip()  # Use flip() instead of update() for double buffering
-            pygame.event.pump()  # Keep the window responsive
-            
-            logger.debug("Frame rendered successfully")
+            if pygame.get_init() and pygame.display.get_init():
+                # Clear screen
+                self.screen.fill((255, 255, 255))
+                
+                # Draw static objects first
+                for obj in self.static_objects:
+                    obj.draw(self.screen)
+                
+                # Draw dynamic objects on top
+                for obj in self.dynamic_objects:
+                    obj.draw(self.screen)
+                
+                # Update display
+                pygame.display.flip()  # Use flip() instead of update() for double buffering
+                pygame.event.pump()  # Keep the window responsive
+                
+                logger.debug("Frame rendered successfully")
+            else:
+                logger.warning("Pygame or display not initialized, skipping render")
         
         except Exception as e:
             logger.error(f"Failed to render game state: {str(e)}")
@@ -207,5 +222,8 @@ class GameLoop:
         
         finally:
             # Cleanup
-            pygame.quit()
+            if pygame.display.get_init():
+                pygame.display.quit()
+            if pygame.get_init():
+                pygame.quit()
             logger.info("Pygame resources cleaned up")

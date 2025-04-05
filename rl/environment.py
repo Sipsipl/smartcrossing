@@ -25,7 +25,8 @@ class SmartCrossingEnv(gym.Env):
         if self.render_mode == "human":
             try:
                 logger.info("Initializing pygame for rendering")
-                pygame.init()
+                if not pygame.get_init():
+                    pygame.init()
                 self.clock = pygame.time.Clock()
             except Exception as e:
                 logger.error(f"Failed to initialize pygame: {str(e)}")
@@ -232,8 +233,11 @@ class SmartCrossingEnv(gym.Env):
         """Render the environment"""
         try:
             if self.render_mode == "human":
-                self.game.render()
-                pygame.event.pump()  # Keep the window responsive
+                if pygame.get_init():
+                    self.game.render()
+                    pygame.event.pump()  # Keep the window responsive
+                else:
+                    logger.warning("Pygame not initialized, skipping render")
         except Exception as e:
             logger.error(f"Failed to render environment: {str(e)}")
             logger.debug(traceback.format_exc())
@@ -242,7 +246,7 @@ class SmartCrossingEnv(gym.Env):
     def close(self):
         """Clean up resources"""
         try:
-            if self.render_mode == "human":
+            if self.render_mode == "human" and pygame.get_init():
                 pygame.quit()
         except Exception as e:
             logger.error(f"Failed to close environment: {str(e)}")
