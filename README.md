@@ -6,7 +6,7 @@ A simple 2D simulation game built with Pygame where cars navigate a road crossin
 
 ### Prerequisites
 
-- Python (recommended version 3.8+)
+- Python (recommended version 3.13+)
 - [Poetry](https://python-poetry.org/) for dependency management
 
 ### Installation
@@ -82,4 +82,4 @@ The reinforcement learning component will be implemented in the following stages
 6. **Dependencies**
    - PyTorch: Neural network implementation
    - Gymnasium: Environment structure
-   - Tensorboard: Training visualization
+   - Weights and Biases: Training visualization

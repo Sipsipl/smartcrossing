@@ -2,3 +2,34 @@ __pycache__/
 *.py[cod]
 *$py.class
 wandb/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Logs
+logs/
+*.log
+
+# Virtual environments
+venv/
+env/
+.env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Training runs and checkpoints
+runs/
+checkpoints/
+models/
+
+# Environment variables
+.env
+
+# OS-specific
+.DS_Store
+Thumbs.db
