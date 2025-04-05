@@ -11,8 +11,8 @@ class Car:
         self.color = color
         self.angle = 0
         self.speed = 0
-        self.turning_speed = 30
-        self.max_speed = 100
+        self.turning_speed = 40
+        self.max_speed = 150
         self.min_speed = 0
         self.reverse_speed = -3
         self.rect = pygame.Rect(self.x, self.y, self.width, self.height)
@@ -99,4 +99,3 @@ class Car:
 
         # Draw the car surface to the screen
         surface.blit(rotated_car_surface, rect)
-
