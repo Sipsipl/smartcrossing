@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import wandb
 import traceback
+import time
 from .environment import SmartCrossingEnv
 from .agent import DQNAgent
 from .logger import setup_logger
@@ -48,6 +49,7 @@ def train(num_episodes: int = 1000, eval_interval: int = 10):
         logger.info("Starting training loop...")
         for episode in range(num_episodes):
             try:
+                episode_start_time = time.time()
                 state, _ = env.reset()
                 episode_reward = 0
                 done = False
@@ -80,17 +82,22 @@ def train(num_episodes: int = 1000, eval_interval: int = 10):
                         logger.debug(traceback.format_exc())
                         raise
                 
+                # Calculate episode duration
+                episode_duration = time.time() - episode_start_time
+                
                 # Log training metrics
                 episode_rewards.append(episode_reward)
                 metrics = {
                     "train/episode_reward": episode_reward,
                     "train/epsilon": agent.epsilon,
+                    "train/episode_duration": episode_duration,
+                    "train/steps": step
                 }
                 if loss is not None:
                     metrics["train/loss"] = loss
                 wandb.log(metrics)
                 
-                logger.info(f"Episode {episode + 1} completed: Reward={episode_reward:.2f}, Epsilon={agent.epsilon:.3f}")
+                logger.info(f"Episode {episode + 1} completed: Reward={episode_reward:.2f}, Epsilon={agent.epsilon:.3f}, Duration={episode_duration:.2f}s, Steps={step}")
                 
                 # Evaluate and save best model
                 if (episode + 1) % eval_interval == 0:
