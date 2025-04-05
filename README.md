@@ -111,3 +111,24 @@ The training process follows this hierarchical structure:
 ```
 
 Each training run consists of 500 episodes. During each episode, the agent interacts with the environment at 60 frames per second until it either reaches the goal or collides with an obstacle. Every 10 episodes, the agent is evaluated without exploration to measure its true performance. The best performing model is saved throughout training, and the final model is saved when training completes.
+
+## Belohnungssystem
+
+Das Belohnungssystem des KI-Agenten funktioniert wie folgt:
+- +100 Punkte für das Erreichen des Ziels
+- -50 Punkte bei Kollision mit Hindernissen
+- -0,1 Punkte pro Zeiteinheit (Motivation für schnelle Ausführung)
+- Kleine Belohnungen für Annäherung an das Ziel
+
+Diese Struktur motiviert den Agenten dazu, das Ziel schnell und sicher zu erreichen.
+
+## Beobachtungsraum
+
+Der Agent erhält bei jedem Zeitschritt folgende Informationen:
+- Position des Autos (X, Y)
+- Winkel des Autos (-360° bis 360°)
+- Geschwindigkeit des Autos (-3 bis 150)
+- Position des Ziels (X, Y)
+- Position des Hindernisses (X, Y)
+
+Diese 8-dimensionalen Informationen werden als normalisierte Werte im Bereich [0, 1024] für X-Koordinaten und [0, 768] für Y-Koordinaten bereitgestellt.
