@@ -1,7 +1,7 @@
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
-from game.game_loop import GameLoop
+from game.game_loop import GameLoop, GameState
 import pygame
 
 class SmartCrossingEnv(gym.Env):
@@ -74,8 +74,8 @@ class SmartCrossingEnv(gym.Env):
         obstacle = self.game.obstacle
         
         return np.array([
-            car.x,
-            car.y,
+            car.rect.centerx,  # Use rect.centerx instead of x
+            car.rect.centery,  # Use rect.centery instead of y
             car.angle,
             car.speed,
             goal.rect.centerx,
@@ -89,10 +89,10 @@ class SmartCrossingEnv(gym.Env):
         car = self.game.car
         goal = self.game.goal
         
-        # Calculate distance to goal
+        # Calculate distance to goal using rect centers
         distance_to_goal = np.sqrt(
-            (car.x - goal.rect.centerx) ** 2 + 
-            (car.y - goal.rect.centery) ** 2
+            (car.rect.centerx - goal.rect.centerx) ** 2 + 
+            (car.rect.centery - goal.rect.centery) ** 2
         )
         
         return {
@@ -106,12 +106,13 @@ class SmartCrossingEnv(gym.Env):
         goal = self.game.goal
         obstacle = self.game.obstacle
         
-        # Reward for reaching goal
-        if car.rect.colliderect(goal.rect):
+        # Reward for reaching goal (using GameState)
+        if self.game.state.goals_reached > getattr(self, '_previous_goals', 0):
             reward += 100
+            self._previous_goals = self.game.state.goals_reached
         
         # Penalty for collision with obstacle
-        if car.rect.colliderect(obstacle.rect):
+        if car.check_collision(obstacle):
             reward -= 50
         
         # Small penalty for time
@@ -119,8 +120,8 @@ class SmartCrossingEnv(gym.Env):
         
         # Reward for getting closer to goal (based on previous distance)
         current_distance = np.sqrt(
-            (car.x - goal.rect.centerx) ** 2 + 
-            (car.y - goal.rect.centery) ** 2
+            (car.rect.centerx - goal.rect.centerx) ** 2 + 
+            (car.rect.centery - goal.rect.centery) ** 2
         )
         if hasattr(self, '_previous_distance'):
             reward += (self._previous_distance - current_distance) * 0.1
@@ -135,14 +136,14 @@ class SmartCrossingEnv(gym.Env):
         obstacle = self.game.obstacle
         
         # End if car reaches goal or hits obstacle
-        return (car.rect.colliderect(goal.rect) or 
-                car.rect.colliderect(obstacle.rect))
+        return (car.check_collision(goal) or 
+                car.check_collision(obstacle))
 
     def render(self):
         """Render the environment"""
         if self.render_mode == "human":
-            # The game already handles rendering
-            pass
+            # Update display
+            self.game.render()
 
     def close(self):
         """Clean up resources"""
