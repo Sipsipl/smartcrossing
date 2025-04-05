@@ -89,28 +89,45 @@ The reinforcement learning component will be implemented in the following stages
 The training process follows this hierarchical structure:
 
 ```
-📦 Run (500 Episoden)
+📦 Run (500 Episodes)
 │
 ├── 🔁 Episode
 │   ├─ 🔄 Step/Frame (60 FPS)
-│   │    ├─ Aktion wählen (agent.select_action)
-│   │    ├─ Umgebung aktualisieren (env.step)
-│   │    ├─ Belohnung berechnen
-│   │    ├─ Neuen Zustand beobachten
-│   │    ├─ Erfahrung im Replay Buffer speichern
-│   │    └─ Training durchführen (wenn Buffer > 64)
-│   └─ 🏁 Episode Ende: Ziel erreicht oder Kollision
+│   │    ├─ Choose Action (agent.select_action)
+│   │    ├─ Update Environment (env.step)
+│   │    ├─ Calculate Reward
+│   │    ├─ Observe New State
+│   │    ├─ Store Experience in Replay Buffer
+│   │    └─ Perform Training (when Buffer > 64)
+│   └─ 🏁 Episode End: Goal Reached or Collision
 │
-├── 📊 Evaluation (alle 10 Episoden)
-│   ├─ 5 Evaluierungsepisoden
-│   └─ Ohne Exploration (ε = 0)
+├── 📊 Evaluation (every 10 Episodes)
+│   ├─ 5 Evaluation Episodes
+│   └─ Without Exploration (ε = 0)
 │
-└── 💾 Modell-Speicherung
-    ├─ Bestes Modell (best_model.pt)
-    └─ Finales Modell (final_model.pt)
+└── 💾 Model Storage
+    ├─ Best Model (best_model.pt)
+    └─ Final Model (final_model.pt)
 ```
 
 Each training run consists of 500 episodes. During each episode, the agent interacts with the environment at 60 frames per second until it either reaches the goal or collides with an obstacle. Every 10 episodes, the agent is evaluated without exploration to measure its true performance. The best performing model is saved throughout training, and the final model is saved when training completes.
+
+### Evaluation Process
+Every 10 training episodes, the training process pauses to evaluate the agent's performance:
+1. The agent runs 5 evaluation episodes
+2. During evaluation:
+   - The agent uses minimal exploration (ε ≈ 0)
+   - Each episode runs until goal reached or collision
+   - The average reward across all 5 episodes is calculated
+3. If the evaluation reward is higher than the previous best:
+   - The current model is saved as 'best_model.pt'
+   - The reward is logged to Weights & Biases
+4. This process repeats 50 times during training (500/10 = 50 evaluation points)
+
+The evaluation process helps:
+- Measure true agent performance without random exploration
+- Track learning progress over time
+- Save the best performing model for later use
 
 ## Training Time Estimation
 
@@ -144,23 +161,23 @@ The environment can run in two modes:
 
 For fastest training, use headless mode by setting `render_mode=None` when creating the environment.
 
-## Belohnungssystem
+## Reward System
 
-Das Belohnungssystem des KI-Agenten funktioniert wie folgt:
-- +100 Punkte für das Erreichen des Ziels
-- -50 Punkte bei Kollision mit Hindernissen
-- -0,1 Punkte pro Zeiteinheit (Motivation für schnelle Ausführung)
-- Kleine Belohnungen für Annäherung an das Ziel
+The AI agent's reward system works as follows:
+- +100 points for reaching the goal
+- -50 points for collision with obstacles
+- -0.1 points per time unit (motivation for quick execution)
+- Small rewards for approaching the goal
 
-Diese Struktur motiviert den Agenten dazu, das Ziel schnell und sicher zu erreichen.
+This structure motivates the agent to reach the goal quickly and safely.
 
-## Beobachtungsraum
+## Observation Space
 
-Der Agent erhält bei jedem Zeitschritt folgende Informationen:
-- Position des Autos (X, Y)
-- Winkel des Autos (-360° bis 360°)
-- Geschwindigkeit des Autos (-3 bis 150)
-- Position des Ziels (X, Y)
-- Position des Hindernisses (X, Y)
+The agent receives the following information at each time step:
+- Car position (X, Y)
+- Car angle (-360° to 360°)
+- Car velocity (-3 to 150)
+- Goal position (X, Y)
+- Obstacle position (X, Y)
 
-Diese 8-dimensionalen Informationen werden als normalisierte Werte im Bereich [0, 1024] für X-Koordinaten und [0, 768] für Y-Koordinaten bereitgestellt.
+These 8-dimensional values are provided as normalized values in the range [0, 1024] for X-coordinates and [0, 768] for Y-coordinates.
