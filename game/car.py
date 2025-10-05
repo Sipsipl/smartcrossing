@@ -7,12 +7,18 @@ class Car(DynamicGameObject):
     """A car that can be controlled by the player or AI"""
     def __init__(self, x: float, y: float, width: float, height: float, color: tuple[int, int, int]):
         super().__init__(x, y, width, height, color)
-        # Store initial position for reset
-        self.initial_x = x
-        self.initial_y = y
+        # Treat the provided coordinates as the car's centre so that dynamic
+        # positioning logic (which works with centre coordinates) remains
+        # consistent even after resets or collision responses.
+        self.rect.center = (x, y)
+
+        # Store initial centre position for reset
+        self.initial_x = self.rect.centerx
+        self.initial_y = self.rect.centery
+
         # Position tracking (needed for accurate movement)
-        self.x = x
-        self.y = y
+        self.x = float(self.rect.centerx)
+        self.y = float(self.rect.centery)
         # Car properties
         self.turning_speed = 40
         self.max_speed = 150
