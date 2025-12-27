@@ -159,7 +159,16 @@ The environment can run in two modes:
 1. Visualization mode (60 FPS): Slower but allows real-time visualization of the agent's behavior
 2. Headless mode (no rendering): Approximately 191 times faster, ideal for training
 
-For fastest training, use headless mode by setting `render_mode=None` when creating the environment.
+For fastest training, use headless mode (default) and only enable rendering when you need to
+observe behavior. You can toggle rendering via the training CLI:
+
+```bash
+# Fast headless training (default)
+poetry run python -m rl.run_training --episodes 500 --eval-interval 10
+
+# Rendered training (much slower)
+poetry run python -m rl.run_training --episodes 100 --eval-interval 10 --render
+```
 
 ## Reward System
 

@@ -12,7 +12,7 @@ from .logger import setup_logger
 # Set up logger
 logger = setup_logger()
 
-def train(num_episodes: int = 1000, eval_interval: int = 10):
+def train(num_episodes: int = 1000, eval_interval: int = 10, render_mode: str | None = None):
     """Train the DQN agent
     
     Args:
@@ -37,7 +37,7 @@ def train(num_episodes: int = 1000, eval_interval: int = 10):
         
         logger.info("Creating environment and agent...")
         # Create environment and agent
-        env = SmartCrossingEnv(render_mode="human")
+        env = SmartCrossingEnv(render_mode=render_mode)
         state_dim = env.observation_space.shape[0]
         action_dim = env.action_space.n
         agent = DQNAgent(state_dim, action_dim)
@@ -71,7 +71,8 @@ def train(num_episodes: int = 1000, eval_interval: int = 10):
                         episode_reward += reward
                         
                         # Render the environment
-                        env.render()
+                        if render_mode == "human":
+                            env.render()
                         
                         step += 1
                         if step % 100 == 0:  # Log every 100 steps
@@ -169,7 +170,8 @@ def evaluate(env: SmartCrossingEnv, agent: DQNAgent, num_episodes: int = 5) -> f
                 done = terminated or truncated
                 episode_reward += reward
                 state = next_state
-                env.render()
+                if render_mode == "human":
+                    env.render()
                 
                 step += 1
                 if step % 100 == 0:  # Log every 100 steps

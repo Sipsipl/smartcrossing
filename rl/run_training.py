@@ -1,15 +1,27 @@
+import argparse
 import os
 from rl.training import train
 
 def main():
-    """Run training with visualization"""
+    """Run training"""
+    parser = argparse.ArgumentParser(description="Train the SmartCrossing RL agent")
+    parser.add_argument("--episodes", type=int, default=500, help="Number of training episodes")
+    parser.add_argument("--eval-interval", type=int, default=10, help="Episodes between evaluations")
+    parser.add_argument(
+        "--render",
+        action="store_true",
+        help="Render the environment during training (slow).",
+    )
+    args = parser.parse_args()
+
     # Create directories
     os.makedirs('models', exist_ok=True)
     
     # Training parameters
     params = {
-        'num_episodes': 500,      # Start with fewer episodes for testing
-        'eval_interval': 10       # Evaluate every 10 episodes
+        "num_episodes": args.episodes,
+        "eval_interval": args.eval_interval,
+        "render_mode": "human" if args.render else None,
     }
     
     print("Starting training with parameters:")
