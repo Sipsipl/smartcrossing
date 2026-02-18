@@ -36,8 +36,8 @@ def train(num_episodes: int = 1000, eval_interval: int = 10):
         )
         
         logger.info("Creating environment and agent...")
-        # Create environment and agent
-        env = SmartCrossingEnv(render_mode="human")
+        # Create environment and agent (headless for fast training)
+        env = SmartCrossingEnv(render_mode=None)
         state_dim = env.observation_space.shape[0]
         action_dim = env.action_space.n
         agent = DQNAgent(state_dim, action_dim)
@@ -69,10 +69,7 @@ def train(num_episodes: int = 1000, eval_interval: int = 10):
                         # Update state and reward
                         state = next_state
                         episode_reward += reward
-                        
-                        # Render the environment
-                        env.render()
-                        
+
                         step += 1
                         if step % 100 == 0:  # Log every 100 steps
                             logger.info(f"Episode {episode + 1}, Step {step}: Reward={reward:.2f}, Loss={loss if loss else 'None'}")
@@ -144,25 +141,29 @@ def train(num_episodes: int = 1000, eval_interval: int = 10):
 
 def evaluate(env: SmartCrossingEnv, agent: DQNAgent, num_episodes: int = 5) -> float:
     """Evaluate the agent's performance
-    
+
     Args:
         env: Environment to evaluate in
         agent: Agent to evaluate
         num_episodes: Number of episodes to evaluate for
-        
+
     Returns:
         Average reward over evaluation episodes
     """
     logger.info(f"Starting evaluation over {num_episodes} episodes...")
     rewards = []
-    
+
+    # Use greedy policy during evaluation by temporarily setting epsilon to 0
+    saved_epsilon = agent.epsilon
+    agent.epsilon = 0.0
+
     try:
         for episode in range(num_episodes):
             state, _ = env.reset()
             episode_reward = 0
             done = False
             step = 0
-            
+
             while not done:
                 action = agent.select_action(state)
                 next_state, reward, terminated, truncated, _ = env.step(action)
@@ -181,11 +182,15 @@ def evaluate(env: SmartCrossingEnv, agent: DQNAgent, num_episodes: int = 5) -> f
         avg_reward = np.mean(rewards)
         logger.info(f"Evaluation completed with average reward: {avg_reward:.2f}")
         return avg_reward
-    
+
     except Exception as e:
         logger.error(f"Error during evaluation: {str(e)}")
         logger.debug(traceback.format_exc())
         raise
+
+    finally:
+        # Always restore epsilon so training exploration is unaffected
+        agent.epsilon = saved_epsilon
 
 if __name__ == "__main__":
     # Create necessary directories

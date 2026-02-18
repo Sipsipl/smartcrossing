@@ -22,6 +22,10 @@ class SmartCrossingEnv(gym.Env):
         self.clock = None
         self.max_steps = max_steps
         self.steps = 0
+
+        # Reward tracking (initialized properly so first step has consistent behaviour)
+        self._previous_goals = 0
+        self._previous_distance = None
         
         # Initialize pygame if we're rendering
         if self.render_mode == "human":
@@ -54,6 +58,8 @@ class SmartCrossingEnv(gym.Env):
             # Reset the game to initial state
             self.game = GameLoop()
             self.steps = 0
+            self._previous_goals = 0
+            self._previous_distance = None
             
             # Get initial observation
             observation = self._get_obs()
@@ -191,23 +197,23 @@ class SmartCrossingEnv(gym.Env):
             obstacle = self.game.obstacle
             
             # Reward for reaching goal (using GameState)
-            if self.game.state.goals_reached > getattr(self, '_previous_goals', 0):
+            if self.game.state.goals_reached > self._previous_goals:
                 reward += 100
                 self._previous_goals = self.game.state.goals_reached
-            
+
             # Penalty for collision with obstacle
             if car.check_collision(obstacle):
                 reward -= 50
-            
+
             # Small penalty for time
             reward -= 0.1
-            
+
             # Reward for getting closer to goal (based on previous distance)
             current_distance = np.sqrt(
-                (car.rect.centerx - goal.rect.centerx) ** 2 + 
+                (car.rect.centerx - goal.rect.centerx) ** 2 +
                 (car.rect.centery - goal.rect.centery) ** 2
             )
-            if hasattr(self, '_previous_distance'):
+            if self._previous_distance is not None:
                 reward += (self._previous_distance - current_distance) * 0.1
             self._previous_distance = current_distance
             
