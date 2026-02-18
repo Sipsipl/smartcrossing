@@ -24,10 +24,15 @@ poetry install
 
 3. Run the game:
 ```bash
-poetry run python main.py
+poetry run python main.py --mode play
 ```
 
 The game will launch in a 1024x768 window. Use the arrow keys to control the car and navigate through the environment while avoiding obstacles.
+
+4. Run RL training (headless, ~2.9 minutes for 500 episodes):
+```bash
+poetry run python main.py --mode train
+```
 
 ## Development
 
@@ -43,46 +48,16 @@ poetry update
 ```
 
 
-## Plan to implement RL component
+## RL Component
 
-The reinforcement learning component will be implemented in the following stages:
+The `rl/` module contains a fully implemented DQN (Deep Q-Network) agent:
 
-1. **Project Structure**
-   - Create new `rl` module with:
-     - `agent.py`: Implementation of the RL agent
-     - `environment.py`: Game environment wrapper for RL
-     - `models.py`: Neural network models
-     - `training.py`: Training loop and utilities
+- `agent.py`: DQN agent with experience replay and epsilon-greedy exploration
+- `environment.py`: Gymnasium-compatible wrapper around the game
+- `models.py`: 3-layer fully connected neural network (8 → 128 → 128 → 5)
+- `training.py`: Training loop with W&B logging and model checkpointing
 
-2. **Environment Implementation**
-   - Wrap existing game into a Gym-like environment
-   - Define:
-     - State space: Car position, velocity, distance to goal, obstacles
-     - Action space: Discrete actions (accelerate, brake, steer left/right)
-     - Reward function: Based on goal reaching, collision avoidance, time
-     - Reset and step functions
-
-3. **Agent Implementation**
-   - Implement DQN (Deep Q-Network) agent
-   - Key components:
-     - Experience replay buffer
-     - Target network for stable learning
-     - Epsilon-greedy exploration
-
-4. **Game Loop Integration**
-   - Support both manual and agent control modes
-   - Add visualization of agent's decision-making
-
-5. **Training Pipeline**
-   - Episode management
-   - Model checkpointing
-   - Performance metrics logging
-   - Multiple training scenarios
-
-6. **Dependencies**
-   - PyTorch: Neural network implementation
-   - Gymnasium: Environment structure
-   - Weights and Biases: Training visualization
+**Dependencies:** PyTorch, Gymnasium, Weights & Biases
 
 ## Training Process
 
@@ -116,7 +91,7 @@ Each training run consists of 500 episodes. During each episode, the agent inter
 Every 10 training episodes, the training process pauses to evaluate the agent's performance:
 1. The agent runs 5 evaluation episodes
 2. During evaluation:
-   - The agent uses minimal exploration (ε ≈ 0)
+   - The agent uses a fully greedy policy (ε = 0)
    - Each episode runs until goal reached or collision
    - The average reward across all 5 episodes is calculated
 3. If the evaluation reward is higher than the previous best:
@@ -131,35 +106,13 @@ The evaluation process helps:
 
 ## Training Time Estimation
 
-Based on empirical observations, here's an estimate of the training duration:
+Training runs in headless mode by default (`render_mode=None`):
 
-### With Rendering (60 FPS)
-- Average episode duration: ~44 seconds
-- Total training episodes: 500
-- Evaluation episodes: 50 (5 episodes every 10 training episodes)
-- Estimated total training time: ~9.2 hours
-  - Base training: 500 episodes × 44 seconds ≈ 6.1 hours
-  - Evaluation time: 50 episodes × 44 seconds ≈ 3.1 hours
-
-### Without Rendering
 - Average episode duration: ~0.23 seconds
 - Total training episodes: 500
-- Evaluation episodes: 50 (5 episodes every 10 training episodes)
 - Estimated total training time: ~2.9 minutes
-  - Base training: 500 episodes × 0.23 seconds ≈ 1.9 minutes
-  - Evaluation time: 50 episodes × 0.23 seconds ≈ 1.0 minutes
 
-Note: The actual training time may vary depending on:
-- Agent's learning progress and path choices
-- System performance and load
-- Whether the agent reaches the goal quickly or takes longer paths
-- Additional overhead from checkpoints and model saving
-
-The environment can run in two modes:
-1. Visualization mode (60 FPS): Slower but allows real-time visualization of the agent's behavior
-2. Headless mode (no rendering): Approximately 191 times faster, ideal for training
-
-For fastest training, use headless mode by setting `render_mode=None` when creating the environment.
+> Rendering during training (~9.2 hours for 500 episodes) can be enabled by passing `render_mode="human"` to `SmartCrossingEnv`, but is not recommended.
 
 ## Reward System
 
