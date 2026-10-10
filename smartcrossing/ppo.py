@@ -369,6 +369,7 @@ def main(argv=None):
     p.add_argument("--no-signal", dest="signal", action="store_false")
     p.add_argument("--cfg", default="", help="JSON SimConfig overrides")
     p.add_argument("--init", default="", help="resume from a full checkpoint (state.npz)")
+    p.add_argument("--reset-logstd", action="store_true", help="with --init: restart log-std at --logstd-init")
     p.add_argument("--eval-every", type=int, default=25)
     p.add_argument("--render-every", type=int, default=100)
     p.add_argument("--seed", type=int, default=0)
@@ -402,6 +403,8 @@ def main(argv=None):
         ceiling = float(z["ceiling"]) if "ceiling" in z.files else ceiling
         it0 = int(z["iter"]) + 1 if "iter" in z.files else 0
         total_steps = int(z["total_steps"]) if "total_steps" in z.files else 0
+        if a.reset_logstd:
+            logstd = np.full(A, a.logstd_init)
     (out / "args.json").write_text(json.dumps({**vars(a), "actor_sizes": a_sizes, "critic_sizes": c_sizes, "cfg": cfg_d}, indent=1))
     print(f"actor {a_sizes} ({n_params(a_sizes)} params), critic {c_sizes}", flush=True)
 
