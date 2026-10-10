@@ -31,6 +31,12 @@ MIN_GREEN = 3.0  # s, actuated light: earliest gap-out
 A_LAT = 4.0  # m/s^2 lateral acceleration bound on the turns
 A_DEC = 3.0  # m/s^2 comfortable deceleration when approaching a turn
 K_E, K_H = 0.05, 2 * np.sqrt(0.05)  # lateral / heading feedback gains (per m)
+# merging (lateral error > MERGE_E on the approach, e.g. a car spawned in the oncoming half of
+# the wide road): stiffer feedback, and while an oncoming car is in the current corridor the
+# car slows to V_MERGE so the grip limit allows a sharp sidestep
+MERGE_E = 0.8
+K_EM, K_HM = 0.2, 2 * np.sqrt(0.2)
+V_MERGE = 3.0
 
 
 def canonical_path(man, L, W, Rc, off=None):
@@ -118,6 +124,7 @@ class LaneDriver:
                     p = np.stack([c * p[:, 0] - s * p[:, 1], s * p[:, 0] + c * p[:, 1]], -1)
                     self.paths[k, m, lane] = Path(p, self.cfg, self.box)
         self.lane = {}  # (b, uid) -> lane chosen at first sight
+        self.merging = set()  # (b, uid) of cars in merge mode
         # backwards compatible views (right lane)
         self.stop_s = {key[:2]: p.stop_s for key, p in self.paths.items() if key[2] == 0}
         self.box_out_s = {key[:2]: p.box_out_s for key, p in self.paths.items() if key[2] == 0}
@@ -242,6 +249,7 @@ class LaneDriver:
             del self.idx[key]
         for key in [key for key in self.lane if key[0] == b and key[1] not in alive_uids]:
             del self.lane[key]
+            self.merging.discard(key)
 
     def _lane_of(self, b, n):
         """Right lane for right turns, left lane for left turns, straight: the lane nearest
@@ -291,7 +299,16 @@ class LaneDriver:
                 # steering: curvature feed-forward + critically damped feedback
                 i_ff = min(i + int(round(0.5 * v * cfg.dt / STEP)), path.n - 1)
                 eh = (th - path.h[i] + np.pi) % (2 * np.pi) - np.pi
-                kappa = path.k[i_ff] - K_E * np.clip(e, -3.0, 3.0) - K_H * np.sin(eh)
+                # merge mode with hysteresis (switching back to the soft gains with a large
+                # heading error would overshoot towards the curb)
+                mkey = (b, uid)
+                if abs(e) > MERGE_E and s_now < path.stop_s:
+                    self.merging.add(mkey)
+                elif mkey in self.merging and ((abs(e) < 0.15 and abs(np.sin(eh)) < 0.03) or s_now >= path.stop_s):
+                    self.merging.discard(mkey)
+                merging = mkey in self.merging
+                ke, kh = (K_EM, K_HM) if merging else (K_E, K_H)
+                kappa = path.k[i_ff] - ke * np.clip(e, -3.0, 3.0) - kh * np.sin(eh)
                 committed = uid in self.committed[b]
                 if j == 0:
                     self.pending[b] = False
@@ -358,6 +375,13 @@ class LaneDriver:
                     a_plan = (plan[1][kk + 1 - plan[0]] - v) / cfg.dt
                     a_idm = self._idm(v, gap, v_lead, s0=1.0, T=0.3) if tight else self._idm(v, gap, v_lead)
                     acc = min(a_plan, a_idm)
+                if merging and len(alive) > 1:
+                    others = np.arange(len(alive)) != j
+                    dx, dy = ax[others] - sim.x[b, n], ay[others] - sim.y[b, n]
+                    f, lat = np.cos(th) * dx + np.sin(th) * dy, -np.sin(th) * dx + np.cos(th) * dy
+                    onc = np.abs((ath[others] - th + np.pi) % (2 * np.pi) - np.pi) > 2 * np.pi / 3
+                    if (onc & (f > 0) & (f < 40.0) & (np.abs(lat) < 2.6)).any():
+                        acc = min(acc, (V_MERGE - v) / cfg.dt)
                 acc = float(np.clip(acc, -cfg.brake_max, cfg.acc_max))
                 act[b, n, 0] = acc / cfg.acc_max if acc > 0 else acc / cfg.brake_max
                 act[b, n, 1] = np.clip(kappa / cfg.kappa_max, -1, 1)
