@@ -1,23 +1,21 @@
 [tool.poetry]
 name = "smartcrossing"
-version = "0.1.0"
-description = "A traffic management system designed to optimize traffic flow and enhance pedestrian safety"
-authors = ["Your Name <your.email@example.com>"]
+version = "0.2.0"
+description = "Signal-free intersection crossed by learning autonomous cars"
+authors = ["Sipsipl"]
 readme = "README.md"
-packages = [{include = "game"}, {include = "rl"}]
+packages = [{include = "smartcrossing"}]
 
 [tool.poetry.dependencies]
 python = "^3.13.2"
-pygame = "^2.5.2"
-gymnasium = "^1.1.1"
 numpy = "^2.2.4"
-torch = "^2.6.0"
-wandb = "^0.19.9"
-pytest = "^8.3.5"
+pillow = "^11.0.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.5"
-pytest-cov = "^6.1.1"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [build-system]
 requires = ["poetry-core"]

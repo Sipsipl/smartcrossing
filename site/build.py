@@ -1,0 +1,459 @@
+"""Build the static website into site/public/ (commit the result; Cloudflare Pages
+serves that folder as is, see docs/DEPLOY.md).
+
+    poetry run python site/build.py                       # auto: best checkpoints from runs/
+    poetry run python site/build.py --main runs/es5/final_g310.npz --bench
+
+What it does:
+1. copies the hand-written pages from site/src/ and the simulator viewer/sim.js,
+2. picks policies from runs/*/ (.npz): the best checkpoint per method (ES: runs/es*,
+   PPO: runs/ppo*), a "Zeitreise" timeline along the warm-start chain (args.json "init")
+   of the best run, and the other runs as side notes,
+3. summarises the training logs (runs/*/log.jsonl) into compact learning curves,
+4. benchmarks the reference drivers and the chosen policies in the Python sim
+   (throughput vs demand). Results are cached in site/data/bench_cache.json, keyed by
+   policy weights, physics and the sim source, so rebuilding is fast and reproducible,
+5. writes everything the pages need into public/data/site-data.js (no fetch needed).
+
+runs/ is gitignored, so the build only works where the runs exist; the committed
+site/public/ is what gets deployed.
+"""
+
+import argparse
+import hashlib
+import json
+import multiprocessing as mp
+import re
+import shutil
+import sys
+import time
+from datetime import date
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from smartcrossing.export_viewer import load_policy, obs_layout, physics_of, round_policy  # noqa: E402
+from smartcrossing.policy import default_in_scale, init_params, layer_sizes, unpack  # noqa: E402
+from smartcrossing.sim import SimConfig  # noqa: E402
+
+SITE = ROOT / "site"
+SRC = SITE / "src"
+OUT = SITE / "public"
+CACHE = SITE / "data" / "bench_cache.json"
+RUNS = ROOT / "runs"
+
+DEMANDS = [0.05, 0.1, 0.15, 0.2, 0.3]
+TIMELINE_DEMANDS = [0.05, 0.15]
+BENCH_ENVS, BENCH_SECONDS, BENCH_SEED = 8, 120.0, 1000
+# Short German notes for known runs (shown in the "Zeitreise" / side notes).
+RUN_NOTES = {
+    "es1": "Irrweg: Die Autos lernten, einfach stehen zu bleiben – Stehen kostete nichts, Unfälle schon.",
+    "es2": "Erster Erfolg: Autos fahren zum Ziel, aber Rechtsabbiegen klappt nie (alle landen im Bordstein).",
+    "es3": "Mehr Ausprobieren (größere Mutationen): kaum Fortschritt, die Rechtskurve bleibt das Problem.",
+    "es4": "Irrweg: Die Autos blockierten die Einfahrt – wer gar nicht erst reinfährt, kann nicht verunglücken.",
+    "es5": "Neue Belohnung (Fortschritt entlang der Route, Strafe für Warteschlange): jetzt klappen alle drei Richtungen meistens.",
+}
+
+PAGES = [
+    ("index.html", "Start"),
+    ("sehen.html", "Was sieht ein Auto?"),
+    ("tun.html", "Was kann es tun?"),
+    ("gehirn.html", "Das Gehirn"),
+    ("lernen.html", "Wie lernen sie?"),
+    ("vergleich.html", "Vergleich"),
+]
+
+
+# ------------------------------------------------------------------ checkpoints
+def method_of(run: str) -> str | None:
+    if run.startswith("es"):
+        return "es"
+    if run.startswith("ppo"):
+        return "ppo"
+    return None
+
+
+def ckpt_meta(path: Path) -> dict:
+    with np.load(path) as z:
+        extra = json.loads(str(z["extra"])) if "extra" in z.files else {}
+        cfg = json.loads(str(z["cfg"])) if "cfg" in z.files else {}
+    gen = None
+    for k in ("gen", "iter", "update", "step", "epoch"):
+        if isinstance(extra.get(k), (int, float)):
+            gen = int(extra[k])
+            break
+    if gen is None:  # e.g. final_g310.npz
+        m = re.search(r"(?:g|gen|it|iter|u)(\d+)", path.stem)
+        gen = int(m.group(1)) if m else None
+    return {"gen": gen, "cfg": cfg, "extra": extra}
+
+
+def policy_vector(d: dict) -> np.ndarray:
+    return np.concatenate([np.concatenate([np.ravel(np.asarray(l["W"], dtype=float)), np.asarray(l["b"], dtype=float)]) for l in d["layers"]])
+
+
+def discover() -> dict:
+    """All loadable checkpoints of runs/es* and runs/ppo*: id -> info."""
+    found = {}
+    if not RUNS.exists():
+        return found
+    for run_dir in sorted(p for p in RUNS.iterdir() if p.is_dir()):
+        method = method_of(run_dir.name)
+        if not method:
+            continue
+        for f in sorted(run_dir.glob("*.npz")):
+            try:
+                pol = load_policy(f)
+            except Exception as e:  # incompatible / broken checkpoint: skip loudly
+                print(f"  skip {f.relative_to(ROOT)}: {e}")
+                continue
+            meta = ckpt_meta(f)
+            cid = f"{run_dir.name}/{f.stem}"
+            found[cid] = {
+                "id": cid, "run": run_dir.name, "file": str(f.relative_to(ROOT)), "method": method,
+                "gen": meta["gen"], "physics": physics_of(meta["cfg"]), "policy": pol,
+                "adapted": pol.get("adapted"),
+                "hash": hashlib.sha1(policy_vector(pol).tobytes() + json.dumps(pol["in_scale"]).encode()).hexdigest()[:16],
+            }
+    return found
+
+
+def run_args(run: str) -> dict:
+    p = RUNS / run / "args.json"
+    return json.loads(p.read_text()) if p.exists() else {}
+
+
+def chain_of(run: str) -> list[tuple[str, int]]:
+    """Warm-start chain ending in `run`: [(run, gen offset), ...] oldest first."""
+    chain, seen = [], set()
+    cur, init_gen = run, None
+    while cur and cur not in seen:
+        seen.add(cur)
+        chain.append(cur)
+        init = run_args(cur).get("init") or ""
+        if not init:
+            break
+        ip = ROOT / init
+        nxt = ip.parent.name
+        if not ip.exists() or not method_of(nxt):
+            break
+        cur = nxt
+    chain.reverse()
+    out, offset = [], 0
+    for i, r in enumerate(chain):
+        if i > 0:
+            ip = ROOT / run_args(r)["init"]
+            g = ckpt_meta(ip)["gen"] or 0
+            offset = dict(out)[chain[i - 1]] + g
+        out.append((r, offset))
+    return out
+
+
+# ------------------------------------------------------------------ bench
+def _bench_job(job):
+    kind, payload, physics, demand = job
+    from smartcrossing.baselines import LaneDriver
+    from smartcrossing.metrics import summarize
+    from smartcrossing.policy import PolicyDriver
+    from smartcrossing.sim import Sim
+
+    cfg = SimConfig(**{**physics, "demand": demand})
+    sim = Sim(cfg, BENCH_ENVS, seed=BENCH_SEED)
+    if kind == "baseline":
+        drv = LaneDriver(sim, payload)
+    else:
+        params, sizes, in_scale = payload
+        drv = PolicyDriver(sim, np.asarray(params), sizes, in_scale=np.asarray(in_scale))
+    for _ in range(int(BENCH_SECONDS / cfg.dt)):
+        sim.step(drv.act())
+    r = summarize(sim, BENCH_SECONDS)
+    keep = ("throughput_per_min", "demand_per_min", "exit_ok_rate", "crash_cars_per_1000", "crash_cars",
+            "offroad_cars", "timeouts", "delay_mean_s")
+    return {k: (round(float(r[k]), 3) if r[k] == r[k] else None) for k in keep}
+
+
+def run_bench(entries: list[tuple[str, str, object, dict, list]], force: bool, workers: int) -> dict:
+    """entries: (key, kind, payload, physics, demands) -> {key: {demand: result}}."""
+    sim_src = hashlib.sha1((ROOT / "smartcrossing" / "sim.py").read_bytes()
+                           + (ROOT / "smartcrossing" / "baselines.py").read_bytes()).hexdigest()[:12]
+    cache = {}
+    if CACHE.exists() and not force:
+        cache = json.loads(CACHE.read_text())
+    jobs, keys = [], []
+    for key, kind, payload, physics, demands in entries:
+        for d in demands:
+            ck = f"{key}|{json.dumps(physics, sort_keys=True)}|{d}|{BENCH_ENVS}x{BENCH_SECONDS}@{BENCH_SEED}|{sim_src}"
+            if ck in cache:
+                continue
+            jobs.append((kind, payload, physics, d))
+            keys.append(ck)
+    if jobs:
+        print(f"  benchmarking {len(jobs)} runs ({BENCH_ENVS} envs x {BENCH_SECONDS:.0f} s each) ...")
+        t0 = time.time()
+        with mp.get_context("fork").Pool(workers) as pool:
+            for ck, res in zip(keys, pool.map(_bench_job, jobs, chunksize=1)):
+                cache[ck] = res
+        print(f"  bench done in {time.time() - t0:.0f} s")
+        CACHE.parent.mkdir(parents=True, exist_ok=True)
+        CACHE.write_text(json.dumps(cache, indent=0, sort_keys=True))
+    out = {}
+    for key, kind, payload, physics, demands in entries:
+        out.setdefault(key, {})
+        for d in demands:
+            ck = f"{key}|{json.dumps(physics, sort_keys=True)}|{d}|{BENCH_ENVS}x{BENCH_SECONDS}@{BENCH_SEED}|{sim_src}"
+            out[key][str(d)] = cache[ck]
+    return out
+
+
+def pol_entry(c: dict) -> tuple:
+    p = c["policy"]
+    return (f"pol:{c['hash']}", "policy", (policy_vector(p).tolist(), p["sizes"], p["in_scale"]), c["physics"])
+
+
+# ------------------------------------------------------------------ logs
+def _flat(d, prefix=""):
+    for k, v in d.items():
+        if isinstance(v, dict):
+            yield from _flat(v, f"{prefix}{k}.")
+        else:
+            yield f"{prefix}{k}", v
+
+
+def _pick(flat: dict, patterns: list[str]):
+    for pat in patterns:
+        for k, v in flat.items():
+            if re.fullmatch(pat, k) and isinstance(v, (int, float)):
+                return float(v)
+    return None
+
+
+def read_curve(run: str, offset: int) -> list[dict]:
+    """Learning curve of one run: x (cumulative generation / iteration), exit, crash,
+    offroad (fractions of finished cars) and exit at demand 0.15 where evaluated.
+    Robust to the field names: ES logs use centre.exit_ok etc."""
+    p = RUNS / run / "log.jsonl"
+    if not p.exists():
+        return []
+    rows = []
+    for i, line in enumerate(p.read_text().splitlines()):
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        f = dict(_flat(rec))
+        x = _pick(f, [r"gen", r"iter(ation)?", r"update", r"step", r"epoch"])
+        x = (x if x is not None else i) + offset
+        row = {
+            "x": x,
+            "exit": _pick(f, [r"centre\.exit_ok", r"(train\.)?exit_ok(_rate)?", r".*\.exit_ok(_rate)?"]),
+            "crash": _pick(f, [r"centre\.crash_rate", r"(train\.)?crash(_rate)?", r".*\.crash(_rate)?"]),
+            "offroad": _pick(f, [r"centre\.offroad_rate", r"(train\.)?offroad(_rate)?", r".*\.offroad(_rate)?"]),
+            "eval15": _pick(f, [r"eval\.d0\.15\.exit_ok", r"eval\..*0\.15.*exit_ok(_rate)?"]),
+            "demand": _pick(f, [r"ceiling", r"demand"]),
+        }
+        if row["exit"] is None and row["eval15"] is None:
+            continue
+        rows.append({k: (round(v, 4) if isinstance(v, float) else v) for k, v in row.items() if v is not None})
+    # thin out long logs (keep every eval point)
+    if len(rows) > 400:
+        step = len(rows) / 400
+        keep = {int(i * step) for i in range(400)} | {i for i, r in enumerate(rows) if "eval15" in r}
+        rows = [r for i, r in enumerate(rows) if i in keep]
+    return rows
+
+
+# ------------------------------------------------------------------ selection
+def choose(found: dict, main: list[str], quick: dict) -> dict:
+    """Best checkpoint per method by quick bench score (exit-weighted throughput at 0.15)."""
+    best = {}
+    for cid, c in found.items():
+        r = quick.get(cid)
+        if r is None:
+            continue
+        score = r["throughput_per_min"] * r["exit_ok_rate"]
+        if c["method"] not in best or score > best[c["method"]][0]:
+            best[c["method"]] = (score, cid)
+    picked = {m: cid for m, (_, cid) in best.items()}
+    for spec in main:  # explicit --main overrides
+        cid = next((k for k, c in found.items() if c["file"] == spec or k == spec), None)
+        if cid is None:
+            raise SystemExit(f"--main {spec}: not a loadable checkpoint under runs/ (see skip messages)")
+        picked[found[cid]["method"]] = cid
+    return picked
+
+
+def timeline(found: dict, best_id: str, n_max: int) -> list[dict]:
+    c = found[best_id]
+    chain = chain_of(c["run"])
+    pts = []
+    for run, off in chain:
+        for cid, cc in found.items():
+            if cc["run"] == run and cc["gen"] is not None:
+                pts.append((off + cc["gen"], cid))
+    # dedupe equal cumulative generations (current == final), prefer the chosen one
+    by_gen = {}
+    for g, cid in sorted(pts):
+        if g not in by_gen or cid == best_id:
+            by_gen[g] = cid
+    pts = sorted(by_gen.items())
+    # drop near-duplicates (closer than 3% of the whole span to the next point)
+    span = max((g for g, _ in pts), default=0) or 1
+    pts = [p for i, p in enumerate(pts) if i == len(pts) - 1 or pts[i + 1][0] - p[0] > 0.03 * span]
+    if len(pts) > n_max:
+        idx = np.unique(np.linspace(0, len(pts) - 1, n_max).round().astype(int))
+        pts = [pts[i] for i in idx]
+    return [{"gen": g, "id": cid} for g, cid in pts], chain
+
+
+def random_policy() -> dict:
+    cfg = SimConfig()
+    sizes = layer_sizes(cfg)
+    params = init_params(sizes, 7)
+    return {
+        "sizes": sizes, "in_scale": default_in_scale(cfg).tolist(), "activation": "tanh", "output": "tanh",
+        "layers": [{"W": W.tolist(), "b": b.tolist()} for W, b in unpack(params, sizes)], "cfg": {},
+    }
+
+
+# ------------------------------------------------------------------ pages
+LOGO = (
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="5" fill="#3b5640"/>'
+    '<path d="M9 0h6v24H9zM0 9h24v6H0z" fill="#46484d"/><rect x="5" y="10.2" width="6" height="3.6" rx="1" fill="#f5a623"/>'
+    '<rect x="10.2" y="14" width="3.6" height="6" rx="1" fill="#4287f5"/></svg>'
+)
+
+
+def header_html(current: str) -> str:
+    items = []
+    for href, label in PAGES:
+        cur = ' aria-current="page"' if href == current else ""
+        items.append(f'<a href="{href}"{cur}>{label}</a>')
+    nav = '<nav class="nav" aria-label="Seiten">' + "".join(items) + "</nav>"
+    return f'<header class="top"><a class="brand" href="index.html">{LOGO}Smart Crossing</a>{nav}</header>'
+
+
+FOOTER = (
+    '<footer>Smart Crossing – ein Hobbyprojekt. Alles läuft direkt in deinem Browser, '
+    "es werden keine Daten gesammelt. Stand: {built}.</footer>"
+)
+
+
+def copy_src(version: str, built: str):
+    if OUT.exists():
+        shutil.rmtree(OUT)
+    shutil.copytree(SRC, OUT)
+    (OUT / "js").mkdir(exist_ok=True)
+    shutil.copy(ROOT / "viewer" / "sim.js", OUT / "js" / "sim.js")
+    for html in OUT.glob("*.html"):
+        t = html.read_text()
+        t = t.replace("<!-- HEADER -->", header_html(html.name)).replace("<!-- FOOTER -->", FOOTER.format(built=built))
+        t = t.replace("{{VERSION}}", version)
+        if re.search(r'\s(src|href)="(https?:)?//', t):
+            raise SystemExit(f"{html.name}: external request found; the site must be self-contained")
+        html.write_text(t)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--main", action="append", default=[], metavar="PATH",
+                    help="use this checkpoint as the best one of its method (runs/<es*|ppo*>/x.npz); repeatable")
+    ap.add_argument("--bench", action="store_true", help="ignore the bench cache and re-run all benchmarks")
+    ap.add_argument("--timeline", type=int, default=6, help="max checkpoints per Zeitreise")
+    ap.add_argument("--workers", type=int, default=4)
+    a = ap.parse_args(argv)
+
+    cfg = SimConfig()
+    layout = obs_layout(cfg)  # fails loudly if the sim's observation layout changed
+    print("discovering checkpoints ...")
+    found = discover()
+    print(f"  {len(found)} loadable checkpoints")
+
+    # quick bench of every checkpoint at demand 0.15 -> pick the best per method
+    quick_entries = [(*pol_entry(c), [0.15]) for c in found.values()]
+    qb = run_bench(quick_entries, a.bench, a.workers)
+    quick = {cid: qb[pol_entry(c)[0]]["0.15"] for cid, c in found.items()}
+    picked = choose(found, a.main, quick)
+    print(f"  best per method: {picked}")
+
+    policies, bench_entries = {}, []
+
+    def use(cid, demands):
+        c = found[cid]
+        if cid not in policies:
+            policies[cid] = {
+                "id": cid, "run": c["run"], "file": c["file"], "method": c["method"], "gen": c["gen"],
+                "physics": c["physics"], "adapted": c["adapted"], "policy": round_policy(c["policy"], 4),
+                "bench": {},
+            }
+        bench_entries.append((*pol_entry(c), demands))
+
+    timelines, curves, chains = {}, {}, {}
+    for method, cid in picked.items():
+        use(cid, DEMANDS)
+        pts, chain = timeline(found, cid, a.timeline)
+        chains[method] = [{"run": r, "offset": off, "note": RUN_NOTES.get(r)} for r, off in chain]
+        for p in pts:
+            use(p["id"], TIMELINE_DEMANDS)
+        timelines[method] = pts
+        curves[method] = {r: read_curve(r, off) for r, off in chain}
+    # random brain as "generation 0" of the ES timeline
+    if "es" in timelines:
+        phys = found[picked["es"]]["physics"]
+        rp = random_policy()
+        rid = "zufall"
+        policies[rid] = {"id": rid, "run": None, "file": None, "method": "es", "gen": 0, "physics": phys,
+                         "adapted": None, "policy": round_policy(rp, 4), "bench": {}}
+        bench_entries.append(("pol:random7", "policy", (policy_vector(rp).tolist(), rp["sizes"], rp["in_scale"]), phys, TIMELINE_DEMANDS))
+        if not timelines["es"] or timelines["es"][0]["gen"] > 0:
+            timelines["es"].insert(0, {"gen": 0, "id": rid})
+    # other (dead-end) runs: their best checkpoint as a side note
+    others = []
+    in_chain = {r["run"] for ch in chains.values() for r in ch}
+    for run in sorted({c["run"] for c in found.values()} - in_chain):
+        cands = [cid for cid, c in found.items() if c["run"] == run]
+        cid = max(cands, key=lambda k: (found[k]["gen"] or 0))
+        use(cid, TIMELINE_DEMANDS)
+        others.append({"run": run, "id": cid, "method": found[cid]["method"], "note": RUN_NOTES.get(run)})
+
+    baselines = {}
+    for drv in ("light", "reservation"):
+        bench_entries.append((f"base:{drv}", "baseline", drv, physics_of(cfg.__dict__), DEMANDS))
+    bench = run_bench(bench_entries, a.bench, a.workers)
+    for cid, p in policies.items():
+        key = f"pol:{found[cid]['hash']}" if cid in found else "pol:random7"
+        p["bench"] = bench[key]
+    for drv in ("light", "reservation"):
+        baselines[drv] = bench[f"base:{drv}"]
+
+    data = {
+        "built": date.today().isoformat(),
+        "layout": layout,
+        "cfg": {k: (list(v) if isinstance(v, tuple) else v) for k, v in cfg.__dict__.items()},
+        "policies": policies,
+        "best": picked,
+        # method whose best checkpoint drives best (shown first on the site)
+        "main": max(picked, key=lambda m: quick[picked[m]]["throughput_per_min"] * quick[picked[m]]["exit_ok_rate"]) if picked else None,
+        "timelines": timelines,
+        "chains": chains,
+        "curves": curves,
+        "others": others,
+        "baselines": baselines,
+        "demands": DEMANDS,
+        "bench_setup": {"envs": BENCH_ENVS, "seconds": BENCH_SECONDS, "seed": BENCH_SEED},
+    }
+    version = hashlib.sha1(json.dumps(data, sort_keys=True).encode()).hexdigest()[:8]
+    copy_src(version, data["built"])
+    (OUT / "data").mkdir(exist_ok=True)
+    js = "// Generated by site/build.py - do not edit.\nwindow.SC_DATA = " + json.dumps(data, separators=(",", ":")) + ";\n"
+    (OUT / "data" / "site-data.js").write_text(js)
+    size = sum(f.stat().st_size for f in OUT.rglob("*") if f.is_file())
+    print(f"wrote {OUT.relative_to(ROOT)}/ ({size / 1024:.0f} KiB, data {len(js) / 1024:.0f} KiB, version {version})")
+    for m, pts in timelines.items():
+        print(f"  Zeitreise {m}: " + ", ".join(f"{p['id']}@{p['gen']}" for p in pts))
+
+
+if __name__ == "__main__":
+    main()

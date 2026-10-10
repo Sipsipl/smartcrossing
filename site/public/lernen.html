@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Wie lernen die Autos? – Smart Crossing</title>
+<meta name="description" content="Belohnung, Strafe, Wiederholung: wie selbstfahrende Autos durch Evolution und PPO lernen – mit Zeitreise durchs Training.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/site.css?v=25d8224c">
+</head>
+<body data-page="lernen">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker></defs></svg>
+<div class="wrap">
+<header class="top"><a class="brand" href="index.html"><svg viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="5" fill="#3b5640"/><path d="M9 0h6v24H9zM0 9h24v6H0z" fill="#46484d"/><rect x="5" y="10.2" width="6" height="3.6" rx="1" fill="#f5a623"/><rect x="10.2" y="14" width="3.6" height="6" rx="1" fill="#4287f5"/></svg>Smart Crossing</a><nav class="nav" aria-label="Seiten"><a href="index.html">Start</a><a href="sehen.html">Was sieht ein Auto?</a><a href="tun.html">Was kann es tun?</a><a href="gehirn.html">Das Gehirn</a><a href="lernen.html" aria-current="page">Wie lernen sie?</a><a href="vergleich.html">Vergleich</a></nav></header>
+<h1>Wie lernen die Autos?</h1>
+<p class="lead">Niemand bringt den Autos das Fahren bei. Sie probieren es einfach – sehr, sehr oft – und bekommen Punkte dafür, wie es gelaufen ist.
+Daraus wird nach und nach ein Gehirn, das fahren kann.</p>
+
+<svg class="diagram wide-only" viewBox="0 0 640 300" role="img" aria-label="Lernschleife: fahren, bewerten, Gewichte anpassen, wiederholen">
+  
+  <rect class="box" x="20" y="20" width="250" height="92" rx="12"/>
+  <text x="40" y="52"><tspan font-weight="700">1 · Fahren</tspan></text>
+  <text class="sub" x="40" y="76">Die Autos fahren ein paar Minuten</text>
+  <text class="sub" x="40" y="94">über die Kreuzung – so gut sie eben können.</text>
+  <rect class="box" x="370" y="20" width="250" height="92" rx="12"/>
+  <text x="390" y="52"><tspan font-weight="700">2 · Bewerten</tspan></text>
+  <text class="sub" x="390" y="76">angekommen: <tspan fill="var(--good)" font-weight="700">+ Punkte</tspan></text>
+  <text class="sub" x="390" y="94">Unfall / Bordstein / Warten: <tspan fill="var(--warn)" font-weight="700">− Punkte</tspan></text>
+  <rect class="box" x="370" y="188" width="250" height="92" rx="12"/>
+  <text x="390" y="220"><tspan font-weight="700">3 · Gewichte anpassen</tspan></text>
+  <text class="sub" x="390" y="244">Die Zahlen im Gehirn werden ein kleines</text>
+  <text class="sub" x="390" y="262">Stück in Richtung „mehr Punkte“ gedreht.</text>
+  <rect class="box" x="20" y="188" width="250" height="92" rx="12"/>
+  <text x="40" y="220"><tspan font-weight="700">4 · Wiederholen</tspan></text>
+  <text class="sub" x="40" y="244">Hunderte Male. Jede Runde fährt</text>
+  <text class="sub" x="40" y="262">das etwas bessere Gehirn.</text>
+  <path class="arrow" d="M276 66 H362" marker-end="url(#ah)"/>
+  <path class="arrow" d="M495 118 V182" marker-end="url(#ah)"/>
+  <path class="arrow" d="M364 234 H278" marker-end="url(#ah)"/>
+  <path class="arrow" d="M145 182 V118" marker-end="url(#ah)"/>
+</svg>
+
+<svg class="diagram narrow-only" viewBox="0 0 320 470" role="img" aria-label="Lernschleife: fahren, bewerten, Gewichte anpassen, wiederholen">
+<rect class="box" x="10" y="10" width="260" height="84" rx="12"/><text x="26" y="40"><tspan font-weight="700">1 · Fahren</tspan></text><text class="sub" x="26" y="64">Die Autos fahren ein paar Minuten</text><text class="sub" x="26" y="82">über die Kreuzung.</text>
+<path class="arrow" d="M140 98 V119" marker-end="url(#ah)"/>
+<rect class="box" x="10" y="125" width="260" height="84" rx="12"/><text x="26" y="155"><tspan font-weight="700">2 · Bewerten</tspan></text><text class="sub" x="26" y="179">angekommen: <tspan fill="var(--good)" font-weight="700">+ Punkte</tspan></text><text class="sub" x="26" y="197">Unfall/Bordstein/Warten: <tspan fill="var(--warn)" font-weight="700">−</tspan></text>
+<path class="arrow" d="M140 213 V234" marker-end="url(#ah)"/>
+<rect class="box" x="10" y="240" width="260" height="84" rx="12"/><text x="26" y="270"><tspan font-weight="700">3 · Gewichte anpassen</tspan></text><text class="sub" x="26" y="294">Die Zahlen im Gehirn ein Stück</text><text class="sub" x="26" y="312">Richtung „mehr Punkte“ drehen.</text>
+<path class="arrow" d="M140 328 V349" marker-end="url(#ah)"/>
+<rect class="box" x="10" y="355" width="260" height="84" rx="12"/><text x="26" y="385"><tspan font-weight="700">4 · Wiederholen</tspan></text><text class="sub" x="26" y="409">Hunderte Male, jedes Mal</text><text class="sub" x="26" y="427">mit dem etwas besseren Gehirn.</text>
+<path class="arrow" d="M272 397 H298 V52 H278" marker-end="url(#ah)"/></svg>
+
+<h2>Die Punkte (Belohnung)</h2>
+<p>Die Autos bekommen nur für das <b>Ergebnis</b> Punkte, nicht für einen bestimmten Fahrstil. Niemand sagt „fahr rechts“ oder „bremse vor der Kurve“:</p>
+<ul class="plain">
+  <li><b>Angekommen</b> an der richtigen Ausfahrt: Pluspunkt.</li>
+  <li><b>Unfall</b> oder <b>von der Straße abgekommen</b>: kräftiger Minuspunkt.</li>
+  <li><b>Zu lange unterwegs</b> oder Autos, die vor der Kreuzung <b>warten müssen</b>: Minuspunkte. Sonst lernen die Autos, dass Stehenbleiben am sichersten ist (ist wirklich passiert, siehe unten).</li>
+  <li>Als Lernhilfe gibt es am Anfang ein paar Krümel-Punkte für jeden Meter, den ein Auto seiner Ausfahrt näher kommt.</li>
+</ul>
+
+<h2>Zwei Lernmethoden</h2>
+<div class="two">
+  <div class="card">
+    <h3 style="margin-top:0">Evolution (Evolution Strategies)</h3>
+    <svg class="diagram" viewBox="0 0 300 150" role="img" aria-label="Evolution: viele leicht veränderte Gehirne, die besten zeigen die Richtung">
+      <g fill="var(--muted)" opacity="0.55">
+        <circle cx="70" cy="40" r="9"/><circle cx="40" cy="80" r="9"/><circle cx="72" cy="118" r="9"/><circle cx="118" cy="128" r="9"/>
+      </g>
+      <g fill="var(--good)"><circle cx="160" cy="28" r="10"/><circle cx="196" cy="86" r="10"/><circle cx="168" cy="108" r="9" opacity="0.6"/></g>
+      <circle cx="110" cy="76" r="15" fill="var(--accent)"/>
+      <text x="110" y="81" text-anchor="middle" style="fill:var(--accent-ink);font-size:13px;font-weight:700">G</text>
+      <path class="arrow" d="M128 70 L196 52" marker-end="url(#ah)"/>
+      <circle cx="232" cy="46" r="15" fill="var(--accent)"/>
+      <text x="232" y="51" text-anchor="middle" style="fill:var(--accent-ink);font-size:13px;font-weight:700">G'</text>
+      <text class="sub" x="150" y="146" text-anchor="middle" style="font-size:11px">48 Varianten · grün = mehr Punkte</text>
+    </svg>
+    <p>Wir nehmen das aktuelle Gehirn und machen <b>48 leicht veränderte Kopien</b> (die Gewichte werden ein wenig zufällig verwackelt).
+      Jede Kopie fährt eine Weile. Dann schauen wir: Welche Veränderungen haben mehr Punkte gebracht? In <b>diese Richtung</b> wird das Gehirn verschoben.
+      Eine Runde heißt <b>Generation</b>.</p>
+    <p class="muted small">Vorteil: sehr einfach und robust. Nachteil: Es zählt nur die Gesamtpunktzahl aller Autos – welches Auto was falsch gemacht hat, erfährt das Verfahren nicht. Das macht es langsam.</p>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0">PPO (Proximal Policy Optimization)</h3>
+    <svg class="diagram" viewBox="0 0 300 150" role="img" aria-label="PPO: jedes Auto lernt aus seinen eigenen Erfahrungen, alle teilen ein Gehirn">
+      <circle cx="150" cy="75" r="17" fill="var(--accent)"/>
+      <text x="150" y="80" text-anchor="middle" style="fill:var(--accent-ink);font-size:13px;font-weight:700">G</text>
+      <g>
+        <rect x="24" y="18" width="34" height="16" rx="4" fill="#4287f5"/><rect x="236" y="22" width="34" height="16" rx="4" fill="#f5a623"/>
+        <rect x="30" y="112" width="34" height="16" rx="4" fill="#f0f0f0" stroke="var(--line)"/><rect x="232" y="110" width="34" height="16" rx="4" fill="#4287f5"/>
+      </g>
+      <g class="arrow" style="stroke-width:2">
+        <path d="M62 30 L130 66" marker-end="url(#ah)"/><path d="M232 34 L170 66" marker-end="url(#ah)"/>
+        <path d="M66 116 L132 86" marker-end="url(#ah)"/><path d="M230 114 L168 86" marker-end="url(#ah)"/>
+      </g>
+      <text class="sub" x="150" y="146" text-anchor="middle" style="font-size:11px">jedes Auto meldet, was ihm half</text>
+    </svg>
+    <p>Hier lernt das Gehirn aus den <b>Erlebnissen jedes einzelnen Autos</b>: Was hat es gesehen, was hat es getan, und wie ging es danach für <em>dieses</em> Auto aus?
+      Handlungen, die besser liefen als erwartet, werden wahrscheinlicher; schlechtere seltener – aber immer nur in kleinen, vorsichtigen Schritten.</p>
+    <p class="muted small">Alle Autos teilen trotzdem ein Gehirn: Was eines lernt, können alle. Das ist meist viel schneller als Evolution, aber kniffliger einzustellen.</p>
+  </div>
+</div>
+
+<h2>Lernkurve</h2>
+<p>Wie viele der Autos sind während des Trainings angekommen, verunglückt oder von der Straße abgekommen? Gestrichelte Linien markieren, wo ein neuer Trainingslauf
+  mit geänderten Einstellungen weitergemacht hat.</p>
+<div id="curves"></div>
+<p class="muted small">Gemessen beim Training selbst: Dort wird die Verkehrsmenge langsam gesteigert, sobald es gut läuft. Zwischen den Läufen haben sich auch Belohnung und Simulation geändert –
+  die Kurve ist also eher ein Tagebuch als eine saubere Messung. Saubere Messungen stehen unter der Zeitreise.</p>
+
+<h2>Zeitreise</h2>
+<p>Hier fährt jeweils ein gespeicherter Zwischenstand des Gehirns. Schieb den Regler und vergleiche: Am Anfang fahren die Autos wild durcheinander,
+  später kommen die meisten an. (Alle Zwischenstände fahren mit genau demselben Verkehr.)</p>
+<div class="sim-layout">
+  <section id="stage" aria-label="Simulation mit Zwischenstand"></section>
+  <aside class="panel">
+    <div class="group tt" id="tt">
+      <div class="method-tabs" id="tt-methods"></div>
+      <label for="tt-range" class="group-title">Trainingsstand</label>
+      <input type="range" id="tt-range" min="0" max="1" step="1" value="0">
+      <div class="tt-ticks" id="tt-ticks"></div>
+      <div class="tt-now" id="tt-now"></div>
+    </div>
+    <div class="group">
+      <h3>Irrwege</h3>
+      <p class="hint">Nicht jeder Trainingslauf klappt. Manchmal finden die Autos ein Schlupfloch in den Punkteregeln:</p>
+      <div class="method-tabs" id="tt-others"></div>
+    </div>
+  </aside>
+</div>
+<p><a href="vergleich.html">Weiter: Wie gut sind sie im Vergleich? →</a></p>
+<footer>Smart Crossing – ein Hobbyprojekt. Alles läuft direkt in deinem Browser, es werden keine Daten gesammelt. Stand: 2026-10-10.</footer>
+</div>
+<script src="data/site-data.js?v=25d8224c"></script>
+<script src="js/sim.js?v=25d8224c"></script>
+<script src="js/crossing.js?v=25d8224c"></script>
+<script src="js/charts.js?v=25d8224c"></script>
+<script src="js/pages.js?v=25d8224c"></script>
+</body>
+</html>
