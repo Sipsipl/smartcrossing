@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .sim import K_NEIGHBOURS, OBS_DIM, Sim, SimConfig, act_dim, obs_dim
+from .sim import K_NEIGHBOURS, NB_FEATURES, OBS_DIM, Sim, SimConfig, act_dim, obs_dim
 
 
 def layer_sizes(cfg: SimConfig, hidden=(32, 32)) -> list[int]:
@@ -22,13 +22,11 @@ def layer_sizes(cfg: SimConfig, hidden=(32, 32)) -> list[int]:
 
 
 def default_in_scale(cfg: SimConfig) -> np.ndarray:
-    """Fixed per-feature input scaling: positions in the sim obs are divided by
-    L = 50 m (own) or 30 m (neighbours), which makes the intersection box tiny;
-    rescale them to ~10 m units so the network can resolve the turning point."""
+    """Fixed per-feature input scaling. Own position (10 m units) and goal vectors (25 m
+    units) are already scaled by fixed constants in the sim; neighbour positions are
+    divided by 30 m there, rescale them to ~10 m units."""
     s = np.ones(obs_dim(cfg))
-    s[0:2] = 5.0  # canonical own position
-    s[8:10] = 2.0  # goal vector
-    blk = 6 + cfg.n_signal
+    blk = NB_FEATURES + cfg.n_signal
     for k in range(K_NEIGHBOURS):
         # neighbour relative position (~10 m units; a longer perception range keeps far cars in range)
         s[OBS_DIM + k * blk : OBS_DIM + k * blk + 2] = 3.0 * min(1.0, 30.0 / getattr(cfg, "neighbour_vis", 30.0))
@@ -108,6 +106,13 @@ class PolicyDriver:
         for p in str(path).split("+"):
             params, sizes, tcfg = load_npz(p)
             scale = load_in_scale(p)
+            if sizes[0] != obs_dim(sim.cfg):  # older observation layout: remap inputs by feature name
+                from .export_viewer import adapt_inputs
+
+                d = adapt_inputs(export_json(p), sim.cfg)
+                sizes = d["sizes"]
+                params = np.concatenate([np.concatenate([np.ravel(la["W"]), la["b"]]) for la in d["layers"]])
+                scale = np.asarray(d["in_scale"], dtype=float)
             plist.append(params)
         if mute is None:  # policies trained without signal never learned to use their lamp
             mute = [not load_npz(p)[2].get("signal_enabled", True) for p in str(path).split("+")]

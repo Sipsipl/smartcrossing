@@ -12,6 +12,11 @@ is drivable and (b) give lower/upper reference numbers for throughput:
   and then executes that speed plan exactly; an upper reference
 - ``none``: lane-following and car-following only, no intersection control
 
+Lanes (right-hand traffic): the road has n_lanes(cfg) lanes per direction (1 on the 7 m
+crossing, 2 on the 14 m crossing). Right turners use the right (outer) lane, left turners
+the left (inner) lane, straight cars the lane nearest to their spawn offset; turns end in
+the corresponding lane of the target arm. Cars of different lanes queue independently.
+
 All share a path-following steering law (curvature feed-forward + lateral and
 heading feedback, critically damped in the arc-length domain), a speed limit
 from a lateral-acceleration bound on the turns, and IDM car following.
@@ -19,7 +24,7 @@ from a lateral-acceleration bound on the turns, and IDM car following.
 
 import numpy as np
 
-from .sim import DISC_OFFSETS, DISC_R, LEFT, RIGHT, STRAIGHT, Sim, rot
+from .sim import DISC_OFFSETS, DISC_R, LEFT, RIGHT, STRAIGHT, Sim, lane_offsets, rot
 
 STEP = 0.5  # path resolution in metres
 MIN_GREEN = 3.0  # s, actuated light: earliest gap-out
@@ -28,26 +33,27 @@ A_DEC = 3.0  # m/s^2 comfortable deceleration when approaching a turn
 K_E, K_H = 0.05, 2 * np.sqrt(0.05)  # lateral / heading feedback gains (per m)
 
 
-def canonical_path(man, L, W, Rc):
-    """Lane centre-line for a car entering from the south, right-hand traffic,
-    resampled at uniform arc length STEP. Turns follow arcs concentric with the
-    curb fillets."""
+def canonical_path(man, L, W, Rc, off=None):
+    """Lane centre-line for a car entering from the south, right-hand traffic, at lateral
+    offset `off` (right of the road centre; default W / 2), resampled at uniform arc
+    length STEP. Turns follow arcs concentric with the curb fillets."""
     c = W + Rc
     y0 = -L - 2
+    o = W / 2 if off is None else off
     if man == STRAIGHT:
-        pts = [np.array([[W / 2, y0], [W / 2, L + 8]])]
+        pts = [np.array([[o, y0], [o, L + 8]])]
     else:
-        pts = [np.array([[W / 2, y0], [W / 2, -c]])]
+        pts = [np.array([[o, y0], [o, -c]])]
         if man == RIGHT:
-            r, cx, cy, a0, a1 = c - W / 2, c, -c, np.pi, np.pi / 2
+            r, cx, cy, a0, a1 = c - o, c, -c, np.pi, np.pi / 2
         else:
-            r, cx, cy, a0, a1 = c + W / 2, -c, -c, 0.0, np.pi / 2
+            r, cx, cy, a0, a1 = c + o, -c, -c, 0.0, np.pi / 2
         a = np.linspace(a0, a1, 200)
         pts.append(np.stack([cx + r * np.cos(a), cy + r * np.sin(a)], -1))
         if man == RIGHT:
-            pts.append(np.array([[c, -W / 2], [L + 8, -W / 2]]))
+            pts.append(np.array([[c, -o], [L + 8, -o]]))
         else:
-            pts.append(np.array([[-c, W / 2], [-L - 8, W / 2]]))
+            pts.append(np.array([[-c, o], [-L - 8, o]]))
     p = np.concatenate(pts)
     seg = np.hypot(*np.diff(p, axis=0).T)
     keep = np.concatenate([[True], seg > 1e-9])
@@ -102,16 +108,19 @@ class LaneDriver:
         self.green, self.clear = green, clearance
         L, W = self.cfg.L, self.cfg.W
         self.box = W + self.cfg.Rc
-        self.paths = {}
+        self.offs = lane_offsets(self.cfg)  # (right lane, left lane) offsets; equal for one lane
+        self.paths = {}  # (arm, manoeuvre, lane 0 = right / 1 = left) -> Path
         for k in range(4):
             c, s = rot(k)
             for m in (RIGHT, STRAIGHT, LEFT):
-                p = canonical_path(m, L, W, self.cfg.Rc)
-                p = np.stack([c * p[:, 0] - s * p[:, 1], s * p[:, 0] + c * p[:, 1]], -1)
-                self.paths[k, m] = Path(p, self.cfg, self.box)
-        # backwards compatible views
-        self.stop_s = {key: p.stop_s for key, p in self.paths.items()}
-        self.box_out_s = {key: p.box_out_s for key, p in self.paths.items()}
+                for lane, off in enumerate(self.offs):
+                    p = canonical_path(m, L, W, self.cfg.Rc, off)
+                    p = np.stack([c * p[:, 0] - s * p[:, 1], s * p[:, 0] + c * p[:, 1]], -1)
+                    self.paths[k, m, lane] = Path(p, self.cfg, self.box)
+        self.lane = {}  # (b, uid) -> lane chosen at first sight
+        # backwards compatible views (right lane)
+        self.stop_s = {key[:2]: p.stop_s for key, p in self.paths.items() if key[2] == 0}
+        self.box_out_s = {key[:2]: p.box_out_s for key, p in self.paths.items() if key[2] == 0}
         self.idx = {}  # (b, uid) -> path index of the last projection
         self.committed = [set() for _ in range(sim.B)]  # uids allowed to enter the box
         self.plans = [dict() for _ in range(sim.B)]  # reservation: uid -> (k0, v, X, Y)
@@ -231,6 +240,25 @@ class LaneDriver:
         self.committed[b] &= alive_uids | set(self.plans[b])
         for key in [key for key in self.idx if key[0] == b and key[1] not in alive_uids]:
             del self.idx[key]
+        for key in [key for key in self.lane if key[0] == b and key[1] not in alive_uids]:
+            del self.lane[key]
+
+    def _lane_of(self, b, n):
+        """Right lane for right turns, left lane for left turns, straight: the lane nearest
+        to the car's lateral offset when first seen (= its spawn offset)."""
+        key = (b, int(self.sim.uid[b, n]))
+        if key not in self.lane:
+            m = int(self.sim.man[b, n])
+            if m == RIGHT:
+                lane = 0
+            elif m == LEFT:
+                lane = 1
+            else:
+                c, s = rot(-self.sim.arm[b, n])
+                cx = c * self.sim.x[b, n] - s * self.sim.y[b, n]  # right of travel on the entry arm
+                lane = 0 if abs(cx - self.offs[0]) <= abs(cx - self.offs[1]) else 1
+            self.lane[key] = lane
+        return self.lane[key]
 
     # -------------------------------------------------------------- act
     def act(self) -> np.ndarray:
@@ -248,12 +276,13 @@ class LaneDriver:
             # order by distance to the centre so cars closer to the box decide first
             alive = alive[np.argsort(np.hypot(sim.x[b, alive], sim.y[b, alive]))]
             ax, ay, ath, av = sim.x[b, alive], sim.y[b, alive], sim.th[b, alive], sim.v[b, alive]
-            arm_blocked = [False] * 4  # an uncommitted car of this arm is ahead
+            arm_blocked = {}  # (arm, lane) -> an uncommitted car of this lane is ahead
             uids = sim.uid[b, alive]
             planned = alive[[int(u) in self.plans[b] and kk - self.plans[b][int(u)][0] < len(self.plans[b][int(u)][1]) - 1 for u in uids]]
             for j, n in enumerate(alive):
                 arm = int(sim.arm[b, n])
-                path = self.paths[arm, int(sim.man[b, n])]
+                lane = self._lane_of(b, n)
+                path = self.paths[arm, int(sim.man[b, n]), lane]
                 self._path_cur = path
                 uid = int(sim.uid[b, n])
                 s_now, e, i = self._project(b, n, path)
@@ -303,7 +332,7 @@ class LaneDriver:
                 # intersection control: an uncommitted car treats the stop line as a wall
                 if before and self.control != "none" and not committed:
                     allowed = False
-                    if not arm_blocked[arm]:
+                    if not arm_blocked.get((arm, lane)):
                         if self.control == "light":
                             if green == arm:
                                 ss, _ = self._predict(path, s_now, v, path.box_out_s + 4.6)
@@ -317,7 +346,7 @@ class LaneDriver:
                         self.committed[b].add(uid)
                         committed = True
                     else:
-                        arm_blocked[arm] = True
+                        arm_blocked[arm, lane] = True
                         g = path.stop_s - s_now - 2.5
                         if g < gap:
                             gap, v_lead = g, 0.0

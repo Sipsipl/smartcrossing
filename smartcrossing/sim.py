@@ -35,7 +35,10 @@ N_RAYS = 5
 RAY_ANGLES = np.radians([-60.0, -30.0, 0.0, 30.0, 60.0])
 RAY_RANGE = 20.0  # metres; rays report the exact distance to the road edge, capped here
 K_NEIGHBOURS = 4
-NEIGHBOUR_RANGE = 30.0
+NEIGHBOUR_RANGE = 30.0  # neighbour positions are divided by this (fixed, independent of the perception range)
+POS_SCALE = 10.0  # own canonical position is given in units of 10 m (fixed: independent of L, W)
+GOAL_SCALE = 25.0  # goal vectors (exit gate, exit mouth) in units of 25 m
+NB_FEATURES = 8  # per neighbour before its lamps: rel. pos (2), rel. heading (2), speed, present, curvature, accel
 
 # why a slot was cleared in the last step (Sim.done_kind)
 DONE_NONE, DONE_EXIT, DONE_WRONG, DONE_CRASH, DONE_OFFROAD, DONE_TIMEOUT = 0, 1, 2, 3, 4, 5
@@ -95,21 +98,30 @@ class SimConfig:
     # their sum over the cars of an environment minus the queue cost.
     r_exit: float = 1.0
     r_wrong_exit: float = -1.0
-    r_crash: float = -2.0  # to every car involved in a collision
-    r_offroad: float = -2.0
+    # crash / off-road: base + per m/s of impact speed (car-car: |relative velocity| of the
+    # pair at contact, max over partners; off-road: own speed). Pure outcome, no blame: every
+    # car involved pays its own term. Order kept: exit (+1) > waiting > timeout (-1) > crash
+    # (-1.5 at walking pace ... -2.9 at 14 m/s ... -4.3 head-on at 2 x 14 m/s).
+    r_crash: float = -1.5  # to every car involved in a collision
+    r_crash_speed: float = 0.1  # extra cost per m/s of relative impact speed
+    r_offroad: float = -1.5
+    r_offroad_speed: float = 0.1  # extra cost per m/s of own speed when leaving the road
     r_timeout: float = -1.0
     r_progress: float = 0.01  # per metre of route-aware distance to the target gate (route_dist)
     r_time: float = 0.0  # cost per car per second on the road
     r_queue: float = 0.0  # team-level cost per queued (not yet entered) car per second
 
 
-# own state: canonical pos (2), heading (2), speed, manoeuvre one-hot (3), goal vector (2),
-# rays (N_RAYS), curvature kappa / kappa_max; the neighbour block is appended below
-OBS_DIM = 4 + 1 + 3 + 2 + N_RAYS + 1
+# own state: canonical pos (2, /POS_SCALE), heading (2), speed, manoeuvre one-hot (3),
+# ego-frame vectors to the exit gate (2) and to the exit mouth (2) (/GOAL_SCALE), rays (N_RAYS),
+# curvature kappa / kappa_max, grip-limited max curvature at the current speed / kappa_max;
+# the neighbour blocks are appended below
+OBS_DIM = 4 + 1 + 3 + 2 + 2 + N_RAYS + 1 + 1
+OBS_RAYS = 12  # index of the first ray
 
 
 def obs_dim(cfg: SimConfig) -> int:
-    return OBS_DIM + K_NEIGHBOURS * (6 + cfg.n_signal)
+    return OBS_DIM + K_NEIGHBOURS * (NB_FEATURES + cfg.n_signal)
 
 
 def act_dim(cfg: SimConfig) -> int:
@@ -274,7 +286,8 @@ class Sim:
         self.y = np.zeros((B, N))
         self.th = np.zeros((B, N))
         self.v = np.zeros((B, N))
-        self.kappa = np.zeros((B, N))  # actual curvature (rate limited)
+        self.kappa = np.zeros((B, N))  # actual curvature (rate and grip limited)
+        self.acc = np.zeros((B, N))  # actual acceleration of the last step ((v_new - v_old) / dt)
         self.sig = np.zeros((B, N, cfg.n_signal))
         self.arm = np.zeros((B, N), dtype=np.int64)
         self.man = np.zeros((B, N), dtype=np.int64)  # manoeuvre 1..3
@@ -332,24 +345,29 @@ class Sim:
         c, s = rot(-arm)
         # canonical frame: rotate world so that the entry arm is south
         cth = th - arm * (np.pi / 2)
-        gc, gs = rot((arm + man) % 4)
-        dx, dy = gs * L - x, -gc * L - y  # to the centre of the target gate
+        ut = ARM_U[(arm + man) % 4]  # outward unit vector of the target arm (world)
+        c0 = W + cfg.Rc
+        dx, dy = L * ut[:, 0] - x, L * ut[:, 1] - y  # to the centre of the target (exit) gate
+        mx, my = c0 * ut[:, 0] - x, c0 * ut[:, 1] - y  # to the centre of the target arm's mouth
         ct, st = np.cos(th), np.sin(th)
         o = obs[bi, ni]
-        o[:, 0] = (c * x - s * y) / L
-        o[:, 1] = (s * x + c * y) / L
+        o[:, 0] = (c * x - s * y) / POS_SCALE
+        o[:, 1] = (s * x + c * y) / POS_SCALE
         o[:, 2] = np.cos(cth)
         o[:, 3] = np.sin(cth)
         o[:, 4] = self.v[bi, ni] / cfg.v_max
         o[:, 5] = man == RIGHT
         o[:, 6] = man == STRAIGHT
         o[:, 7] = man == LEFT
-        o[:, 8] = (ct * dx + st * dy) / L
-        o[:, 9] = (-st * dx + ct * dy) / L
+        o[:, 8] = (ct * dx + st * dy) / GOAL_SCALE
+        o[:, 9] = (-st * dx + ct * dy) / GOAL_SCALE
+        o[:, 10] = (ct * mx + st * my) / GOAL_SCALE
+        o[:, 11] = (-st * mx + ct * my) / GOAL_SCALE
         # rays to the road edge in the ego frame (exact distance, capped)
         ang = th[:, None] + RAY_ANGLES  # (M,R)
-        o[:, 10 : 10 + N_RAYS] = ray_edge_dist(x[:, None], y[:, None], np.cos(ang), np.sin(ang), W, cfg.Rc) / RAY_RANGE
-        o[:, 10 + N_RAYS] = self.kappa[bi, ni] / cfg.kappa_max
+        o[:, OBS_RAYS : OBS_RAYS + N_RAYS] = ray_edge_dist(x[:, None], y[:, None], np.cos(ang), np.sin(ang), W, cfg.Rc) / RAY_RANGE
+        o[:, OBS_RAYS + N_RAYS] = self.kappa[bi, ni] / cfg.kappa_max
+        o[:, OBS_RAYS + N_RAYS + 1] = grip_kappa(cfg, self.v[bi, ni]) / cfg.kappa_max
         # neighbours: K nearest other cars within range, sorted by distance
         ddx = self.x[bi] - x[:, None]  # (M, N) = x_j - x_i
         ddy = self.y[bi] - y[:, None]
@@ -368,7 +386,7 @@ class Sim:
         ny = np.take_along_axis(ddy, idx, -1)
         b2 = bi[:, None]
         nth = self.th[b2, idx] - th[:, None]
-        blk = 6 + cfg.n_signal
+        blk = NB_FEATURES + cfg.n_signal
         f = np.zeros((len(bi), K, blk))
         ct2, st2 = ct[:, None], st[:, None]
         f[..., 0] = (ct2 * nx + st2 * ny) / NEIGHBOUR_RANGE
@@ -377,10 +395,12 @@ class Sim:
         f[..., 3] = np.sin(nth)
         f[..., 4] = self.v[b2, idx] / cfg.v_max
         f[..., 5] = 1.0
+        f[..., 6] = self.kappa[b2, idx] / cfg.kappa_max  # visible: how hard it is turning
+        f[..., 7] = self.acc[b2, idx] / cfg.brake_max  # visible: brake lights / pitch
         if cfg.signal_enabled:
-            f[..., 6:] = self.sig[b2, idx]
+            f[..., NB_FEATURES:] = self.sig[b2, idx]
             if cfg.signal_noise > 0:
-                f[..., 6:] += self.noise_rng.normal(0, cfg.signal_noise, f[..., 6:].shape)
+                f[..., NB_FEATURES:] += self.noise_rng.normal(0, cfg.signal_noise, f[..., NB_FEATURES:].shape)
         f *= present[..., None]
         o[:, OBS_DIM : OBS_DIM + K * blk] = f.reshape(len(bi), -1)
         obs[bi, ni] = o
@@ -408,6 +428,7 @@ class Sim:
         self.kappa = np.where(alive, np.clip(kap, -kg, kg), 0.0)
         self.sig = np.where(alive[..., None], a[..., 2:], 0.0)
         th = self.th + v * self.kappa * cfg.dt
+        self.acc = np.where(alive, (v - self.v) / cfg.dt, 0.0)
         self.x = np.where(alive, self.x + v * np.cos(th) * cfg.dt, self.x)
         self.y = np.where(alive, self.y + v * np.sin(th) * cfg.dt, self.y)
         self.th = np.where(alive, (th + np.pi) % (2 * np.pi) - np.pi, self.th)
@@ -443,13 +464,13 @@ class Sim:
         # off-road: any disc overlapping the complement of the road
         ox, oy = self._discs()
         off = (corner_dist(ox, oy, cfg.W, cfg.Rc) < cfg.Rc + DISC_R).any(-1) & alive
-        # collisions between cars (both cars of a pair are marked)
-        col = self._collisions(ox, oy, alive)
+        # collisions between cars (both cars of a pair are marked; vrel = impact speed)
+        col, vrel = self._collisions(ox, oy, alive)
         crash = col & ~off
         for kind, m in (("offroad", off), ("crash", crash)):
             for b, n in zip(*np.nonzero(m)):
                 self.events.append((b, kind, self.x[b, n], self.y[b, n]))
-        cr += cfg.r_offroad * off + cfg.r_crash * crash
+        cr += off * (cfg.r_offroad - cfg.r_offroad_speed * self.v) + crash * (cfg.r_crash - cfg.r_crash_speed * vrel)
         self.done_kind[off] = DONE_OFFROAD
         self.done_kind[crash] = DONE_CRASH
         self.stats.offroad += off.sum(1)
@@ -477,19 +498,24 @@ class Sim:
         dcy = self.y[:, :, None] - self.y[:, None, :]
         near = (dcx**2 + dcy**2 < (2 * 1.4 + 2 * DISC_R) ** 2) & alive[:, :, None] & alive[:, None, :]
         near &= ~np.eye(N, dtype=bool)[None]
+        vrel = np.zeros(alive.shape)
         if not near.any():
-            return np.zeros_like(alive)
+            return np.zeros_like(alive), vrel
         b, i, j = np.nonzero(near)
         dx = ox[b, i][:, :, None] - ox[b, j][:, None, :]
         dy = oy[b, i][:, :, None] - oy[b, j][:, None, :]
         hit = ((dx**2 + dy**2) < (2 * DISC_R) ** 2).any((1, 2))
         col = np.zeros_like(alive)
         col[b[hit], i[hit]] = True
-        return col
+        b, i, j = b[hit], i[hit], j[hit]
+        vx, vy = self.v * np.cos(self.th), self.v * np.sin(self.th)
+        np.maximum.at(vrel, (b, i), np.hypot(vx[b, i] - vx[b, j], vy[b, i] - vy[b, j]))
+        return col, vrel
 
     def _remove(self, mask):
         self.alive &= ~mask
         self.v[mask] = 0.0
+        self.acc[mask] = 0.0
         self.sig[mask] = 0.0
         self.age[mask] = 0.0
         self.uid[mask] = -1
@@ -553,6 +579,7 @@ class Sim:
                 self.th[b, n] = np.arctan2(np.sin(h), np.cos(h))
                 self.v[b, n] = cfg.spawn_speed
                 self.kappa[b, n] = 0.0
+                self.acc[b, n] = 0.0
                 self.arm[b, n] = k
                 self.man[b, n] = self.queue_man[b, k]
                 self.group[b, n] = self.queue_grp[b, k]

@@ -18,7 +18,7 @@ Also used by ``site/build.py``:
   against ``sim.OBS_DIM`` / ``obs_dim(cfg)``, so a layout change in the sim fails
   loudly here instead of silently mislabelling.
 - ``load_policy``: checkpoints trained with an older observation layout (listed
-  in ``LEGACY_OWN_KEYS``) are adapted by feature name: the inputs that did not
+  in ``LEGACY_LAYOUTS``) are adapted by feature name: the inputs that did not
   exist yet get zero weights, so the network computes exactly what it computed
   before and simply ignores the new sensor.
 """
@@ -43,26 +43,25 @@ MAX_TYPES = 3
 # "scale" converts the (normalised) observation back into the unit shown on the site;
 # a str scale names a SimConfig field (e.g. v_max), a callable gets cfg.
 OWN_FEATURES = [
-    ("pos_x", "Position", "quer (rechts +)", lambda c: c.L, "m"),
-    ("pos_y", "Position", "längs (Richtung Mitte +)", lambda c: c.L, "m"),
+    ("pos_x", "Position", "quer (rechts +)", simmod.POS_SCALE, "m"),
+    ("pos_y", "Position", "längs (Richtung Mitte +)", simmod.POS_SCALE, "m"),
     ("dir_x", "Richtung", "Anteil nach rechts", 1, ""),
     ("dir_y", "Richtung", "Anteil nach vorn", 1, ""),
     ("speed", "Tempo", "Tempo", lambda c: c.v_max * 3.6, "km/h"),
     ("goal_right", "Ziel", "rechts abbiegen", 1, "bool"),
     ("goal_straight", "Ziel", "geradeaus", 1, "bool"),
     ("goal_left", "Ziel", "links abbiegen", 1, "bool"),
-    ("exit_fwd", "Weg zur Ausfahrt", "vor mir", lambda c: c.L, "m"),
-    ("exit_left", "Weg zur Ausfahrt", "links von mir", lambda c: c.L, "m"),
+    ("exit_fwd", "Weg zur Ausfahrt", "vor mir", simmod.GOAL_SCALE, "m"),
+    ("exit_left", "Weg zur Ausfahrt", "links von mir", simmod.GOAL_SCALE, "m"),
+    ("mouth_fwd", "Weg zur Ausfahrtsstraße", "vor mir", simmod.GOAL_SCALE, "m"),
+    ("mouth_left", "Weg zur Ausfahrtsstraße", "links von mir", simmod.GOAL_SCALE, "m"),
     ("ray_r60", "Abstand zum Fahrbahnrand", "60° rechts", simmod.RAY_RANGE, "m"),
     ("ray_r30", "Abstand zum Fahrbahnrand", "30° rechts", simmod.RAY_RANGE, "m"),
     ("ray_0", "Abstand zum Fahrbahnrand", "geradeaus", simmod.RAY_RANGE, "m"),
     ("ray_l30", "Abstand zum Fahrbahnrand", "30° links", simmod.RAY_RANGE, "m"),
     ("ray_l60", "Abstand zum Fahrbahnrand", "60° links", simmod.RAY_RANGE, "m"),
     ("kappa", "Lenkrad", "aktueller Lenkeinschlag (links +)", 100, "%"),
-]
-# Own-block layouts of older sim versions (by key), used to adapt old checkpoints.
-LEGACY_OWN_KEYS = [
-    [k for k, *_ in OWN_FEATURES if k != "kappa"],  # before the steering-rate limit (es1-es5)
+    ("kappa_grip", "Lenkrad", "möglicher Einschlag bei diesem Tempo (Haftung)", 100, "%"),
 ]
 NEIGHBOUR_FEATURES = [
     ("fwd", "vor mir", lambda c: simmod.NEIGHBOUR_RANGE, "m"),
@@ -71,6 +70,21 @@ NEIGHBOUR_FEATURES = [
     ("cross", "fährt quer: nach links (+) / rechts (−)", 1, ""),
     ("speed", "Tempo", lambda c: c.v_max * 3.6, "km/h"),
     ("present", "da?", 1, "bool"),
+    ("kappa", "lenkt (links +)", 100, "%"),
+    ("acc", "beschleunigt (+) / bremst (−)", lambda c: c.brake_max, "m/s²"),
+]
+# Observation layouts of older sim versions, used to adapt old checkpoints by feature key.
+# "factor": old value = new value * factor (folded into in_scale, so the network computes
+# exactly what it computed before); keys missing from the old layout get weight 0.
+_OLD_OWN = ["pos_x", "pos_y", "dir_x", "dir_y", "speed", "goal_right", "goal_straight", "goal_left", "exit_fwd",
+            "exit_left", "ray_r60", "ray_r30", "ray_0", "ray_l30", "ray_l60"]
+_OLD_NB = ["fwd", "left", "same", "cross", "speed", "present"]
+# before the wide crossing: own position / L and goal / L with L = 50 m
+_OLD_FACTOR = {"pos_x": simmod.POS_SCALE / 50.0, "pos_y": simmod.POS_SCALE / 50.0,
+               "exit_fwd": simmod.GOAL_SCALE / 50.0, "exit_left": simmod.GOAL_SCALE / 50.0}
+LEGACY_LAYOUTS = [
+    {"own": _OLD_OWN + ["kappa"], "nb": _OLD_NB, "factor": _OLD_FACTOR},  # ppo*, es after the steering-rate limit
+    {"own": _OLD_OWN, "nb": _OLD_NB, "factor": _OLD_FACTOR},  # es1-es5 (before the steering-rate limit)
 ]
 
 
@@ -82,13 +96,13 @@ def own_keys() -> list[str]:
     return [k for k, *_ in OWN_FEATURES]
 
 
-def neighbour_keys(cfg: SimConfig) -> list[str]:
-    keys = [k for k, *_ in NEIGHBOUR_FEATURES] + [f"lamp{q + 1}" for q in range(cfg.n_signal)]
+def neighbour_keys(cfg: SimConfig, nb: list[str] | None = None) -> list[str]:
+    keys = (nb or [k for k, *_ in NEIGHBOUR_FEATURES]) + [f"lamp{q + 1}" for q in range(cfg.n_signal)]
     return [f"n{k + 1}_{f}" for k in range(simmod.K_NEIGHBOURS) for f in keys]
 
 
-def obs_keys(cfg: SimConfig, own: list[str] | None = None) -> list[str]:
-    return (own or own_keys()) + neighbour_keys(cfg)
+def obs_keys(cfg: SimConfig, own: list[str] | None = None, nb: list[str] | None = None) -> list[str]:
+    return (own or own_keys()) + neighbour_keys(cfg, nb)
 
 
 def obs_layout(cfg: SimConfig) -> dict:
@@ -98,7 +112,7 @@ def obs_layout(cfg: SimConfig) -> dict:
             f"export_viewer.OWN_FEATURES has {len(OWN_FEATURES)} labels but sim.OBS_DIM is "
             f"{simmod.OBS_DIM}: the observation layout changed, update the labels"
         )
-    blk = 6 + cfg.n_signal
+    blk = simmod.NB_FEATURES + cfg.n_signal
     if len(NEIGHBOUR_FEATURES) + cfg.n_signal != blk or simmod.OBS_DIM + simmod.K_NEIGHBOURS * blk != obs_dim(cfg):
         raise RuntimeError("neighbour block layout changed: update export_viewer.NEIGHBOUR_FEATURES")
     groups, i = [], 0
@@ -170,13 +184,14 @@ def placeholder_policy(seed: int) -> dict:
 
 def adapt_inputs(d: dict, cfg: SimConfig) -> dict:
     """Map a policy trained on a legacy observation layout onto the current one by
-    feature key (new inputs get zero weights and scale 1). No-op if sizes match."""
+    feature key (new inputs get zero weights and scale 1; rescaled inputs get their
+    factor folded into in_scale). No-op if sizes match."""
     n_in, want = d["sizes"][0], obs_dim(cfg)
     if n_in == want:
         return d
     cur = obs_keys(cfg)
-    for legacy in LEGACY_OWN_KEYS:
-        old = obs_keys(cfg, legacy)
+    for legacy in LEGACY_LAYOUTS:
+        old = obs_keys(cfg, legacy["own"], legacy["nb"])
         if len(old) != n_in:
             continue
         W0 = np.asarray(d["layers"][0]["W"], dtype=float)
@@ -186,11 +201,12 @@ def adapt_inputs(d: dict, cfg: SimConfig) -> dict:
         pos = {k: j for j, k in enumerate(cur)}
         for j, k in enumerate(old):
             W[pos[k]] = W0[j]
-            s[pos[k]] = scale[j]
-        missing = [k for k in cur if k not in set(old)]
+            s[pos[k]] = scale[j] * legacy["factor"].get(k, 1.0)
+        missing = [k for k in cur if k not in set(old) and not k[1:2].isdigit()]
+        missing_nb = sorted({k.split("_", 1)[1] for k in cur if k not in set(old) and k[1:2].isdigit()})
         d = {**d, "sizes": [want, *d["sizes"][1:]], "in_scale": s.tolist(),
              "layers": [{"W": W.tolist(), "b": d["layers"][0]["b"]}, *d["layers"][1:]],
-             "adapted": f"trained without input(s) {', '.join(missing)} (weights 0)"}
+             "adapted": f"trained without input(s) {', '.join(missing + ['neighbour ' + k for k in missing_nb])} (weights 0)"}
         return d
     raise ValueError(f"policy has {n_in} inputs; the sim gives {want} and no legacy layout matches")
 

@@ -22,7 +22,7 @@ import numpy as np
 
 from .metrics import summarize
 from .policy import PolicyDriver
-from .sim import K_NEIGHBOURS, OBS_DIM, Sim, SimConfig, ARM_U
+from .sim import ARM_U, K_NEIGHBOURS, NB_FEATURES, OBS_DIM, Sim, SimConfig
 
 MODES = ("normal", "zero", "shuffle")
 
@@ -34,8 +34,8 @@ def _intervene(sim: Sim, mode: str, rng):
         return
     orig = sim.observe
     S = sim.cfg.n_signal
-    blk = 6 + S
-    cols = np.array([OBS_DIM + k * blk + 6 + q for k in range(K_NEIGHBOURS) for q in range(S)]).reshape(K_NEIGHBOURS, S)
+    blk = NB_FEATURES + S
+    cols = np.array([OBS_DIM + k * blk + NB_FEATURES + q for k in range(K_NEIGHBOURS) for q in range(S)]).reshape(K_NEIGHBOURS, S)
     pres = np.array([OBS_DIM + k * blk + 5 for k in range(K_NEIGHBOURS)])
 
     def observe():
@@ -66,12 +66,7 @@ def run(ckpt, demand, envs, seconds, seed=1000, mode="normal", record=False, cfg
     that is filled with per-car-step arrays (env, uid, step, arm, man, x, y, v, th, kappa)
     for the wobble analysis. Returns (summary, R, sim)."""
     sim = Sim(SimConfig(demand=demand, **(cfg_over or {})), envs, seed=seed)
-    if ckpt in ("light", "reservation", "none"):
-        from .baselines import LaneDriver
-
-        drv = LaneDriver(sim, ckpt)
-    else:
-        drv = PolicyDriver.load(ckpt, sim)
+    drv = _make_driver(ckpt, sim)
     _intervene(sim, mode, np.random.default_rng(seed + 7))
     rec, tr = [], []
     for k in range(int(seconds / sim.cfg.dt)):
@@ -90,6 +85,73 @@ def run(ckpt, demand, envs, seconds, seed=1000, mode="normal", record=False, cfg
         for j, key in enumerate(("env", "uid", "step", "arm", "man", "x", "y", "v", "th", "kappa")):
             traj[key] = T[:, j]
     return summarize(sim, seconds), (np.concatenate(rec) if record else None), sim
+
+
+KIND_NAMES = ("exit", "wrong_exit", "crash", "offroad", "timeout")
+
+
+def _make_driver(ckpt, sim):
+    if ckpt in ("light", "reservation", "none"):
+        from .baselines import LaneDriver
+
+        return LaneDriver(sim, ckpt)
+    return PolicyDriver.load(ckpt, sim)
+
+
+def outcome_counts(ckpt, demand, envs=16, seconds=120.0, seed=1000, cfg_over=None, solo=False):
+    """Outcome of every car that finished (exit / wrong_exit / crash / offroad / timeout),
+    per manoeuvre. solo=True: one car slot per env (every car drives alone; the queue is
+    always full, demand is irrelevant). Returns ({manoeuvre: {kind: count}}, summary)."""
+    over = dict(cfg_over or {})
+    if solo:
+        over.update(n_slots=1)
+        demand = max(demand, 0.5)
+    sim = Sim(SimConfig(demand=demand, **over), envs, seed=seed)
+    drv = _make_driver(ckpt, sim)
+    cnt = {m: dict.fromkeys(KIND_NAMES, 0) for m in ("right", "straight", "left")}
+    names = {1: "right", 2: "straight", 3: "left"}
+    for _ in range(int(seconds / sim.cfg.dt)):
+        act = drv.act()
+        man = sim.man.copy()  # slots refilled in this step get a new manoeuvre after removal
+        sim.step(act)
+        b, n = np.nonzero(sim.done_kind > 0)
+        for m, k in zip(man[b, n], sim.done_kind[b, n]):
+            cnt[names[int(m)]][KIND_NAMES[int(k) - 1]] += 1
+    return cnt, summarize(sim, seconds)
+
+
+def failure_breakdown(ckpt, demands=(0.02, 0.05, 0.15, 0.3), envs=16, seconds=120.0, seed=1000, cfg_over=None):
+    """Rates (per finished car) of exit_ok / crash (car-car) / offroad / timeout / wrong exit,
+    overall and per manoeuvre, for a solo car and for traffic at each demand."""
+    out = {}
+    for label, d, solo in [("solo", 0.5, True)] + [(f"d{d:g}", d, False) for d in demands]:
+        cnt, summ = outcome_counts(ckpt, d, envs, seconds, seed, cfg_over, solo)
+        rows = {}
+        tot = dict.fromkeys(KIND_NAMES, 0)
+        for m, c in cnt.items():
+            n = sum(c.values())
+            rows[m] = {"n": n, **{k: round(v / max(n, 1), 4) for k, v in c.items()}}
+            for k in KIND_NAMES:
+                tot[k] += c[k]
+        n = sum(tot.values())
+        rows["all"] = {"n": n, **{k: round(v / max(n, 1), 4) for k, v in tot.items()},
+                       "throughput_per_min": round(summ["throughput_per_min"], 2), "delay_mean_s": round(summ["delay_mean_s"], 2)}
+        out[label] = rows
+    return out
+
+
+def breakdown_table(fb) -> str:
+    """Markdown table of failure_breakdown(): rows = condition, columns = exit/crash/offroad (%)
+    overall and exit/offroad per manoeuvre."""
+    lines = ["| condition | n | exit ok | crash | offroad | timeout+wrong | R exit/off | S exit/off | L exit/off | thr/min |",
+             "|---|---|---|---|---|---|---|---|---|---|"]
+    pct = lambda x: f"{100 * x:.1f}"  # noqa: E731
+    for label, r in fb.items():
+        a = r["all"]
+        mm = [f"{pct(r[m]['exit'])}/{pct(r[m]['offroad'])}" for m in ("right", "straight", "left")]
+        lines.append(f"| {label} | {a['n']} | {pct(a['exit'])} | {pct(a['crash'])} | {pct(a['offroad'])} | "
+                     f"{pct(a['timeout'] + a['wrong_exit'])} | {' | '.join(mm)} | {a['throughput_per_min']} |")
+    return "\n".join(lines)
 
 
 def mutual_info(a, b):
@@ -255,8 +317,15 @@ def main(argv=None):
     p.add_argument("--modes", default="normal,zero,shuffle")
     p.add_argument("--cfg", default="", help="JSON SimConfig overrides (a policy's own interface/geometry wins)")
     p.add_argument("--hist", action="store_true", help="include the lateral-offset histograms")
+    p.add_argument("--breakdown", action="store_true", help="only the failure breakdown (solo + demands), as JSON + table")
+    p.add_argument("--demands", default="0.02,0.05,0.15,0.3")
     a = p.parse_args(argv)
     over = json.loads(a.cfg) if a.cfg else None
+    if a.breakdown:
+        fb = failure_breakdown(a.ckpt, tuple(float(d) for d in a.demands.split(",")), a.envs, a.seconds, cfg_over=over)
+        print(json.dumps({"ckpt": a.ckpt, "breakdown": fb}))
+        print(breakdown_table(fb))
+        return
     baseline = a.ckpt in ("light", "reservation", "none")
     modes = ["normal"] if baseline else a.modes.split(",")
     res = {"ckpt": a.ckpt, "demand": a.demand, "bench": {}}
