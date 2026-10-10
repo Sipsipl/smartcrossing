@@ -67,8 +67,8 @@ LEGACY_OWN_KEYS = [
 NEIGHBOUR_FEATURES = [
     ("fwd", "vor mir", lambda c: simmod.NEIGHBOUR_RANGE, "m"),
     ("left", "links von mir", lambda c: simmod.NEIGHBOUR_RANGE, "m"),
-    ("same", "fährt wie ich (1) / entgegen (−1)", 1, ""),
-    ("cross", "fährt von rechts nach links (+)", 1, ""),
+    ("same", "gleiche Richtung (+1) / entgegen (−1)", 1, ""),
+    ("cross", "fährt quer: nach links (+) / rechts (−)", 1, ""),
     ("speed", "Tempo", lambda c: c.v_max * 3.6, "km/h"),
     ("present", "da?", 1, "bool"),
 ]
@@ -130,6 +130,24 @@ def obs_layout(cfg: SimConfig) -> dict:
         "groups": groups,
         "actions": ["Gas / Bremse", "Lenkung"] + [f"Lampe {q + 1}" for q in range(cfg.n_signal)],
     }
+
+
+# ------------------------------------------------------------------ physics
+PHYSICS_KEYS = ["v_max", "acc_max", "brake_max", "kappa_max", "kappa_rate"]
+# Value a physics field had *before* it existed in SimConfig (checkpoints trained
+# with an older sim do not store it): kappa_rate absent = steering acts instantly.
+LEGACY_PHYSICS = {"kappa_rate": 1e6}
+
+
+def physics_of(train_cfg: dict) -> dict:
+    """Vehicle physics a policy was trained with (to run it the way it learned)."""
+    fields = SimConfig.__dataclass_fields__
+    out = {}
+    for k in PHYSICS_KEYS:
+        if k not in fields:
+            continue
+        out[k] = float(train_cfg[k]) if k in train_cfg else float(LEGACY_PHYSICS.get(k, getattr(SimConfig, k)))
+    return out
 
 
 # ------------------------------------------------------------------ policies
@@ -221,7 +239,9 @@ def build_types(specs: list[str]) -> list[dict]:
     types = []
     for spec in specs:
         name, path = parse_spec(spec)
-        types.append({"name": name, "source": str(path), "placeholder": False, "policy": load_policy(path)})
+        pol = load_policy(path)
+        types.append({"name": name, "source": str(path), "placeholder": False, "policy": pol,
+                      "physics": physics_of(pol.get("cfg") or {})})
     return types
 
 

@@ -139,6 +139,26 @@
 "throughput_per_min": 3.562,
 "timeouts": 0.0
 },
+"pol:0da6e4b51cda8aad|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"v_max\": 14.0}|0.05|8x120.0@1000|05ef78bfb448": {
+"crash_cars": 36.0,
+"crash_cars_per_1000": 248.366,
+"delay_mean_s": 4.836,
+"demand_per_min": 13.125,
+"exit_ok_rate": 0.307,
+"offroad_cars": 2.0,
+"throughput_per_min": 2.938,
+"timeouts": 5.0
+},
+"pol:0da6e4b51cda8aad|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"v_max\": 14.0}|0.15|8x120.0@1000|05ef78bfb448": {
+"crash_cars": 170.0,
+"crash_cars_per_1000": 618.705,
+"delay_mean_s": 5.123,
+"demand_per_min": 35.625,
+"exit_ok_rate": 0.112,
+"offroad_cars": 2.0,
+"throughput_per_min": 1.938,
+"timeouts": 34.0
+},
 "pol:1adc57d321db6804|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"v_max\": 14.0}|0.05|8x120.0@1000|05ef78bfb448": {
 "crash_cars": 34.0,
 "crash_cars_per_1000": 189.474,
@@ -189,6 +209,56 @@
 "throughput_per_min": 4.312,
 "timeouts": 0.0
 },
+"pol:2903b9c8e54d4cda|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"v_max\": 14.0}|0.15|8x120.0@1000|05ef78bfb448": {
+"crash_cars": 244.0,
+"crash_cars_per_1000": 648.579,
+"delay_mean_s": 3.067,
+"demand_per_min": 35.625,
+"exit_ok_rate": 0.109,
+"offroad_cars": 7.0,
+"throughput_per_min": 2.625,
+"timeouts": 8.0
+},
+"pol:30edca00ca796647|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"v_max\": 14.0}|0.05|8x120.0@1000|05ef78bfb448": {
+"crash_cars": 58.0,
+"crash_cars_per_1000": 308.901,
+"delay_mean_s": 1.967,
+"demand_per_min": 13.125,
+"exit_ok_rate": 0.267,
+"offroad_cars": 1.0,
+"throughput_per_min": 3.188,
+"timeouts": 0.0
+},
+"pol:30edca00ca796647|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"v_max\": 14.0}|0.15|8x120.0@1000|05ef78bfb448": {
+"crash_cars": 342.0,
+"crash_cars_per_1000": 682.51,
+"delay_mean_s": 2.579,
+"demand_per_min": 35.625,
+"exit_ok_rate": 0.135,
+"offroad_cars": 17.0,
+"throughput_per_min": 4.438,
+"timeouts": 0.0
+},
+"pol:35f0d4e33fa67140|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"v_max\": 14.0}|0.05|8x120.0@1000|05ef78bfb448": {
+"crash_cars": 20.0,
+"crash_cars_per_1000": 314.607,
+"delay_mean_s": 17.992,
+"demand_per_min": 13.125,
+"exit_ok_rate": 0.18,
+"offroad_cars": 8.0,
+"throughput_per_min": 1.0,
+"timeouts": 42.0
+},
+"pol:35f0d4e33fa67140|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"v_max\": 14.0}|0.15|8x120.0@1000|05ef78bfb448": {
+"crash_cars": 48.0,
+"crash_cars_per_1000": 366.667,
+"delay_mean_s": 5.539,
+"demand_per_min": 35.625,
+"exit_ok_rate": 0.18,
+"offroad_cars": 7.0,
+"throughput_per_min": 1.688,
+"timeouts": 57.0
+},
 "pol:3771aca4878e762d|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 1000000.0, \"v_max\": 14.0}|0.15|8x120.0@1000|05ef78bfb448": {
 "crash_cars": 0.0,
 "crash_cars_per_1000": 58.824,
@@ -198,6 +268,26 @@
 "offroad_cars": 2.0,
 "throughput_per_min": 0.0,
 "timeouts": 32.0
+},
+"pol:3da877014095f64d|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"v_max\": 14.0}|0.05|8x120.0@1000|05ef78bfb448": {
+"crash_cars": 55.0,
+"crash_cars_per_1000": 368.75,
+"delay_mean_s": 4.088,
+"demand_per_min": 13.125,
+"exit_ok_rate": 0.25,
+"offroad_cars": 4.0,
+"throughput_per_min": 2.5,
+"timeouts": 8.0
+},
+"pol:3da877014095f64d|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"v_max\": 14.0}|0.15|8x120.0@1000|05ef78bfb448": {
+"crash_cars": 231.0,
+"crash_cars_per_1000": 658.402,
+"delay_mean_s": 2.861,
+"demand_per_min": 35.625,
+"exit_ok_rate": 0.121,
+"offroad_cars": 8.0,
+"throughput_per_min": 2.75,
+"timeouts": 23.0
 },
 "pol:416c9d75744bbb86|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"v_max\": 14.0}|0.05|8x120.0@1000|05ef78bfb448": {
 "crash_cars": 30.0,
@@ -238,6 +328,26 @@
 "offroad_cars": 297.0,
 "throughput_per_min": 9.0,
 "timeouts": 0.0
+},
+"pol:625c976fc03d5b96|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"v_max\": 14.0}|0.05|8x120.0@1000|05ef78bfb448": {
+"crash_cars": 32.0,
+"crash_cars_per_1000": 283.186,
+"delay_mean_s": 5.779,
+"demand_per_min": 13.125,
+"exit_ok_rate": 0.248,
+"offroad_cars": 0.0,
+"throughput_per_min": 1.75,
+"timeouts": 25.0
+},
+"pol:625c976fc03d5b96|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"v_max\": 14.0}|0.15|8x120.0@1000|05ef78bfb448": {
+"crash_cars": 60.0,
+"crash_cars_per_1000": 370.588,
+"delay_mean_s": 5.642,
+"demand_per_min": 35.625,
+"exit_ok_rate": 0.188,
+"offroad_cars": 3.0,
+"throughput_per_min": 2.0,
+"timeouts": 50.0
 },
 "pol:6627ff45bc0f2074|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"v_max\": 14.0}|0.05|8x120.0@1000|05ef78bfb448": {
 "crash_cars": 42.0,
@@ -287,6 +397,56 @@
 "exit_ok_rate": 0.06,
 "offroad_cars": 124.0,
 "throughput_per_min": 3.875,
+"timeouts": 0.0
+},
+"pol:7c0e6904a63b4dd2|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"v_max\": 14.0}|0.05|8x120.0@1000|05ef78bfb448": {
+"crash_cars": 42.0,
+"crash_cars_per_1000": 221.053,
+"delay_mean_s": 1.866,
+"demand_per_min": 13.125,
+"exit_ok_rate": 0.279,
+"offroad_cars": 0.0,
+"throughput_per_min": 3.312,
+"timeouts": 0.0
+},
+"pol:7c0e6904a63b4dd2|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"v_max\": 14.0}|0.15|8x120.0@1000|05ef78bfb448": {
+"crash_cars": 264.0,
+"crash_cars_per_1000": 668.213,
+"delay_mean_s": 2.92,
+"demand_per_min": 35.625,
+"exit_ok_rate": 0.107,
+"offroad_cars": 24.0,
+"throughput_per_min": 2.875,
+"timeouts": 2.0
+},
+"pol:7fe8b36c493f4d27|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"v_max\": 14.0}|0.05|8x120.0@1000|05ef78bfb448": {
+"crash_cars": 40.0,
+"crash_cars_per_1000": 313.433,
+"delay_mean_s": 4.623,
+"demand_per_min": 13.125,
+"exit_ok_rate": 0.291,
+"offroad_cars": 2.0,
+"throughput_per_min": 2.438,
+"timeouts": 18.0
+},
+"pol:7fe8b36c493f4d27|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"v_max\": 14.0}|0.15|8x120.0@1000|05ef78bfb448": {
+"crash_cars": 136.0,
+"crash_cars_per_1000": 551.587,
+"delay_mean_s": 4.096,
+"demand_per_min": 35.625,
+"exit_ok_rate": 0.171,
+"offroad_cars": 3.0,
+"throughput_per_min": 2.688,
+"timeouts": 42.0
+},
+"pol:a0194b3fab52fd44|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"v_max\": 14.0}|0.15|8x120.0@1000|05ef78bfb448": {
+"crash_cars": 252.0,
+"crash_cars_per_1000": 798.148,
+"delay_mean_s": 1.503,
+"demand_per_min": 35.625,
+"exit_ok_rate": 0.074,
+"offroad_cars": 179.0,
+"throughput_per_min": 2.5,
 "timeouts": 0.0
 },
 "pol:a101d88c71055699|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 1000000.0, \"v_max\": 14.0}|0.05|8x120.0@1000|05ef78bfb448": {
@@ -408,6 +568,26 @@
 "offroad_cars": 321.0,
 "throughput_per_min": 10.062,
 "timeouts": 0.0
+},
+"pol:dab6fabddc3465a0|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"v_max\": 14.0}|0.05|8x120.0@1000|05ef78bfb448": {
+"crash_cars": 65.0,
+"crash_cars_per_1000": 445.946,
+"delay_mean_s": 5.747,
+"demand_per_min": 13.125,
+"exit_ok_rate": 0.236,
+"offroad_cars": 1.0,
+"throughput_per_min": 2.188,
+"timeouts": 15.0
+},
+"pol:dab6fabddc3465a0|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"v_max\": 14.0}|0.15|8x120.0@1000|05ef78bfb448": {
+"crash_cars": 140.0,
+"crash_cars_per_1000": 573.171,
+"delay_mean_s": 3.884,
+"demand_per_min": 35.625,
+"exit_ok_rate": 0.142,
+"offroad_cars": 1.0,
+"throughput_per_min": 2.188,
+"timeouts": 45.0
 },
 "pol:e0814595b57cb703|{\"acc_max\": 3.0, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 1000000.0, \"v_max\": 14.0}|0.05|8x120.0@1000|05ef78bfb448": {
 "crash_cars": 13.0,

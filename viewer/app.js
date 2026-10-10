@@ -17,7 +17,7 @@
   while (types.length < MAX_TYPES) types.push(null);
 
   function addType(t, slot) {
-    const entry = { name: t.name || "Policy", source: t.source || "", placeholder: !!t.placeholder, share: 50, mute: false };
+    const entry = { name: t.name || "Policy", source: t.source || "", placeholder: !!t.placeholder, share: 50, mute: false, physics: t.physics || null };
     try {
       entry.policy = SC.loadPolicy(t.policy || t);
       const cfg = SC.defaultConfig();
@@ -61,6 +61,9 @@
     cfg.turn_probs = [r, s, l].every((v) => v === 0) ? [0, 1, 0] : [r, s, l];
     cfg.signal_enabled = $("sigon").checked;
     cfg.signal_noise = +$("noise").value;
+    // vehicle physics the first loaded type was trained with (one physics per sim)
+    const first = types.find((t) => t && t.policy);
+    if (first && first.physics) Object.assign(cfg, first.physics);
     $("demand-o").textContent = `${cfg.demand.toFixed(2)} cars/s`;
     $("pright-o").textContent = `${r}%`;
     $("pleft-o").textContent = `${l}%`;

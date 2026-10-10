@@ -174,7 +174,7 @@
       ctx.textBaseline = "middle"; ctx.textAlign = "right";
       const lx = this.pos[0][0][0] - 10;
       for (const g of this.groupY) {
-        const name = this.narrow ? g.name.replace("Abstand zum Fahrbahnrand", "Rand-Abstand").replace("Weg zur Ausfahrt", "Weg z. Ausf.") : g.name;
+        const name = g.name.replace("Abstand zum Fahrbahnrand", "Abstand Rand").replace("Weg zur Ausfahrt", this.narrow ? "zur Ausfahrt" : "Weg zur Ausfahrt");
         ctx.fillText(name, lx, (g.y0 + g.y1) / 2);
         if (g.y1 - g.y0 > 14) {
           ctx.strokeStyle = "rgba(128,128,128,0.45)"; ctx.lineWidth = 1;
@@ -186,7 +186,7 @@
       const names = this.layout.actions;
       ctx.fillStyle = fg;
       outs.forEach(([x, y], j) => {
-        ctx.fillText(names[j] || `Ausgang ${j + 1}`, x + 14, y - (tr ? 7 : 0));
+        ctx.fillText((this.narrow ? (names[j] || "").replace("Gas / Bremse", "Gas") : names[j]) || `Ausgang ${j + 1}`, x + 14, y - (tr ? 7 : 0));
         if (tr) {
           ctx.fillStyle = muted;
           ctx.font = `${this.narrow ? 11 : 12}px ui-monospace, Menlo, monospace`;

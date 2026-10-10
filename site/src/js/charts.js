@@ -56,7 +56,11 @@
     if (opts.yLabel) { const t = el("text", { x: 4, y: 10, "text-anchor": "start" }, svg); t.textContent = opts.yLabel; }
     for (const mk of opts.markers || []) {
       el("line", { x1: X(mk.x), x2: X(mk.x), y1: m.t, y2: H - m.b, class: "sep" }, svg);
-      if (mk.label) { const t = el("text", { x: X(mk.x) + 4, y: m.t + 10, class: "sep-label" }, svg); t.textContent = mk.label; }
+      if (mk.label) {
+        const right = X(mk.x) > W - m.r - 70;
+        const t = el("text", { x: X(mk.x) + (right ? -4 : 4), y: m.t + 10, class: "sep-label", "text-anchor": right ? "end" : "start" }, svg);
+        t.textContent = mk.label;
+      }
     }
     const lastYs = [];
     for (const s of opts.series) {

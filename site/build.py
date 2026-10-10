@@ -35,7 +35,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from smartcrossing.export_viewer import load_policy, obs_layout, round_policy  # noqa: E402
+from smartcrossing.export_viewer import load_policy, obs_layout, physics_of, round_policy  # noqa: E402
 from smartcrossing.policy import default_in_scale, init_params, layer_sizes, unpack  # noqa: E402
 from smartcrossing.sim import SimConfig  # noqa: E402
 
@@ -48,11 +48,6 @@ RUNS = ROOT / "runs"
 DEMANDS = [0.05, 0.1, 0.15, 0.2, 0.3]
 TIMELINE_DEMANDS = [0.05, 0.15]
 BENCH_ENVS, BENCH_SECONDS, BENCH_SEED = 8, 120.0, 1000
-PHYSICS_KEYS = ["v_max", "acc_max", "brake_max", "kappa_max", "kappa_rate"]
-# Value a physics field had *before* it existed in SimConfig (checkpoints trained
-# with an older sim do not store it): kappa_rate absent = steering acts instantly.
-LEGACY_PHYSICS = {"kappa_rate": 1e6}
-
 # Short German notes for known runs (shown in the "Zeitreise" / side notes).
 RUN_NOTES = {
     "es1": "Irrweg: Die Autos lernten, einfach stehen zu bleiben – Stehen kostete nichts, Unfälle schon.",
@@ -94,19 +89,6 @@ def ckpt_meta(path: Path) -> dict:
         m = re.search(r"(?:g|gen|it|iter|u)(\d+)", path.stem)
         gen = int(m.group(1)) if m else None
     return {"gen": gen, "cfg": cfg, "extra": extra}
-
-
-def physics_of(train_cfg: dict) -> dict:
-    fields = SimConfig.__dataclass_fields__
-    out = {}
-    for k in PHYSICS_KEYS:
-        if k not in fields:
-            continue
-        if k in train_cfg:
-            out[k] = float(train_cfg[k])
-        else:
-            out[k] = float(LEGACY_PHYSICS.get(k, getattr(SimConfig, k)))
-    return out
 
 
 def policy_vector(d: dict) -> np.ndarray:
@@ -219,7 +201,7 @@ def run_bench(entries: list[tuple[str, str, object, dict, list]], force: bool, w
         CACHE.write_text(json.dumps(cache, indent=0, sort_keys=True))
     out = {}
     for key, kind, payload, physics, demands in entries:
-        out[key] = {}
+        out.setdefault(key, {})
         for d in demands:
             ck = f"{key}|{json.dumps(physics, sort_keys=True)}|{d}|{BENCH_ENVS}x{BENCH_SECONDS}@{BENCH_SEED}|{sim_src}"
             out[key][str(d)] = cache[ck]
@@ -403,7 +385,7 @@ def main(argv=None):
         if cid not in policies:
             policies[cid] = {
                 "id": cid, "run": c["run"], "file": c["file"], "method": c["method"], "gen": c["gen"],
-                "physics": c["physics"], "adapted": c["adapted"], "policy": round_policy(c["policy"]),
+                "physics": c["physics"], "adapted": c["adapted"], "policy": round_policy(c["policy"], 4),
                 "bench": {},
             }
         bench_entries.append((*pol_entry(c), demands))
@@ -423,7 +405,7 @@ def main(argv=None):
         rp = random_policy()
         rid = "zufall"
         policies[rid] = {"id": rid, "run": None, "file": None, "method": "es", "gen": 0, "physics": phys,
-                         "adapted": None, "policy": round_policy(rp), "bench": {}}
+                         "adapted": None, "policy": round_policy(rp, 4), "bench": {}}
         bench_entries.append(("pol:random7", "policy", (policy_vector(rp).tolist(), rp["sizes"], rp["in_scale"]), phys, TIMELINE_DEMANDS))
         if not timelines["es"] or timelines["es"][0]["gen"] > 0:
             timelines["es"].insert(0, {"gen": 0, "id": rid})
@@ -434,7 +416,7 @@ def main(argv=None):
         cands = [cid for cid, c in found.items() if c["run"] == run]
         cid = max(cands, key=lambda k: (found[k]["gen"] or 0))
         use(cid, TIMELINE_DEMANDS)
-        others.append({"run": run, "id": cid, "note": RUN_NOTES.get(run), "curve": read_curve(run, 0)})
+        others.append({"run": run, "id": cid, "method": found[cid]["method"], "note": RUN_NOTES.get(run)})
 
     baselines = {}
     for drv in ("light", "reservation"):

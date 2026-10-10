@@ -71,12 +71,18 @@
       last = now;
       SCX.renderStats(cx, host);
       tb.update();
-      if (opts.onRefresh) opts.onRefresh(cx);
+      if (cx.opts.onRefresh) cx.opts.onRefresh(cx);
     };
     cx.opts.onFrame = () => refresh(false);
     cx.onChange(() => refresh(true));
     const hint = host.querySelector(".canvas-hint");
-    if (hint) cx.opts.onPick = () => { hint.style.opacity = "0"; };
+    if (hint) {
+      cx.opts.onPick = () => { hint.style.opacity = "0"; };
+      setTimeout(() => { hint.style.opacity = "0"; }, 6000);
+    }
+    // small screens: let the camera follow the selected car so the sensors are readable
+    const fol = host.querySelector("[data-act=follow]");
+    if (fol && canvas.getBoundingClientRect().width < 520) { fol.checked = true; cx.follow = true; }
     refresh(true);
     // pause the loop while the canvas is off screen (saves battery on long pages)
     new IntersectionObserver((es) => { cx.visible = es[0].isIntersecting; }).observe(canvas);
@@ -102,7 +108,7 @@
       c.turn = [r, s, l];
       c.signal = $("sigon").checked;
       c.noise = +$("noise").value;
-      $("demand-o").textContent = `${num(c.demand * 60, 0)} Autos/min`;
+      $("demand-o").textContent = `${num(c.demand * 240, 0)} Autos/min`;
       $("pright-o").textContent = `${r} %`;
       $("pleft-o").textContent = `${l} %`;
       $("pstraight").textContent = `Geradeaus: ${s} %`;
@@ -155,8 +161,9 @@
   }
 
   // ------------------------------------------------------------------ obs panel ("Was sieht ein Auto?")
-  function fmtObs(it, v) {
+  function fmtObs(it, v, compact) {
     if (it.unit === "bool") return v > 0.5 ? "ja" : "nein";
+    if (compact) return it.unit === "m" || it.unit === "km/h" ? num(v * it.scale, 0) : num(v, 2);
     if (it.key.startsWith("ray_") && v >= 0.999) return `≥ ${num(it.scale, 0)} m`;
     const x = v * it.scale;
     if (it.unit === "m") return `${num(x)} m`;
@@ -192,10 +199,11 @@
       <table class="ntable"><thead><tr><th></th>${nbs.map((_, k) => `<th>${k + 1}</th>`).join("")}</tr></thead><tbody>`;
     const present = nbs.map((g) => o[g.items.find((it) => it.key.endsWith("_present")).i] > 0.5);
     for (let r = 0; r < nItems; r++) {
-      const lab = nbs[0].items[r].label;
+      const it0 = nbs[0].items[r];
+      const lab = { fwd: "vor mir (m)", left: "links von mir (m)", same: "gleiche Richtung", cross: "kreuzt nach links", speed: "Tempo (km/h)", present: "da?" }[it0.key.split("_").slice(1).join("_")] || it0.label;
       h += `<tr><td>${lab}</td>` + nbs.map((g, k) => {
         const it = g.items[r];
-        return present[k] ? `<td>${fmtObs(it, o[it.i])}</td>` : `<td class="none">–</td>`;
+        return present[k] ? `<td title="${it.label}">${fmtObs(it, o[it.i], true)}</td>` : `<td class="none">–</td>`;
       }).join("") + `</tr>`;
     }
     const lampIdx = nbs.map((g) => g.items.filter((it) => /_lamp\d$/.test(it.key)).map((it) => it.i));
@@ -261,7 +269,7 @@
         <div class="out"><div class="top-row"><b><i class="line-key" style="border-color:${c2}"></i> Lenkung</b><span class="phys">${radius ? `Kurve nach ${a[1] > 0 ? "links" : "rechts"}, Radius ${num(radius, 0)} m` : "geradeaus"}</span></div>
           ${bar(a[1], true, c2, sc.kappa_rate < 1e5 ? k : undefined)}<div class="bar-ends"><span>links</span><span>${num(a[1], 2)}</span><span>rechts</span></div></div>
         ${[0, 1].map((q) => `<div class="out"><div class="top-row"><b><i class="line-key" style="border-color:${cols()[2 + q]}"></i> Lampe Kanal ${q + 1}</b><span class="phys">${q === 0 ? "mehr Rot" : "mehr Blau"} bei +1</span></div>
-          ${bar(a[2 + q], false, q === 0 ? "rgb(220,60,40)" : "rgb(40,70,220)")}<div class="bar-ends"><span>−1</span><span>${num(a[2 + q], 2)}</span><span>+1</span></div></div>`).join("")}
+          ${bar(a[2 + q], false, cols()[2 + q])}<div class="bar-ends"><span>−1</span><span>${num(a[2 + q], 2)}</span><span>+1</span></div></div>`).join("")}
         <div class="lampbox"><span class="big" style="background:${lampOn ? SCX.lampRGB(a[2], a[3]) : "rgb(90,90,96)"}"></span>
           <span>So leuchtet die Dachlampe${c.typeOf(n).mute ? " (stumm geschaltet)" : ""}${lampOn ? "" : " – die anderen sehen sie gerade nicht"}.</span></div>
         ${sc.kappa_rate < 1e5 ? `<p class="hint">Der schwarze Strich auf der Lenkung zeigt, wo das Lenkrad gerade steht: es dreht sich nur ${num(sc.kappa_rate / sc.kappa_max, 1)}-mal den vollen Weg pro Sekunde.</p>` : ""}`;
@@ -335,6 +343,7 @@
     if (p) {
       const s = p.policy.sizes, params = s.slice(1).reduce((a, n, i) => a + s[i] * n + n, 0);
       $("brain-sizes").textContent = `${s[0]} Eingänge → ${s[1]} → ${s[2]} → ${s[3]} Ausgänge`;
+      $("brain-hidden").textContent = s[1] === s[2] ? `je ${s[1]}` : `${s[1]} und ${s[2]}`;
       $("brain-params").textContent = params.toLocaleString("de-DE");
     }
     window.__sc = cx;
@@ -375,6 +384,7 @@
         ticks.appendChild(b);
       });
       tabs.querySelectorAll("button").forEach((b, i) => b.classList.toggle("primary", methods[i] === method));
+      setupOthers();
     }
     slider.addEventListener("input", () => { idx = +slider.value; extra = null; show(); });
     function show() {
@@ -393,14 +403,18 @@
     }
     // dead-end runs
     const ow = $("tt-others");
-    for (const o of D.others || []) {
-      const b = document.createElement("button");
-      b.type = "button"; b.className = "btn"; b.textContent = `Irrweg ${o.run}`;
-      b.title = o.note || "";
-      b.addEventListener("click", () => { extra = o; show(); });
-      ow.appendChild(b);
+    function setupOthers() {
+      ow.innerHTML = "";
+      const list = (D.others || []).filter((o) => (o.method || "es") === method);
+      for (const o of list) {
+        const b = document.createElement("button");
+        b.type = "button"; b.className = "btn"; b.textContent = `${o.note ? "Irrweg" : "Lauf"} ${o.run}`;
+        b.title = o.note || "";
+        b.addEventListener("click", () => { extra = Object.assign({ note: "Ein anderer, früherer Trainingslauf." }, o.note ? o : { run: o.run, id: o.id }); show(); });
+        ow.appendChild(b);
+      }
+      ow.parentElement.style.display = list.length ? "" : "none";
     }
-    if (!(D.others || []).length) ow.parentElement.style.display = "none";
 
     function drawCurves() {
       const curves = D.curves[method] || {};
