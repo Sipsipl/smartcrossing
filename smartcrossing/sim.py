@@ -23,6 +23,8 @@ RIGHT, STRAIGHT, LEFT = 1, 2, 3
 DISC_OFFSETS = np.array([-1.4, 0.0, 1.4])
 DISC_R = 0.9
 
+SPAWN_LAT_MARGIN = 0.8  # lateral corridor (beyond car width) checked for closing traffic at spawn
+
 N_RAYS = 5
 RAY_ANGLES = np.radians([-60.0, -30.0, 0.0, 30.0, 60.0])
 RAY_STEPS = np.arange(1.0, 21.0)  # metres
@@ -42,6 +44,10 @@ class SimConfig:
     kappa_max: float = 0.2  # 1 / minimum turning radius
     spawn_speed: float = 8.0
     spawn_clearance: float = 7.0
+    # extra spawn clearance (s) per m/s of closing speed between the new car and an
+    # existing one in its lateral corridor (no spawns head-on into exiting cars or
+    # into the back of a queue)
+    spawn_headway: float = 1.5
     max_age: float = 60.0  # cars older than this are removed (counted as timeout)
     n_slots: int = 32
     n_signal: int = 2  # dimensions of the free "light" signal
@@ -127,7 +133,8 @@ class Sim:
         self.B = n_envs
         self.S = n_scenarios or n_envs
         self.scen = np.arange(self.B) % self.S
-        self.rng = np.random.default_rng(seed)
+        self.rng = np.random.default_rng(seed)  # traffic stream (arrivals only)
+        self.noise_rng = np.random.default_rng([seed, 1])  # signal noise (keeps traffic CRN-aligned)
         B, N = self.B, cfg.n_slots
         self.alive = np.zeros((B, N), dtype=bool)
         self.x = np.zeros((B, N))
@@ -145,6 +152,11 @@ class Sim:
         self.queue_lat = np.zeros((B, 4))  # lateral offset of the head of each queue
         self.queue_man = np.ones((B, 4), dtype=np.int64)
         self.queue_grp = np.zeros((B, 4), dtype=np.int64)
+        # FIFO of queued cars' attributes (drawn at arrival time, so CRN holds even
+        # when two policies release cars from the queue at different times)
+        self._qcap = 64
+        self._qhead = np.zeros((B, 4), dtype=np.int64)
+        self._qbuf = np.zeros((B, 4, self._qcap, 3))  # lat, man, grp
         self.next_uid = 0
         self.t = 0.0
         self.stats = Stats(B)
@@ -217,7 +229,7 @@ class Sim:
         if not cfg.signal_enabled:
             nsig = np.zeros_like(nsig)
         elif cfg.signal_noise > 0:
-            nsig = nsig + self.rng.normal(0, cfg.signal_noise, nsig.shape)
+            nsig = nsig + self.noise_rng.normal(0, cfg.signal_noise, nsig.shape)
         ct3, st3 = ct[..., None], st[..., None]
         rel_x = (ct3 * nx + st3 * ny) / NEIGHBOUR_RANGE
         rel_y = (-st3 * nx + ct3 * ny) / NEIGHBOUR_RANGE
@@ -329,12 +341,20 @@ class Sim:
         man = self.rng.choice([RIGHT, STRAIGHT, LEFT], size=(S, 4), p=np.asarray(cfg.turn_probs) / sum(cfg.turn_probs))
         grp = self.rng.choice(len(self.group_probs), size=(S, 4), p=self.group_probs)
         arrive, lat, man, grp = arrive[self.scen], lat[self.scen], man[self.scen], grp[self.scen]
-        empty = self.queue == 0
-        self.queue_lat = np.where(empty & arrive, lat, self.queue_lat)
-        self.queue_man = np.where(empty & arrive, man, self.queue_man)
-        self.queue_grp = np.where(empty & arrive, grp, self.queue_grp)
+        if (self.queue + arrive).max() > self._qcap:  # grow the FIFO (keeps order)
+            new = np.zeros((self.B, 4, 2 * self._qcap, 3))
+            for j in range(self._qcap):
+                new[:, :, j] = np.take_along_axis(self._qbuf, ((self._qhead + j) % self._qcap)[..., None, None], 2)[:, :, 0]
+            self._qbuf, self._qhead, self._qcap = new, np.zeros_like(self._qhead), 2 * self._qcap
+        bi, ki = np.nonzero(arrive)
+        slot = (self._qhead[bi, ki] + self.queue[bi, ki]) % self._qcap
+        self._qbuf[bi, ki, slot] = np.stack([lat[bi, ki], man[bi, ki], grp[bi, ki]], -1)
         self.queue += arrive
         self.stats.arrived += arrive.sum(1)
+        head = np.take_along_axis(self._qbuf, self._qhead[..., None, None], 2)[:, :, 0]
+        self.queue_lat, self.queue_man, self.queue_grp = head[..., 0], head[..., 1].astype(np.int64), head[..., 2].astype(np.int64)
+        # velocities of existing cars (for the closing-speed spawn clearance)
+        vx, vy = self.v * np.cos(self.th), self.v * np.sin(self.th)
         for k in range(4):
             want = self.queue[:, k] > 0
             if not want.any():
@@ -344,13 +364,24 @@ class Sim:
             # canonical spawn point (u, -L + 2.5) rotated by k*90deg
             sx = c * u - s * (-cfg.L + 2.5)
             sy = s * u + c * (-cfg.L + 2.5)
-            clear = (np.hypot(self.x - sx[:, None], self.y - sy[:, None]) > cfg.spawn_clearance) | ~self.alive
+            h = np.pi / 2 + k * np.pi / 2  # canonical heading (north) rotated by k*90deg
+            dx, dy = self.x - sx[:, None], self.y - sy[:, None]
+            dist = np.hypot(dx, dy)
+            # closing speed along the line of sight between the new car and car j
+            rvx, rvy = cfg.spawn_speed * np.cos(h) - vx, cfg.spawn_speed * np.sin(h) - vy
+            closing = np.maximum((rvx * dx + rvy * dy) / np.maximum(dist, 1e-6), 0.0)
+            # outside the new car's lateral corridor only its own speed counts (the other
+            # car is treated as standing: it may be queued in the lane the new car joins)
+            own = np.maximum(cfg.spawn_speed * (np.cos(h) * dx + np.sin(h) * dy) / np.maximum(dist, 1e-6), 0.0)
+            lat_off = np.abs(-np.sin(h) * dx + np.cos(h) * dy)
+            closing = np.where(lat_off < 2 * DISC_R + SPAWN_LAT_MARGIN, closing, own)
+            margin = cfg.spawn_headway * closing
+            clear = (dist > cfg.spawn_clearance + margin) | ~self.alive
             ok = want & clear.all(1) & (~self.alive).any(1)
             for b in np.nonzero(ok)[0]:
                 n = np.argmin(self.alive[b])
                 self.alive[b, n] = True
                 self.x[b, n], self.y[b, n] = sx[b], sy[b]
-                h = np.pi / 2 + k * np.pi / 2  # canonical heading (north) rotated by k*90deg
                 self.th[b, n] = np.arctan2(np.sin(h), np.cos(h))
                 self.v[b, n] = cfg.spawn_speed
                 self.kappa[b, n] = 0.0
@@ -361,11 +392,9 @@ class Sim:
                 self.uid[b, n] = self.next_uid
                 self.next_uid += 1
                 self.queue[b, k] -= 1
+                self._qhead[b, k] = (self._qhead[b, k] + 1) % self._qcap
                 self.stats.spawned[b] += 1
                 gx, gy = self.gate_xy()
                 self._prev_dist[b, n] = np.hypot(sx[b] - gx[b, n], sy[b] - gy[b, n])
-                # the next queued car gets fresh attributes drawn from the same stream
-                if self.queue[b, k] > 0:
-                    self.queue_lat[b, k] = lat[b, k]
-                    self.queue_man[b, k] = man[b, k]
-                    self.queue_grp[b, k] = grp[b, k]
+                hd = self._qbuf[b, k, self._qhead[b, k]]
+                self.queue_lat[b, k], self.queue_man[b, k], self.queue_grp[b, k] = hd[0], int(hd[1]), int(hd[2])

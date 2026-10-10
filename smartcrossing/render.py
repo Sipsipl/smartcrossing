@@ -20,8 +20,30 @@ def _signal_colour(sig):
     return (r, 40, bl)
 
 
-def draw_frame(sim: Sim, b: int = 0, size: int = 512, view: float = 52.0, label: str = "", trails=None) -> Image.Image:
+def default_view(cfg) -> float:
+    """Half-width of the default view: the box plus ~30 m of each arm."""
+    return cfg.W + cfg.Rc + 30.0
+
+
+def _legend(d, size, cfg, font):
+    """Small legend in the bottom-left corner: body colour = manoeuvre, roof lamp = signal."""
+    x0, y0 = 6, size - (46 if cfg.n_signal > 0 else 34)
+    d.rectangle([x0 - 3, y0 - 3, x0 + 118, size - 4], fill=(30, 30, 34))
+    for i, (m, name) in enumerate(((RIGHT, "right"), (STRAIGHT, "straight"), (LEFT, "left"))):
+        xx = x0 + i * 40
+        d.rectangle([xx, y0 + 2, xx + 9, y0 + 8], fill=MAN_COLOURS[m])
+        d.text((xx + 12, y0), name[:5] if name != "straight" else "str", fill=(230, 230, 230), font=font)
+    d.text((x0, y0 + 13), "colour = manoeuvre", fill=(200, 200, 200), font=font)
+    if cfg.n_signal > 0:
+        d.ellipse([x0, y0 + 27, x0 + 7, y0 + 34], fill=_signal_colour(np.array([1.0, -1.0])))
+        d.ellipse([x0 + 9, y0 + 27, x0 + 16, y0 + 34], fill=_signal_colour(np.array([-1.0, 1.0])))
+        d.text((x0 + 20, y0 + 25), "roof lamp = signal", fill=(200, 200, 200), font=font)
+
+
+def draw_frame(sim: Sim, b: int = 0, size: int = 512, view: float | None = None, label: str = "", trails=None,
+               legend: bool = True) -> Image.Image:
     cfg = sim.cfg
+    view = default_view(cfg) if view is None else view
     img = Image.new("RGB", (size, size), BG)
     d = ImageDraw.Draw(img)
     sc = size / (2 * view)
@@ -56,7 +78,8 @@ def draw_frame(sim: Sim, b: int = 0, size: int = 512, view: float = 52.0, label:
             d.ellipse([lx - r, ly - r, lx + r, ly + r], fill=_signal_colour(sim.sig[b, n]))
         # nose marker
         nx, ny = P(x + c * 2.0, y + s * 2.0)
-        d.ellipse([nx - 1.5, ny - 1.5, nx + 1.5, ny + 1.5], fill=(0, 0, 0))
+        r = max(1.5, 0.3 * sc)
+        d.ellipse([nx - r, ny - r, nx + r, ny + r], fill=(0, 0, 0))
     for eb, kind, ex, ey in sim.events:
         if eb == b:
             cx, cy = P(ex, ey)
@@ -65,19 +88,74 @@ def draw_frame(sim: Sim, b: int = 0, size: int = 512, view: float = 52.0, label:
             d.line([cx - r, cy - r, cx + r, cy + r], fill=col, width=3)
             d.line([cx - r, cy + r, cx + r, cy - r], fill=col, width=3)
     st = sim.stats
+    font = ImageFont.load_default()
     txt = f"{label} t={sim.t:5.1f}s  exits={st.exits[b]} crash={st.crashes[b]} off={st.offroad[b]} q={sim.queue[b].sum()}"
-    d.text((6, 6), txt, fill=(255, 255, 255), font=ImageFont.load_default())
+    d.rectangle([0, 0, size, 18], fill=(30, 30, 34))
+    d.text((6, 4), txt, fill=(255, 255, 255), font=font)
+    if legend:
+        _legend(d, size, cfg, font)
     return img
 
 
-def contact_sheet(frames, cols=3) -> Image.Image:
+def contact_sheet(frames, cols=3, gap=4) -> Image.Image:
     w, h = frames[0].size
     rows = (len(frames) + cols - 1) // cols
-    sheet = Image.new("RGB", (cols * w, rows * h), (0, 0, 0))
+    sheet = Image.new("RGB", (cols * w + (cols - 1) * gap, rows * h + (rows - 1) * gap), (0, 0, 0))
     for i, f in enumerate(frames):
-        sheet.paste(f, ((i % cols) * w, (i // cols) * h))
+        sheet.paste(f, ((i % cols) * (w + gap), (i // cols) * (h + gap)))
     return sheet
 
 
 def save_gif(frames, path, fps=10):
     frames[0].save(path, save_all=True, append_images=frames[1:], duration=int(1000 / fps), loop=0)
+
+
+class SpaceTime:
+    """Space-time diagnostic for one env: per entry arm, every car's distance to
+    the centre over time: -r while approaching, r - 2*r_min after the closest
+    point (continuous; = signed distance for straight cars). Flat segments are
+    stops, slopes are speeds; colour = manoeuvre."""
+
+    def __init__(self, sim: Sim, b: int = 0):
+        self.sim, self.b = sim, b
+        self.tracks = {}  # uid -> (arm, man, [(t, d)])
+        self._min = {}
+
+    def record(self):
+        sim, b = self.sim, self.b
+        for n in np.nonzero(sim.alive[b])[0]:
+            uid = int(sim.uid[b, n])
+            r = float(np.hypot(sim.x[b, n], sim.y[b, n]))
+            m = min(self._min.get(uid, np.inf), r)
+            self._min[uid] = m
+            dist = r - 2 * m if r > m + 0.5 else -r  # continuous through the closest point
+            tr = self.tracks.setdefault(uid, (int(sim.arm[b, n]), int(sim.man[b, n]), []))
+            tr[2].append((sim.t, dist))
+
+    def image(self, w: int = 360, h: int = 240) -> Image.Image:
+        cfg = self.sim.cfg
+        font = ImageFont.load_default()
+        img = Image.new("RGB", (2 * w, 2 * h), (24, 24, 28))
+        d = ImageDraw.Draw(img)
+        t1 = max(self.sim.t, 1e-6)
+        names = ["south", "east", "north", "west"]
+        box = cfg.W + cfg.Rc
+        for k in range(4):
+            ox, oy = (k % 2) * w, (k // 2) * h
+            pad = 22
+
+            def P(t, dd):
+                return (ox + pad + (t / t1) * (w - pad - 6), oy + h / 2 - dd / cfg.L * (h / 2 - 14))
+
+            d.rectangle([ox + pad, oy + 14, ox + w - 6, oy + h - 14], fill=(36, 36, 40))
+            for yy in (-box, box):
+                d.line([P(0, yy), P(t1, yy)], fill=(90, 90, 96))
+            d.line([P(0, 0), P(t1, 0)], fill=(140, 140, 150))
+            d.text((ox + pad + 2, oy + 1), f"from {names[k]}  (d to centre vs t, 0..{t1:.0f}s)", fill=(220, 220, 220), font=font)
+            d.text((ox + 2, oy + 14), f"+{cfg.L:.0f}", fill=(160, 160, 160), font=font)
+            d.text((ox + 2, oy + h - 26), f"-{cfg.L:.0f}", fill=(160, 160, 160), font=font)
+            for arm, man, pts in self.tracks.values():
+                if arm != k or len(pts) < 2:
+                    continue
+                d.line([P(t, dd) for t, dd in pts], fill=MAN_COLOURS[man], width=1)
+        return img

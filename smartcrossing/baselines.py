@@ -3,204 +3,341 @@
 They are not part of the learning problem; they exist to (a) prove the simulator
 is drivable and (b) give lower/upper reference numbers for throughput:
 
-- ``light``: exclusive green per arm in rotation (a conservative traffic light)
-- ``reservation``: AIM-style central manager (Dresner & Stone) granting
-  space-time reservations of the intersection box; an upper reference
+- ``light``: actuated traffic light, exclusive green per arm in rotation (a
+  conservative lower reference); empty approaches are skipped, green gaps out
+  when its approach empties; amber rule: a car only enters if it can clear the
+  box before the clearance interval ends
+- ``reservation``: AIM-style central manager (Dresner & Stone): a car reserves
+  its whole space-time trajectory (3-disc footprint per 0.1 s) through the box
+  and then executes that speed plan exactly; an upper reference
 - ``none``: lane-following and car-following only, no intersection control
 
-All share pure-pursuit steering along right-hand lane paths and IDM car following.
+All share a path-following steering law (curvature feed-forward + lateral and
+heading feedback, critically damped in the arc-length domain), a speed limit
+from a lateral-acceleration bound on the turns, and IDM car following.
 """
 
 import numpy as np
 
-from .sim import LEFT, RIGHT, STRAIGHT, Sim, rot
+from .sim import DISC_OFFSETS, DISC_R, LEFT, RIGHT, STRAIGHT, Sim, rot
 
 STEP = 0.5  # path resolution in metres
+MIN_GREEN = 3.0  # s, actuated light: earliest gap-out
+A_LAT = 4.0  # m/s^2 lateral acceleration bound on the turns
+A_DEC = 3.0  # m/s^2 comfortable deceleration when approaching a turn
+K_E, K_H = 0.05, 2 * np.sqrt(0.05)  # lateral / heading feedback gains (per m)
 
 
 def canonical_path(man, L, W, Rc):
-    """Lane centre-line for a car entering from the south, right-hand traffic.
-    Turns follow arcs concentric with the curb fillets."""
-    pts = []
+    """Lane centre-line for a car entering from the south, right-hand traffic,
+    resampled at uniform arc length STEP. Turns follow arcs concentric with the
+    curb fillets."""
     c = W + Rc
     y0 = -L - 2
     if man == STRAIGHT:
-        ys = np.arange(y0, L + 8, STEP)
-        return np.stack([np.full_like(ys, W / 2), ys], -1)
-    ys = np.arange(y0, -c, STEP)
-    pts.append(np.stack([np.full_like(ys, W / 2), ys], -1))
-    if man == RIGHT:
-        r, cx, cy, a0, a1 = c - W / 2, c, -c, np.pi, np.pi / 2
+        pts = [np.array([[W / 2, y0], [W / 2, L + 8]])]
     else:
-        r, cx, cy, a0, a1 = c + W / 2, -c, -c, 0.0, np.pi / 2
-    n = max(int(abs(a1 - a0) * r / STEP), 2)
-    a = np.linspace(a0, a1, n)
-    pts.append(np.stack([cx + r * np.cos(a), cy + r * np.sin(a)], -1))
-    xs = np.arange(c, L + 8, STEP)
-    if man == RIGHT:
-        pts.append(np.stack([xs, np.full_like(xs, -W / 2)], -1))
-    else:
-        pts.append(np.stack([-xs, np.full_like(xs, W / 2)], -1))
-    return np.concatenate(pts)
+        pts = [np.array([[W / 2, y0], [W / 2, -c]])]
+        if man == RIGHT:
+            r, cx, cy, a0, a1 = c - W / 2, c, -c, np.pi, np.pi / 2
+        else:
+            r, cx, cy, a0, a1 = c + W / 2, -c, -c, 0.0, np.pi / 2
+        a = np.linspace(a0, a1, 200)
+        pts.append(np.stack([cx + r * np.cos(a), cy + r * np.sin(a)], -1))
+        if man == RIGHT:
+            pts.append(np.array([[c, -W / 2], [L + 8, -W / 2]]))
+        else:
+            pts.append(np.array([[-c, W / 2], [-L - 8, W / 2]]))
+    p = np.concatenate(pts)
+    seg = np.hypot(*np.diff(p, axis=0).T)
+    keep = np.concatenate([[True], seg > 1e-9])
+    p = p[keep]
+    cum = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(p, axis=0).T))])
+    s = np.arange(0.0, cum[-1], STEP)
+    return np.stack([np.interp(s, cum, p[:, 0]), np.interp(s, cum, p[:, 1])], -1)
+
+
+class Path:
+    """A resampled lane path with heading, curvature, speed limit and box limits."""
+
+    def __init__(self, pts, cfg, box):
+        self.p = pts
+        d = np.diff(pts, axis=0)
+        h = np.arctan2(d[:, 1], d[:, 0])
+        self.h = np.concatenate([h, h[-1:]])
+        dh = np.diff(np.unwrap(self.h)) / STEP
+        k = np.concatenate([dh, [0.0]])
+        # curvature at a point = mean of the adjacent segments (removes the half-step lag)
+        self.k = 0.5 * (k + np.concatenate([[0.0], k[:-1]]))
+        vl = np.minimum(cfg.v_max, np.sqrt(A_LAT / np.maximum(np.abs(self.k), 1e-6)))
+        for i in range(len(vl) - 2, -1, -1):
+            vl[i] = min(vl[i], np.sqrt(vl[i + 1] ** 2 + 2 * A_DEC * STEP))
+        self.vlim = vl
+        inbox = (np.abs(pts[:, 0]) <= box) & (np.abs(pts[:, 1]) <= box)
+        idx = np.nonzero(inbox)[0]
+        self.stop_s = idx[0] * STEP
+        self.box_out_s = (idx[-1] + 1) * STEP
+        self.n = len(pts)
+
+    def at(self, s):
+        """Interpolated (x, y, heading) at arc length s (array)."""
+        f = np.clip(np.asarray(s) / STEP, 0, self.n - 1)
+        i0 = np.minimum(f.astype(int), self.n - 2)
+        w = f - i0
+        x = self.p[i0, 0] * (1 - w) + self.p[i0 + 1, 0] * w
+        y = self.p[i0, 1] * (1 - w) + self.p[i0 + 1, 1] * w
+        h = self.h[i0] + w * ((self.h[i0 + 1] - self.h[i0] + np.pi) % (2 * np.pi) - np.pi)
+        return x, y, h
+
+    def vlim_at(self, s):
+        return self.vlim[min(max(int(s / STEP), 0), self.n - 1)]
 
 
 class LaneDriver:
-    def __init__(self, sim: Sim, control: str = "reservation", green: float = 6.0, clearance: float = 3.0):
+    def __init__(self, sim: Sim, control: str = "reservation", green: float = 10.0, clearance: float = 3.0):
+        assert control in ("none", "light", "reservation"), control
         self.sim = sim
         self.cfg = sim.cfg
         self.control = control
         self.green, self.clear = green, clearance
         L, W = self.cfg.L, self.cfg.W
+        self.box = W + self.cfg.Rc
         self.paths = {}
         for k in range(4):
             c, s = rot(k)
             for m in (RIGHT, STRAIGHT, LEFT):
                 p = canonical_path(m, L, W, self.cfg.Rc)
-                self.paths[k, m] = np.stack([c * p[:, 0] - s * p[:, 1], s * p[:, 0] + c * p[:, 1]], -1)
-        # s-coordinate of the stop line (box edge) on every path
-        self.box = W + self.cfg.Rc
-        self.stop_s = {}
-        self.box_out_s = {}
-        for key, p in self.paths.items():
-            inbox = (np.abs(p[:, 0]) <= self.box) & (np.abs(p[:, 1]) <= self.box)
-            idx = np.nonzero(inbox)[0]
-            self.stop_s[key] = idx[0] * STEP
-            self.box_out_s[key] = (idx[-1] + 1) * STEP
-        self.reservations = [dict() for _ in range(sim.B)]  # cell -> list of (t0, t1, uid)
-        self.granted = [set() for _ in range(sim.B)]
-        self.idx = {}  # (b, uid) -> path index
+                p = np.stack([c * p[:, 0] - s * p[:, 1], s * p[:, 0] + c * p[:, 1]], -1)
+                self.paths[k, m] = Path(p, self.cfg, self.box)
+        # backwards compatible views
+        self.stop_s = {key: p.stop_s for key, p in self.paths.items()}
+        self.box_out_s = {key: p.box_out_s for key, p in self.paths.items()}
+        self.idx = {}  # (b, uid) -> path index of the last projection
+        self.committed = [set() for _ in range(sim.B)]  # uids allowed to enter the box
+        self.plans = [dict() for _ in range(sim.B)]  # reservation: uid -> (k0, v, X, Y)
+        self.granted = self.committed  # old name
+        # actuated light state per env
+        self.ls_arm = np.zeros(sim.B, dtype=int)
+        self.ls_green = np.zeros(sim.B, dtype=bool)
+        self.ls_t0 = np.zeros(sim.B)
+        self.clear_by = np.zeros(sim.B)  # time by which all committed cars have left the box
+        self.pending = np.zeros(sim.B, dtype=bool)  # a committed car has not yet left the box
 
     # -------------------------------------------------------------- helpers
-    def _progress(self, b, n):
+    def _step_index(self):
+        return int(round(self.sim.t / self.cfg.dt))
+
+    def _project(self, b, n, path):
+        """Continuous arc length and signed lateral error (left positive)."""
         key = (b, self.sim.uid[b, n])
-        p = self.paths[self.sim.arm[b, n], self.sim.man[b, n]]
+        x, y = self.sim.x[b, n], self.sim.y[b, n]
         i0 = self.idx.get(key, 0)
-        win = p[i0 : i0 + 40]
-        d = np.hypot(win[:, 0] - self.sim.x[b, n], win[:, 1] - self.sim.y[b, n])
-        i = i0 + int(np.argmin(d))
+        win = path.p[i0 : i0 + 60]
+        i = i0 + int(np.argmin((win[:, 0] - x) ** 2 + (win[:, 1] - y) ** 2))
         self.idx[key] = i
-        return p, i
+        ch, sh = np.cos(path.h[i]), np.sin(path.h[i])
+        dx, dy = x - path.p[i, 0], y - path.p[i, 1]
+        return i * STEP + ch * dx + sh * dy, -sh * dx + ch * dy, i
 
-    def _green_arm(self):
-        cyc = self.green + self.clear
-        ph = self.sim.t % (4 * cyc)
-        k = int(ph // cyc)
-        return k if (ph - k * cyc) < self.green else -1
-
-    def _cells(self, path, s_from, v0, t0):
-        """Box cells a car occupies when driving its path from s_from accelerating to v_max."""
+    def _free_acc(self, v, s):
         cfg = self.cfg
-        out = []
-        s, v, t = s_from, v0, t0
-        end = self.box_out_s_cur + 6.0
-        while s < end:
-            i = min(int(s / STEP), len(path) - 1)
-            x, y = path[i]
-            if abs(x) <= self.box + 1 and abs(y) <= self.box + 1:
-                out.append((int(np.floor(x)), int(np.floor(y)), t))
-            v = min(v + cfg.acc_max * 0.1, cfg.v_max)
-            s += v * 0.1
-            t += 0.1
-        return out
+        a = cfg.acc_max * (1 - (v / cfg.v_max) ** 4)
+        target = self._path_cur.vlim_at(s + v * cfg.dt)
+        a = min(a, (target - v) / cfg.dt)
+        return max(-cfg.brake_max, min(cfg.acc_max, a))
 
-    def _try_reserve(self, b, uid, path, s_now, v, key):
-        table = self.reservations[b]
-        t0 = self.sim.t
-        self.box_out_s_cur = self.box_out_s[key]
-        cells = self._cells(path, s_now, v, t0)
-        margin = 0.6  # seconds of separation in each cell
-        claims = {}
-        for cx, cy, t in cells:
-            for ox in (-2, -1, 0, 1, 2):
-                for oy in (-2, -1, 0, 1, 2):
-                    if ox * ox + oy * oy > 5:
-                        continue
-                    c = (cx + ox, cy + oy)
-                    lo, hi = claims.get(c, (t, t))
-                    claims[c] = (min(lo, t), max(hi, t))
-        for c, (lo, hi) in claims.items():
-            for r0, r1, other in table.get(c, ()):
-                if other != uid and lo - margin < r1 and r0 < hi + margin:
-                    return False
-        for c, (lo, hi) in claims.items():
-            table.setdefault(c, []).append((lo, hi, uid))
-        self.granted[b].add(uid)
+    def _predict(self, path, s, v, s_end, max_steps=400):
+        """Speeds and arc lengths under the free-driving law until s_end
+        (same law as _free_acc, inlined for speed)."""
+        cfg = self.cfg
+        dt, am, bm, vmax = cfg.dt, cfg.acc_max, cfg.brake_max, cfg.v_max
+        vl, nmax = path.vlim, path.n - 1
+        ss, vs = [s], [v]
+        for _ in range(max_steps):
+            if s >= s_end:
+                break
+            a = am * (1 - (v / vmax) ** 4)
+            i = int((s + v * dt) / STEP)
+            a = min(a, (vl[min(max(i, 0), nmax)] - v) / dt)
+            a = max(-bm, min(am, a))
+            v = min(max(v + a * dt, 0.0), vmax)
+            s += v * dt
+            ss.append(s)
+            vs.append(v)
+        return np.array(ss), np.array(vs)
+
+    def _update_light(self, b):
+        """Actuated signal for env b: exclusive green per arm, max green
+        `self.green`, gap-out after MIN_GREEN when the green approach is empty and
+        another one waits, empty approaches are skipped, and the all-red interval
+        lasts at least `self.clear` and until every committed car has (by its own
+        prediction) left the box. Returns (green arm or -1, remaining max green)."""
+        sim, t = self.sim, self.sim.t
+        al = sim.alive[b] & ~np.isin(sim.uid[b], list(self.committed[b]))
+        c, s = rot(-sim.arm[b])
+        cy = s * sim.x[b] + c * sim.y[b]  # along-arm coordinate in the canonical frame
+        appr_all = sim.alive[b] & (cy < -self.box) & (cy > -self.box - 45.0)
+        appr = appr_all & al
+        waiting = np.array([(appr & (sim.arm[b] == k)).any() for k in range(4)])
+        present = np.array([(appr_all & (sim.arm[b] == k)).any() for k in range(4)])
+        k = self.ls_arm[b]
+        el = t - self.ls_t0[b]
+        if self.ls_green[b]:
+            if el >= self.green - 1e-9 or (el >= MIN_GREEN and not present[k] and waiting.any()):
+                self.ls_green[b], self.ls_t0[b] = False, t
+        elif el >= self.clear - 1e-9 and t >= self.clear_by[b] and not self.pending[b]:
+            order = [(k + d) % 4 for d in range(1, 5)]
+            nxt = next((a for a in order if waiting[a]), None)
+            if nxt is not None:
+                self.ls_arm[b], self.ls_green[b], self.ls_t0[b] = nxt, True, t
+        if self.ls_green[b]:
+            return self.ls_arm[b], self.green - (t - self.ls_t0[b])
+        return -1, 0.0
+
+    def _try_reserve(self, b, uid, path, s_now, v):
+        ss, vs = self._predict(path, s_now, v, path.box_out_s + 25.0)
+        x, y, h = path.at(ss)
+        X = x[:, None] + np.cos(h)[:, None] * DISC_OFFSETS
+        Y = y[:, None] + np.sin(h)[:, None] * DISC_OFFSETS
+        k0 = self._step_index()
+        M = 6  # steps of temporal separation required in every point of space
+        need = (2 * DISC_R + 0.5) ** 2
+        bb = (X.min() - 3, X.max() + 3, Y.min() - 3, Y.max() + 3)
+        T = len(ss)
+        A = np.arange(T)[:, None] + np.arange(-M, M + 1)[None]  # (T, 2M+1)
+        for k1, _, X1, Y1 in self.plans[b].values():
+            if X1.max() < bb[0] or X1.min() > bb[1] or Y1.max() < bb[2] or Y1.min() > bb[3]:
+                continue
+            Bi = A + (k0 - k1)
+            valid = (Bi >= 0) & (Bi < len(X1))
+            if not valid.any():
+                continue
+            Bc = np.clip(Bi, 0, len(X1) - 1)
+            dx = X[:, None, :, None] - X1[Bc][:, :, None, :]  # (T, 2M+1, 3, 3)
+            dy = Y[:, None, :, None] - Y1[Bc][:, :, None, :]
+            close = ((dx**2 + dy**2) < need).any((2, 3))
+            if (close & valid).any():
+                return False
+        self.plans[b][uid] = (k0, vs, X, Y)
         return True
 
     def _gc(self, b):
-        t = self.sim.t
-        table = self.reservations[b]
-        for c in list(table):
-            table[c] = [r for r in table[c] if r[1] > t - 1]
-            if not table[c]:
-                del table[c]
+        alive_uids = set(self.sim.uid[b, self.sim.alive[b]].tolist())
+        k = self._step_index()
+        for uid in list(self.plans[b]):
+            k0, vs, _, _ = self.plans[b][uid]
+            if uid not in alive_uids and k0 + len(vs) < k - 10:
+                del self.plans[b][uid]
+        self.committed[b] &= alive_uids | set(self.plans[b])
+        for key in [key for key in self.idx if key[0] == b and key[1] not in alive_uids]:
+            del self.idx[key]
 
     # -------------------------------------------------------------- act
     def act(self) -> np.ndarray:
         sim, cfg = self.sim, self.cfg
         act = np.zeros((sim.B, cfg.n_slots, 2 + cfg.n_signal))
-        green = self._green_arm()
+        kk = self._step_index()
         for b in range(sim.B):
-            if self.control == "reservation":
-                self._gc(b)
+            self._gc(b)
+            if self.control == "light":
+                green, rem = self._update_light(b)
             alive = np.nonzero(sim.alive[b])[0]
-            # order by distance to the box so earlier cars reserve first
-            alive = sorted(alive, key=lambda n: np.hypot(sim.x[b, n], sim.y[b, n]))
-            for n in alive:
-                key = (sim.arm[b, n], sim.man[b, n])
-                uid = sim.uid[b, n]
-                path, i = self._progress(b, n)
-                s_now = i * STEP
+            if len(alive) == 0:
+                self.pending[b] = False
+                continue
+            # order by distance to the centre so cars closer to the box decide first
+            alive = alive[np.argsort(np.hypot(sim.x[b, alive], sim.y[b, alive]))]
+            ax, ay, ath, av = sim.x[b, alive], sim.y[b, alive], sim.th[b, alive], sim.v[b, alive]
+            arm_blocked = [False] * 4  # an uncommitted car of this arm is ahead
+            uids = sim.uid[b, alive]
+            planned = alive[[int(u) in self.plans[b] and kk - self.plans[b][int(u)][0] < len(self.plans[b][int(u)][1]) - 1 for u in uids]]
+            for j, n in enumerate(alive):
+                arm = int(sim.arm[b, n])
+                path = self.paths[arm, int(sim.man[b, n])]
+                self._path_cur = path
+                uid = int(sim.uid[b, n])
+                s_now, e, i = self._project(b, n, path)
                 v = sim.v[b, n]
-                # pure pursuit
-                look = max(4.0, 0.6 * v)
-                j = min(i + int(look / STEP), len(path) - 1)
-                tx, ty = path[j]
-                alpha = np.arctan2(ty - sim.y[b, n], tx - sim.x[b, n]) - sim.th[b, n]
-                alpha = (alpha + np.pi) % (2 * np.pi) - np.pi
-                kappa = 2 * np.sin(alpha) / np.hypot(tx - sim.x[b, n], ty - sim.y[b, n])
-                # obstacles: nearest car on the path ahead
+                th = sim.th[b, n]
+                # steering: curvature feed-forward + critically damped feedback
+                i_ff = min(i + int(round(0.5 * v * cfg.dt / STEP)), path.n - 1)
+                eh = (th - path.h[i] + np.pi) % (2 * np.pi) - np.pi
+                kappa = path.k[i_ff] - K_E * np.clip(e, -3.0, 3.0) - K_H * np.sin(eh)
+                committed = uid in self.committed[b]
+                if j == 0:
+                    self.pending[b] = False
+                if committed and s_now < path.box_out_s + 4.6:
+                    self.pending[b] = True
+                before = s_now < path.stop_s
+                # car following: nearest other car near my path ahead
                 gap, v_lead = np.inf, 0.0
-                ahead = path[i : i + 90]
-                in_box_or_granted = uid in self.granted[b] or s_now >= self.stop_s[key]
-                for m in alive:
-                    if m == n:
-                        continue
-                    if in_box_or_granted:
-                        dth = (sim.th[b, m] - sim.th[b, n] + np.pi) % (2 * np.pi) - np.pi
-                        if abs(dth) > np.pi / 3:
-                            continue
-                    d = np.hypot(ahead[:, 0] - sim.x[b, m], ahead[:, 1] - sim.y[b, m])
-                    k = int(np.argmin(d))
-                    if d[k] < 2.2 and k > 0:
-                        g = k * STEP - 4.6
-                        if g < gap:
-                            gap, v_lead = g, sim.v[b, m]
-                # intersection control: stop line acts as a standing obstacle
-                before = s_now < self.stop_s[key]
-                if before and self.control != "none":
+                tight = False
+                hi = min(i + 90, path.n)
+                ahead = path.p[i + 1 : hi]
+                if len(ahead):
+                    others = np.arange(len(alive)) != j
+                    d2 = (ahead[None, :, 0] - ax[others, None]) ** 2 + (ahead[None, :, 1] - ay[others, None]) ** 2
+                    kmin = d2.argmin(1)
+                    dmin = np.sqrt(d2[np.arange(len(kmin)), kmin])
+                    dth = (ath[others] - th + np.pi) % (2 * np.pi) - np.pi
+                    s_hit = (i + 1 + kmin) * STEP
+                    in_box = (s_hit >= path.stop_s - 2.0) & (s_hit <= path.box_out_s + 2.0)
+                    cand = dmin < 2.2
+                    # oncoming cars (e.g. a fresh spawn merging out of my lane) only matter
+                    # when close; they are treated as standing obstacles
+                    oncoming = np.abs(dth) > 2 * np.pi / 3
+                    cand &= ~oncoming | (kmin * STEP < 25.0)
+                    if self.control == "none":
+                        # nobody manages crossing traffic in the box
+                        cand &= ~(in_box & (np.abs(dth) > np.pi / 3))
+                    elif self.control == "reservation" and uid in self.plans[b]:
+                        # separation from other planned cars is guaranteed by the manager
+                        # (inside the box); outside it planned cars follow each other tightly
+                        tight = True
+                        cand &= ~(np.isin(alive[others], planned) & in_box)
+                    if cand.any():
+                        g = (kmin + 1) * STEP - 4.6
+                        g = np.where(cand, g, np.inf)
+                        m = int(np.argmin(g))
+                        gap, v_lead = float(g[m]), float(max(av[others][m] * np.cos(dth[m]), 0.0))
+                # intersection control: an uncommitted car treats the stop line as a wall
+                if before and self.control != "none" and not committed:
                     allowed = False
-                    if self.control == "light":
-                        allowed = green == sim.arm[b, n]
-                    elif self.control == "reservation":
-                        allowed = uid in self.granted[b]
-                        if not allowed and self.stop_s[key] - s_now < 25:
-                            allowed = self._try_reserve(b, uid, path, s_now, v, key)
-                    if not allowed:
-                        g = self.stop_s[key] - s_now - 2.5
+                    if not arm_blocked[arm]:
+                        if self.control == "light":
+                            if green == arm:
+                                ss, _ = self._predict(path, s_now, v, path.box_out_s + 4.6)
+                                t_need = (len(ss) - 1) * cfg.dt
+                                allowed = t_need <= rem + self.clear - 0.5
+                                if allowed:
+                                    self.clear_by[b] = max(self.clear_by[b], sim.t + t_need + 0.5)
+                        elif (kk + uid) % 2 == 0:  # requests every 0.2 s per car (cost)
+                            allowed = self._try_reserve(b, uid, path, s_now, v)
+                    if allowed:
+                        self.committed[b].add(uid)
+                        committed = True
+                    else:
+                        arm_blocked[arm] = True
+                        g = path.stop_s - s_now - 2.5
                         if g < gap:
                             gap, v_lead = g, 0.0
-                acc = self._idm(v, gap, v_lead)
-                if uid in self.granted[b] and np.isinf(gap):
-                    acc = cfg.acc_max
+                self._path_cur = path
+                acc = min(self._free_acc(v, s_now), self._idm(v, gap, v_lead))
+                plan = self.plans[b].get(uid)
+                if plan is not None and kk + 1 - plan[0] < len(plan[1]):
+                    # execute the reserved speed plan (IDM can only make it more careful)
+                    a_plan = (plan[1][kk + 1 - plan[0]] - v) / cfg.dt
+                    a_idm = self._idm(v, gap, v_lead, s0=1.0, T=0.3) if tight else self._idm(v, gap, v_lead)
+                    acc = min(a_plan, a_idm)
+                acc = float(np.clip(acc, -cfg.brake_max, cfg.acc_max))
                 act[b, n, 0] = acc / cfg.acc_max if acc > 0 else acc / cfg.brake_max
                 act[b, n, 1] = np.clip(kappa / cfg.kappa_max, -1, 1)
         return act
 
     def _idm(self, v, gap, v_lead, s0=2.0, T=1.0, b=3.0):
         cfg = self.cfg
-        a = cfg.acc_max * (1 - (v / cfg.v_max) ** 4)
-        if np.isfinite(gap):
-            s_star = s0 + v * T + v * (v - v_lead) / (2 * np.sqrt(cfg.acc_max * b))
-            a -= cfg.acc_max * (max(s_star, 0) / max(gap, 0.1)) ** 2
+        if not np.isfinite(gap):
+            return cfg.acc_max
+        s_star = s0 + v * T + v * (v - v_lead) / (2 * np.sqrt(cfg.acc_max * b))
+        a = cfg.acc_max * (1 - (v / cfg.v_max) ** 4) - cfg.acc_max * (max(s_star, 0) / max(gap, 0.1)) ** 2
         return float(np.clip(a, -cfg.brake_max, cfg.acc_max))
