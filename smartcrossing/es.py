@@ -21,60 +21,31 @@ from pathlib import Path
 import numpy as np
 
 from .policy import default_in_scale, forward, init_params, layer_sizes, load_in_scale, load_npz, n_params, save_npz
-from .sim import Sim, SimConfig, rot
+from .sim import Sim, SimConfig
 
 STAT_KEYS = ("arrived", "spawned", "exits", "wrong_exits", "crashes", "offroad", "timeouts")
-
-
-ARM_U = np.array([[0.0, -1.0], [1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]])  # canonical arm directions
-
-
-def geo_dist(sim: Sim) -> np.ndarray:
-    """Route-aware distance to the target gate (no lanes): in the target arm the
-    remaining arm length; in the box the distance to the target mouth centre;
-    in any other arm via that arm's mouth centre. Unlike the euclidean gate
-    distance it does not reward cutting through the curb corners."""
-    cfg = sim.cfg
-    c0 = cfg.W + cfg.Rc
-    co, si = rot(-sim.arm)
-    cx = co * sim.x - si * sim.y
-    cy = si * sim.x + co * sim.y
-    ut = ARM_U[sim.man]  # canonical target arm index == manoeuvre
-    in_box = (np.abs(cx) <= c0) & (np.abs(cy) <= c0)
-    a = np.argmax(np.stack([-cy, cx, cy, -cx], -1), -1)
-    ua = ARM_U[a]
-    d_target_arm = cfg.L - (cx * ut[..., 0] + cy * ut[..., 1])
-    d_box = np.hypot(cx - c0 * ut[..., 0], cy - c0 * ut[..., 1]) + cfg.L - c0
-    d_other = (
-        np.hypot(cx - c0 * ua[..., 0], cy - c0 * ua[..., 1])
-        + c0 * np.hypot(ua[..., 0] - ut[..., 0], ua[..., 1] - ut[..., 1])
-        + cfg.L
-        - c0
-    )
-    return np.where(in_box, d_box, np.where(a == sim.man, d_target_arm, d_other))
 
 
 def rollout(cfg_d: dict, members: np.ndarray, sizes, n_scen: int, seconds: float, seed: int, demand: float, in_scale=None, r_geo=0.0, r_queue=0.0):
     """Evaluate members (P, D) on n_scen shared traffic streams.
     Returns fitness (P,) summed over streams and stats dict of (P,) arrays."""
-    cfg = SimConfig(**{**cfg_d, "demand": demand})
+    # route-aware progress and the queue cost now live in the sim (r_progress, r_queue)
+    over = {"demand": demand}
+    if r_geo:
+        over["r_progress"] = r_geo
+    if r_queue:
+        over["r_queue"] = r_queue
+    cfg = SimConfig(**{**cfg_d, **over})
     P = len(members)
     sim = Sim(cfg, P * n_scen, seed=seed, n_scenarios=n_scen)
     env_params = np.repeat(members, n_scen, axis=0)  # env b -> member b // n_scen
     total = np.zeros(sim.B)
     mute = not cfg.signal_enabled
-    prev_d, prev_uid = np.zeros(sim.alive.shape), sim.uid.copy()
     for _ in range(int(round(seconds / cfg.dt))):
         a = forward(env_params, sim.observe(), sizes, in_scale)
         if mute:
             a[..., 2:] = 0.0
         total += sim.step(a)
-        total -= r_queue * cfg.dt * sim.queue.sum(1)  # cars kept from entering
-        if r_geo:
-            d = geo_dist(sim)
-            same = sim.alive & (sim.uid == prev_uid)
-            total += r_geo * np.where(same, prev_d - d, 0.0).sum(1)
-            prev_d, prev_uid = d, sim.uid.copy()
     fit = total.reshape(P, n_scen).sum(1)
     stats = {k: getattr(sim.stats, k).reshape(P, n_scen).sum(1) for k in STAT_KEYS}
     stats["alive_end"] = sim.alive.sum(1).reshape(P, n_scen).sum(1)
@@ -146,8 +117,8 @@ def main(argv=None):
     p.add_argument("--init", default="", help="start from this .npz")
     p.add_argument("--eval-every", type=int, default=10)
     p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--r-geo", type=float, default=0.0, help="route-aware progress reward per metre (es-side)")
-    p.add_argument("--r-queue", type=float, default=0.0, help="penalty per queued car per second (es-side)")
+    p.add_argument("--r-geo", type=float, default=0.0, help="overrides SimConfig.r_progress (route-aware progress per metre)")
+    p.add_argument("--r-queue", type=float, default=0.0, help="overrides SimConfig.r_queue (per queued car per second)")
     p.add_argument("--no-in-scale", dest="in_scale", action="store_false", default=True)
     a = p.parse_args(argv)
 

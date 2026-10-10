@@ -46,6 +46,7 @@ def export_state(sim: Sim) -> dict:
         "th": sim.th[0].tolist(),
         "v": sim.v[0].tolist(),
         "kappa": sim.kappa[0].tolist(),
+        "kappa_cmd": sim.kappa_cmd[0].tolist(),
         "age": sim.age[0].tolist(),
         "prev_dist": sim._prev_dist[0].tolist(),
         "sig": sim.sig[0].tolist(),
@@ -196,7 +197,7 @@ def edge_cases(cfg):
 @pytest.fixture(scope="module")
 def parity(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("parity")
-    cfg = SimConfig(n_slots=16, r_time=0.05, r_queue=0.1)
+    cfg = SimConfig(n_slots=16, r_time=0.05, r_queue=0.1, r_steer=0.02)
     cases = trajectory_cases(0, dataclasses.replace(cfg, demand=0.5))
     cases += trajectory_cases(1, dataclasses.replace(cfg, demand=0.35, signal_enabled=False, turn_probs=(0.5, 0.2, 0.3)))
     cases += edge_cases(cfg)
@@ -278,7 +279,7 @@ def test_step_parity(parity):
         assert abs(j["queue_cost"] - c["expect"]["queue_cost"]) < TOL, name
         assert s["alive"] == e["alive"], name  # removals and spawns
         alive = np.array(e["alive"])
-        for k in ("x", "y", "th", "v", "age", "prev_dist", "kappa"):
+        for k in ("x", "y", "th", "v", "age", "prev_dist", "kappa", "kappa_cmd"):
             np.testing.assert_allclose(np.array(s[k]), np.array(e[k]), atol=TOL, err_msg=f"{name}:{k}")
         np.testing.assert_allclose(np.array(s["sig"]), np.array(e["sig"]), atol=TOL, err_msg=f"{name}:sig")
         for k in ("arm", "man", "uid", "group"):

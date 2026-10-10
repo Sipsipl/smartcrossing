@@ -48,6 +48,9 @@ class SimConfig:
     acc_max: float = 3.0
     brake_max: float = 7.0
     kappa_max: float = 0.2  # 1 / minimum turning radius
+    # steering rate limit: the curvature action is a target; the actual curvature moves
+    # towards it by at most kappa_rate per second (0.4 = lock to lock in 1 s)
+    kappa_rate: float = 0.4
     spawn_speed: float = 8.0
     spawn_clearance: float = 7.0
     # extra spawn clearance (s) per m/s of closing speed between the new car and an
@@ -74,9 +77,12 @@ class SimConfig:
     r_progress: float = 0.01  # per metre of route-aware distance to the target gate (route_dist)
     r_time: float = 0.0  # cost per car per second on the road
     r_queue: float = 0.0  # team-level cost per queued (not yet entered) car per second
+    r_steer: float = 0.0  # cost per car per unit change of the (normalised) curvature target
 
 
-OBS_DIM = 4 + 1 + 3 + 2 + N_RAYS  # own state; neighbour block appended below
+# own state: canonical pos (2), heading (2), speed, manoeuvre one-hot (3), goal vector (2),
+# rays (N_RAYS), curvature kappa / kappa_max; the neighbour block is appended below
+OBS_DIM = 4 + 1 + 3 + 2 + N_RAYS + 1
 
 
 def obs_dim(cfg: SimConfig) -> int:
@@ -130,14 +136,16 @@ def ray_edge_dist(x, y, dx, dy, W, Rc, tmax=RAY_RANGE):
     blocks; the block of quadrant (sx, sy) is every point within Rc of the quarter
     plane {sx x >= W + Rc, sy y >= W + Rc}, i.e. two quarter planes plus a disc."""
     c = W + Rc
-    best = np.full(np.broadcast_shapes(np.shape(x), np.shape(dx)), float(tmax))
-    for sx in (1.0, -1.0):
-        for sy in (1.0, -1.0):
-            u, v, du, dv = sx * x, sy * y, sx * dx, sy * dy
-            best = np.minimum(best, _quarter_entry(u, v, du, dv, W, c))
-            best = np.minimum(best, _quarter_entry(u, v, du, dv, c, W))
-            best = np.minimum(best, _disc_entry(u - c, v - c, du, dv, Rc))
-    return best
+    x, y, dx, dy = np.broadcast_arrays(*(np.asarray(z, dtype=float) for z in (x, y, dx, dy)))
+    # the four quadrants along a new leading axis: (sx, sy) = (+,+), (+,-), (-,+), (-,-)
+    sx = np.array([1.0, 1.0, -1.0, -1.0]).reshape((4,) + (1,) * x.ndim)
+    sy = np.array([1.0, -1.0, 1.0, -1.0]).reshape((4,) + (1,) * x.ndim)
+    u, v, du, dv = sx * x, sy * y, sx * dx, sy * dy
+    t = np.minimum(
+        np.minimum(_quarter_entry(u, v, du, dv, W, c), _quarter_entry(u, v, du, dv, c, W)),
+        _disc_entry(u - c, v - c, du, dv, Rc),
+    )
+    return np.minimum(t.min(0), tmax)
 
 
 def route_dist(cfg, arm, man, x, y):
@@ -225,7 +233,8 @@ class Sim:
         self.y = np.zeros((B, N))
         self.th = np.zeros((B, N))
         self.v = np.zeros((B, N))
-        self.kappa = np.zeros((B, N))
+        self.kappa = np.zeros((B, N))  # actual curvature (rate limited)
+        self.kappa_cmd = np.zeros((B, N))  # last curvature target in [-1, 1] (for r_steer)
         self.sig = np.zeros((B, N, cfg.n_signal))
         self.arm = np.zeros((B, N), dtype=np.int64)
         self.man = np.zeros((B, N), dtype=np.int64)  # manoeuvre 1..3
@@ -299,7 +308,8 @@ class Sim:
         o[:, 9] = (-st * dx + ct * dy) / L
         # rays to the road edge in the ego frame (exact distance, capped)
         ang = th[:, None] + RAY_ANGLES  # (M,R)
-        o[:, 10:OBS_DIM] = ray_edge_dist(x[:, None], y[:, None], np.cos(ang), np.sin(ang), W, cfg.Rc) / RAY_RANGE
+        o[:, 10 : 10 + N_RAYS] = ray_edge_dist(x[:, None], y[:, None], np.cos(ang), np.sin(ang), W, cfg.Rc) / RAY_RANGE
+        o[:, 10 + N_RAYS] = self.kappa[bi, ni] / cfg.kappa_max
         # neighbours: K nearest other cars within range, sorted by distance
         ddx = self.x[bi] - x[:, None]  # (M, N) = x_j - x_i
         ddy = self.y[bi] - y[:, None]
@@ -347,7 +357,10 @@ class Sim:
         a = np.clip(action, -1.0, 1.0)
         alive = self.alive
         acc = np.where(a[..., 0] > 0, a[..., 0] * cfg.acc_max, a[..., 0] * cfg.brake_max)
-        self.kappa = a[..., 1] * cfg.kappa_max
+        dk = cfg.kappa_rate * cfg.dt
+        self.kappa = np.where(alive, self.kappa + np.clip(a[..., 1] * cfg.kappa_max - self.kappa, -dk, dk), 0.0)
+        steer_change = np.abs(a[..., 1] - self.kappa_cmd)
+        self.kappa_cmd = np.where(alive, a[..., 1], 0.0)
         self.sig = np.where(alive[..., None], a[..., 2:], 0.0)
         v = np.clip(self.v + acc * cfg.dt, 0.0, cfg.v_max)
         th = self.th + v * self.kappa * cfg.dt
@@ -361,7 +374,7 @@ class Sim:
         self.done_kind = np.zeros(alive.shape, dtype=np.int8)
         self.done_uid = np.where(alive, self.uid, -1)
 
-        cr = np.where(alive, -cfg.r_time * cfg.dt, 0.0)
+        cr = np.where(alive, -cfg.r_time * cfg.dt - cfg.r_steer * steer_change, 0.0)
         dist = self.dist_to_gate()
         cr += np.where(alive, cfg.r_progress * (self._prev_dist - dist), 0.0)
         self._prev_dist = dist
@@ -465,6 +478,7 @@ class Sim:
         self.queue_lat, self.queue_man, self.queue_grp = head[..., 0], head[..., 1].astype(np.int64), head[..., 2].astype(np.int64)
         # velocities of existing cars (for the closing-speed spawn clearance)
         vx, vy = self.v * np.cos(self.th), self.v * np.sin(self.th)
+        spawned = np.zeros(self.alive.shape, dtype=bool)
         for k in range(4):
             want = self.queue[:, k] > 0
             if not want.any():
@@ -495,6 +509,7 @@ class Sim:
                 self.th[b, n] = np.arctan2(np.sin(h), np.cos(h))
                 self.v[b, n] = cfg.spawn_speed
                 self.kappa[b, n] = 0.0
+                self.kappa_cmd[b, n] = 0.0
                 self.arm[b, n] = k
                 self.man[b, n] = self.queue_man[b, k]
                 self.group[b, n] = self.queue_grp[b, k]
@@ -504,6 +519,8 @@ class Sim:
                 self.queue[b, k] -= 1
                 self._qhead[b, k] = (self._qhead[b, k] + 1) % self._qcap
                 self.stats.spawned[b] += 1
-                self._prev_dist[b, n] = route_dist(cfg, k, self.man[b, n], sx[b], sy[b])
+                spawned[b, n] = True
                 hd = self._qbuf[b, k, self._qhead[b, k]]
                 self.queue_lat[b, k], self.queue_man[b, k], self.queue_grp[b, k] = hd[0], int(hd[1]), int(hd[2])
+        if spawned.any():
+            self._prev_dist = np.where(spawned, self.dist_to_gate(), self._prev_dist)

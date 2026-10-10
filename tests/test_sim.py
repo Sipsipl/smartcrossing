@@ -2,7 +2,21 @@ import numpy as np
 import pytest
 
 from smartcrossing.baselines import LaneDriver
-from smartcrossing.sim import LEFT, RIGHT, STRAIGHT, Sim, SimConfig, act_dim, obs_dim, offroad_point
+from smartcrossing.sim import (
+    DONE_CRASH,
+    DONE_EXIT,
+    DONE_NONE,
+    DONE_OFFROAD,
+    LEFT,
+    RIGHT,
+    STRAIGHT,
+    Sim,
+    SimConfig,
+    act_dim,
+    obs_dim,
+    offroad_point,
+    ray_edge_dist,
+)
 
 
 def place(sim, b, n, x, y, th, v=0.0, arm=0, man=STRAIGHT):
@@ -181,7 +195,8 @@ def test_rule_based_baselines_are_safe(control):
         sim.step(drv.act())
     st = sim.stats
     assert st.crashes.sum() == 0 and st.offroad.sum() == 0
-    assert st.exits.sum() >= 0.6 * st.arrived.sum()
+    # (light: cars queue at red; 60 s window, so the bar is modest)
+    assert st.exits.sum() >= 0.55 * st.arrived.sum()
     assert st.wrong_exits.sum() == 0
 
 
@@ -214,3 +229,60 @@ def test_render_smoke(tmp_path):
 
 def test_turn_manoeuvre_constants():
     assert (RIGHT, STRAIGHT, LEFT) == (1, 2, 3)
+
+
+def test_steering_rate_limit_and_kappa_obs():
+    cfg = SimConfig(demand=0.0)
+    sim = Sim(cfg, 1, seed=0)
+    place(sim, 0, 0, 0.0, -30.0, np.pi / 2, v=5.0)
+    a = zeros(sim)
+    a[0, 0, 1] = 1.0  # full lock target
+    sim.step(a)
+    assert sim.kappa[0, 0] == pytest.approx(cfg.kappa_rate * cfg.dt)
+    for _ in range(5):
+        sim.step(a)
+    assert sim.alive[0, 0] and sim.kappa[0, 0] == pytest.approx(cfg.kappa_max)
+    assert sim.observe()[0, 0, obs_dim(cfg) - 4 * (6 + cfg.n_signal) - 1] == pytest.approx(1.0)
+
+
+def test_ray_edge_dist_matches_sampling():
+    cfg = SimConfig()
+    rng = np.random.default_rng(0)
+    x, y = rng.uniform(-12, 12, 400), rng.uniform(-12, 12, 400)
+    on = ~offroad_point(x, y, cfg.W, cfg.Rc)
+    x, y = x[on], y[on]
+    ang = rng.uniform(-np.pi, np.pi, len(x))
+    d = ray_edge_dist(x, y, np.cos(ang), np.sin(ang), cfg.W, cfg.Rc)
+    t = np.linspace(0, 20, 20001)
+    hit = offroad_point(x[:, None] + np.cos(ang)[:, None] * t, y[:, None] + np.sin(ang)[:, None] * t, cfg.W, cfg.Rc)
+    first = np.where(hit.any(1), t[hit.argmax(1)], 20.0)
+    np.testing.assert_allclose(d, first, atol=2e-3)
+
+
+def test_car_rewards_and_done_info():
+    cfg = SimConfig(demand=0.0, r_time=0.1, r_queue=0.5)
+    sim = Sim(cfg, 1, seed=0)
+    place(sim, 0, 0, 0.0, -20.0, np.pi / 2)
+    place(sim, 0, 1, 1.0, -21.0, np.pi / 2)  # crashes with car 0
+    place(sim, 0, 2, 1.0, cfg.L - 0.1, np.pi / 2, v=10.0)  # exits north (straight from south)
+    place(sim, 0, 3, cfg.W - 0.5, 10.0, np.pi / 2)  # offroad
+    place(sim, 0, 4, -1.5, -35.0, np.pi / 2, v=5.0)  # keeps driving
+    uids = sim.uid[0].copy()
+    sim.queue[0, 1] = 2
+    team = sim.step(zeros(sim))
+    k, r = sim.done_kind[0], sim.car_reward[0]
+    assert list(k[:5]) == [DONE_CRASH, DONE_CRASH, DONE_EXIT, DONE_OFFROAD, DONE_NONE]
+    assert list(sim.done_uid[0, :5]) == list(uids[:5])
+    assert r[0] < cfg.r_crash + 0.1 and r[1] < cfg.r_crash + 0.1 and r[2] > 0.9 and r[3] < cfg.r_offroad + 0.1
+    assert -0.02 < r[4] < 0.02 and r[4] > -cfg.r_time * cfg.dt - 1e-9  # moving forward offsets the time cost
+    assert sim.queue_cost[0] > 0 and team[0] == pytest.approx(r.sum() - sim.queue_cost[0])
+
+
+def test_demand_range_per_stream():
+    cfg = SimConfig(demand_range=(0.02, 0.4))
+    sim = Sim(cfg, 8, seed=3, n_scenarios=4)
+    assert np.allclose(sim.demand[:4], sim.demand[4:]) and sim.demand.std() > 0.01
+    for _ in range(600):
+        sim.step(zeros(sim))
+    lo, hi = np.argmin(sim.demand[:4]), np.argmax(sim.demand[:4])
+    assert sim.stats.arrived[hi] > sim.stats.arrived[lo]

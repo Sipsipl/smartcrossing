@@ -1,15 +1,26 @@
-"""Bundle the browser viewer.
+"""Bundle the browser viewer (and shared helpers for the website build).
 
 Writes ``viewer/policies.js`` (the agent types the page starts with) and one
 self-contained HTML file ``viewer/dist/smartcrossing.html`` with sim.js, app.js
 and the policy weights inlined (no external requests), e.g.::
 
     poetry run python -m smartcrossing.export_viewer \
-        --policy "Evolved A=runs/es4/best.npz" --policy "Muted B=runs/es3/best.json"
+        --policy "Evolved A=runs/es5/final_g310.npz" --policy "Early B=runs/es2/stop.npz"
 
 Up to three ``NAME=PATH`` policies (.npz from es.py or .json from
 ``policy.export_json``). Without ``--policy`` two random-weight placeholder
 policies are used so the page still runs.
+
+Also used by ``site/build.py``:
+
+- ``obs_layout(cfg)``: German labels / groups / display units for every entry of
+  the observation vector. The label list mirrors ``sim.observe`` and is checked
+  against ``sim.OBS_DIM`` / ``obs_dim(cfg)``, so a layout change in the sim fails
+  loudly here instead of silently mislabelling.
+- ``load_policy``: checkpoints trained with an older observation layout (listed
+  in ``LEGACY_OWN_KEYS``) are adapted by feature name: the inputs that did not
+  exist yet get zero weights, so the network computes exactly what it computed
+  before and simply ignores the new sensor.
 """
 
 import argparse
@@ -17,6 +28,9 @@ import json
 import re
 from pathlib import Path
 
+import numpy as np
+
+from . import sim as simmod
 from .policy import default_in_scale, export_json, init_params, layer_sizes, unpack
 from .sim import SimConfig, act_dim, obs_dim
 
@@ -24,7 +38,101 @@ ROOT = Path(__file__).resolve().parents[1]
 VIEWER = ROOT / "viewer"
 MAX_TYPES = 3
 
+# ------------------------------------------------------------------ observation layout
+# Own block of sim.observe, in order: (key, group, label, display scale, unit).
+# "scale" converts the (normalised) observation back into the unit shown on the site;
+# a str scale names a SimConfig field (e.g. v_max), a callable gets cfg.
+OWN_FEATURES = [
+    ("pos_x", "Position", "quer (rechts +)", lambda c: c.L, "m"),
+    ("pos_y", "Position", "längs (Richtung Mitte +)", lambda c: c.L, "m"),
+    ("dir_x", "Richtung", "Anteil nach rechts", 1, ""),
+    ("dir_y", "Richtung", "Anteil nach vorn", 1, ""),
+    ("speed", "Tempo", "Tempo", lambda c: c.v_max * 3.6, "km/h"),
+    ("goal_right", "Ziel", "rechts abbiegen", 1, "bool"),
+    ("goal_straight", "Ziel", "geradeaus", 1, "bool"),
+    ("goal_left", "Ziel", "links abbiegen", 1, "bool"),
+    ("exit_fwd", "Weg zur Ausfahrt", "vor mir", lambda c: c.L, "m"),
+    ("exit_left", "Weg zur Ausfahrt", "links von mir", lambda c: c.L, "m"),
+    ("ray_r60", "Abstand zum Fahrbahnrand", "60° rechts", simmod.RAY_RANGE, "m"),
+    ("ray_r30", "Abstand zum Fahrbahnrand", "30° rechts", simmod.RAY_RANGE, "m"),
+    ("ray_0", "Abstand zum Fahrbahnrand", "geradeaus", simmod.RAY_RANGE, "m"),
+    ("ray_l30", "Abstand zum Fahrbahnrand", "30° links", simmod.RAY_RANGE, "m"),
+    ("ray_l60", "Abstand zum Fahrbahnrand", "60° links", simmod.RAY_RANGE, "m"),
+    ("kappa", "Lenkrad", "aktueller Lenkeinschlag (links +)", 100, "%"),
+]
+# Own-block layouts of older sim versions (by key), used to adapt old checkpoints.
+LEGACY_OWN_KEYS = [
+    [k for k, *_ in OWN_FEATURES if k != "kappa"],  # before the steering-rate limit (es1-es5)
+]
+NEIGHBOUR_FEATURES = [
+    ("fwd", "vor mir", lambda c: simmod.NEIGHBOUR_RANGE, "m"),
+    ("left", "links von mir", lambda c: simmod.NEIGHBOUR_RANGE, "m"),
+    ("same", "fährt wie ich (1) / entgegen (−1)", 1, ""),
+    ("cross", "fährt von rechts nach links (+)", 1, ""),
+    ("speed", "Tempo", lambda c: c.v_max * 3.6, "km/h"),
+    ("present", "da?", 1, "bool"),
+]
 
+
+def _scale(s, cfg):
+    return float(s(cfg)) if callable(s) else float(s)
+
+
+def own_keys() -> list[str]:
+    return [k for k, *_ in OWN_FEATURES]
+
+
+def neighbour_keys(cfg: SimConfig) -> list[str]:
+    keys = [k for k, *_ in NEIGHBOUR_FEATURES] + [f"lamp{q + 1}" for q in range(cfg.n_signal)]
+    return [f"n{k + 1}_{f}" for k in range(simmod.K_NEIGHBOURS) for f in keys]
+
+
+def obs_keys(cfg: SimConfig, own: list[str] | None = None) -> list[str]:
+    return (own or own_keys()) + neighbour_keys(cfg)
+
+
+def obs_layout(cfg: SimConfig) -> dict:
+    """German labels for the observation vector, grouped for display."""
+    if len(OWN_FEATURES) != simmod.OBS_DIM:
+        raise RuntimeError(
+            f"export_viewer.OWN_FEATURES has {len(OWN_FEATURES)} labels but sim.OBS_DIM is "
+            f"{simmod.OBS_DIM}: the observation layout changed, update the labels"
+        )
+    blk = 6 + cfg.n_signal
+    if len(NEIGHBOUR_FEATURES) + cfg.n_signal != blk or simmod.OBS_DIM + simmod.K_NEIGHBOURS * blk != obs_dim(cfg):
+        raise RuntimeError("neighbour block layout changed: update export_viewer.NEIGHBOUR_FEATURES")
+    groups, i = [], 0
+
+    def add(group, label, key, scale, unit, sub=None):
+        nonlocal i
+        if not groups or groups[-1]["name"] != group:
+            groups.append({"name": group, "sub": sub, "items": []})
+        groups[-1]["items"].append({"i": i, "key": key, "label": label, "scale": scale, "unit": unit})
+        i += 1
+
+    for key, group, label, scale, unit in OWN_FEATURES:
+        add(group, label, key, _scale(scale, cfg), unit)
+    for k in range(simmod.K_NEIGHBOURS):
+        for key, label, scale, unit in NEIGHBOUR_FEATURES:
+            add(f"Nachbar {k + 1}", label, f"n{k + 1}_{key}", _scale(scale, cfg), unit, sub="neighbour")
+        for q in range(cfg.n_signal):
+            add(f"Nachbar {k + 1}", f"Lampe {q + 1}", f"n{k + 1}_lamp{q + 1}", 1.0, "", sub="neighbour")
+    assert i == obs_dim(cfg)
+    return {
+        "dim": i,
+        "own_dim": simmod.OBS_DIM,
+        "neighbour_block": blk,
+        "k_neighbours": simmod.K_NEIGHBOURS,
+        "ray_angles_deg": [round(float(a), 3) for a in np.degrees(simmod.RAY_ANGLES)],
+        "ray_range": float(simmod.RAY_RANGE),
+        "neighbour_range": float(simmod.NEIGHBOUR_RANGE),
+        "keys": obs_keys(cfg),
+        "groups": groups,
+        "actions": ["Gas / Bremse", "Lenkung"] + [f"Lampe {q + 1}" for q in range(cfg.n_signal)],
+    }
+
+
+# ------------------------------------------------------------------ policies
 def placeholder_policy(seed: int) -> dict:
     cfg = SimConfig()
     sizes = layer_sizes(cfg)
@@ -39,6 +147,33 @@ def placeholder_policy(seed: int) -> dict:
     }
 
 
+def adapt_inputs(d: dict, cfg: SimConfig) -> dict:
+    """Map a policy trained on a legacy observation layout onto the current one by
+    feature key (new inputs get zero weights and scale 1). No-op if sizes match."""
+    n_in, want = d["sizes"][0], obs_dim(cfg)
+    if n_in == want:
+        return d
+    cur = obs_keys(cfg)
+    for legacy in LEGACY_OWN_KEYS:
+        old = obs_keys(cfg, legacy)
+        if len(old) != n_in:
+            continue
+        W0 = np.asarray(d["layers"][0]["W"], dtype=float)
+        scale = np.asarray(d.get("in_scale") or np.ones(n_in), dtype=float)
+        W = np.zeros((want, W0.shape[1]))
+        s = np.ones(want)
+        pos = {k: j for j, k in enumerate(cur)}
+        for j, k in enumerate(old):
+            W[pos[k]] = W0[j]
+            s[pos[k]] = scale[j]
+        missing = [k for k in cur if k not in set(old)]
+        d = {**d, "sizes": [want, *d["sizes"][1:]], "in_scale": s.tolist(),
+             "layers": [{"W": W.tolist(), "b": d["layers"][0]["b"]}, *d["layers"][1:]],
+             "adapted": f"trained without input(s) {', '.join(missing)} (weights 0)"}
+        return d
+    raise ValueError(f"policy has {n_in} inputs; the sim gives {want} and no legacy layout matches")
+
+
 def load_policy(path: str | Path) -> dict:
     path = Path(path)
     if path.suffix == ".npz":
@@ -49,12 +184,22 @@ def load_policy(path: str | Path) -> dict:
     sizes = d.get("sizes") or [len(d["layers"][0]["W"]), *[len(layer["b"]) for layer in d["layers"]]]
     n_signal = int((d.get("cfg") or {}).get("n_signal", SimConfig.n_signal))
     cfg = SimConfig(n_signal=n_signal)
-    if sizes[0] != obs_dim(cfg) or sizes[-1] != act_dim(cfg):
-        raise ValueError(f"{path}: sizes {sizes} do not match obs_dim {obs_dim(cfg)} / act_dim {act_dim(cfg)}")
     if n_signal != SimConfig.n_signal:
         raise ValueError(f"{path}: n_signal={n_signal}; the viewer runs with n_signal={SimConfig.n_signal}")
     d["sizes"] = sizes
+    if sizes[-1] != act_dim(cfg):
+        raise ValueError(f"{path}: {sizes[-1]} outputs, the sim expects act_dim {act_dim(cfg)}")
+    try:
+        d = adapt_inputs(d, cfg)
+    except ValueError as e:
+        raise ValueError(f"{path}: {e}") from None
     return d
+
+
+def round_policy(d: dict, digits: int = 5) -> dict:
+    """Shrink the JSON: weights rounded to `digits` decimals."""
+    r = lambda a: np.round(np.asarray(a, dtype=float), digits).tolist()  # noqa: E731
+    return {**d, "in_scale": r(d["in_scale"]), "layers": [{"W": r(l["W"]), "b": r(l["b"])} for l in d["layers"]]}
 
 
 def parse_spec(spec: str) -> tuple[str, str]:
@@ -113,6 +258,8 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     types = build_types(args.policy)
+    for t in types:
+        t["policy"] = round_policy(t["policy"], 6)
     pjs = policies_js(types)
     if args.policies_js:
         Path(args.policies_js).write_text(pjs)
