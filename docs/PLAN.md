@@ -24,6 +24,8 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
   terms that prescribe driving style (e.g. no penalty for wobbling, no lane-keeping bonus).
   Progress shaping (route distance) is tolerated as a learning aid only; prefer removing it once
   agents can learn without it.
+- Training budget (owner): during development keep trainings short (<= ~1 h per round); long
+  trainings only right before a merge to main.
 - Deliverable: a live, in-browser visualisation with a few sliders (keep it simple),
   incl. mixing agent types.
 

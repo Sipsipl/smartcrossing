@@ -132,9 +132,14 @@ PAGES = [
 def method_of(run: str) -> str | None:
     if run.startswith("es"):
         return "es"
-    if run.startswith("ppo"):
+    if run.startswith("ppo") or run.startswith("wide"):  # wide_*: PPO on the wide crossing
         return "ppo"
     return None
+
+
+def world_of(physics: dict) -> str:
+    """'narrow' (original 7 m road) or 'wide' (14 m road) from a checkpoint's physics."""
+    return "narrow" if physics.get("W", 3.5) < 5 else "wide"
 
 
 def ckpt_meta(path: Path) -> dict:
@@ -156,8 +161,9 @@ def policy_vector(d: dict) -> np.ndarray:
     return np.concatenate([np.concatenate([np.ravel(np.asarray(l["W"], dtype=float)), np.asarray(l["b"], dtype=float)]) for l in d["layers"]])
 
 
-def discover() -> dict:
-    """All loadable checkpoints of runs/es* and runs/ppo*: id -> info."""
+def discover(world: str = "any") -> dict:
+    """All loadable checkpoints of runs/es*, runs/ppo* and runs/wide*: id -> info
+    (only those trained on `world` = narrow / wide crossing, unless 'any')."""
     found = {}
     if not RUNS.exists():
         return found
@@ -172,6 +178,8 @@ def discover() -> dict:
                 print(f"  skip {f.relative_to(ROOT)}: {e}")
                 continue
             meta = ckpt_meta(f)
+            if world != "any" and world_of(physics_of(meta["cfg"])) != world:
+                continue
             cid = f"{run_dir.name}/{f.stem}"
             found[cid] = {
                 "id": cid, "run": run_dir.name, "file": str(f.relative_to(ROOT)), "method": method,
@@ -267,6 +275,93 @@ def run_bench(entries: list[tuple[str, str, object, dict, list]], force: bool, w
             ck = f"{key}|{json.dumps(physics, sort_keys=True)}|{d}|{BENCH_ENVS}x{BENCH_SECONDS}@{BENCH_SEED}|{sim_src}"
             out[key][str(d)] = cache[ck]
     return out
+
+
+# ------------------------------------------------------------------ replays ("Vergleich" side by side)
+REPLAY_DEMANDS = [0.05, 0.15, 0.3]
+REPLAY_SEED, REPLAY_WARMUP, REPLAY_SECONDS = 7, 15.0, 90.0
+GEOMETRY_KEYS = ("L", "W", "Rc", "a_lat_max", "v_reverse")  # the "world": same for all drivers compared
+Q_POS, Q_TH, Q_LAMP = 0.05, 0.01, 100.0  # quantisation: 5 cm, 0.01 rad, lamp in 1/100
+
+
+def _b64(a: np.ndarray) -> str:
+    import base64
+
+    return base64.b64encode(np.ascontiguousarray(a).tobytes()).decode()
+
+
+def _replay_job(job):
+    """Drive one sim (1 env) and record every car as a compact track:
+    [t0, man, end_step, end_kind, qx0, qy0, qth0, width, b64] where b64 holds per sample
+    (dx, dy, dth[, lamp0, lamp1]) as int8 (width 1) or int16 (width 2), deltas of the
+    quantised values (exact reconstruction). Plus crash marks and the queue per arm."""
+    from smartcrossing.baselines import LaneDriver
+    from smartcrossing.policy import PolicyDriver
+    from smartcrossing.sim import DONE_NAMES, Sim
+
+    kind, payload, physics, demand = job
+    cfg = SimConfig(**{**physics, "demand": demand})
+    sim = Sim(cfg, 1, seed=REPLAY_SEED)
+    if kind == "baseline":
+        drv = LaneDriver(sim, payload)
+    else:
+        params, sizes, in_scale = payload
+        drv = PolicyDriver(sim, np.asarray(params), sizes, in_scale=np.asarray(in_scale))
+    lamps = kind != "baseline" and cfg.n_signal >= 2
+    tracks, marks, queue = {}, [], []
+    n_warm, n = int(round(REPLAY_WARMUP / cfg.dt)), int(round(REPLAY_SECONDS / cfg.dt))
+    for k in range(-n_warm, n):
+        sim.step(drv.act())
+        if k < 0:
+            continue
+        for slot in np.nonzero(sim.done_kind[0])[0]:
+            tr = tracks.get(int(sim.done_uid[0, slot]))
+            if tr is not None:
+                tr["end"] = (k, int(sim.done_kind[0, slot]))
+        for _, ev, x, y in sim.events:
+            marks.append([k, 1 if ev == "crash" else 2, int(round(x / Q_POS)), int(round(y / Q_POS))])
+        for slot in np.nonzero(sim.alive[0])[0]:
+            uid = int(sim.uid[0, slot])
+            tr = tracks.get(uid)
+            if tr is None:
+                tr = tracks[uid] = {"t0": k, "man": int(sim.man[0, slot]), "s": [], "end": (None, 0)}
+            tr["s"].append((sim.x[0, slot], sim.y[0, slot], sim.th[0, slot], *(sim.sig[0, slot, :2] if lamps else ())))
+        queue.append(np.minimum(sim.queue[0], 255))
+    out = []
+    for uid, tr in tracks.items():
+        s = np.asarray(tr["s"], dtype=float)
+        q = np.empty_like(s, dtype=np.int64)
+        q[:, 0] = np.round(s[:, 0] / Q_POS)
+        q[:, 1] = np.round(s[:, 1] / Q_POS)
+        q[:, 2] = np.round(np.unwrap(s[:, 2]) / Q_TH)
+        d = q.copy()
+        d[1:, :3] = q[1:, :3] - q[:-1, :3]
+        d[0, :3] = 0
+        if lamps:
+            d[:, 3:] = np.round(np.clip(s[:, 3:], -1, 1) * Q_LAMP)
+        width = 1 if np.abs(d).max() <= 127 else 2
+        end_k, end_kind = tr["end"]
+        out.append([tr["t0"], tr["man"], end_k if end_k is not None else -1, end_kind,
+                    int(q[0, 0]), int(q[0, 1]), int(q[0, 2]), width, _b64(d.astype(np.int8 if width == 1 else "<i2"))])
+    return {
+        "demand": demand, "steps": n, "dt": cfg.dt, "lamps": lamps,
+        "kinds": list(DONE_NAMES), "tracks": out, "marks": marks,
+        "queue": _b64(np.asarray(queue, dtype=np.uint8)),
+    }
+
+
+def record_replays(drivers: list[tuple[str, str, object, dict]], workers: int) -> dict:
+    """drivers: (name, kind, payload, physics) -> {"q": quantisation, "runs": {name: {demand: replay}}}."""
+    jobs = [(kind, payload, physics, d) for _, kind, payload, physics in drivers for d in REPLAY_DEMANDS]
+    t0 = time.time()
+    with mp.get_context("fork").Pool(workers) as pool:
+        res = pool.map(_replay_job, jobs, chunksize=1)
+    print(f"  replays: {len(jobs)} recorded in {time.time() - t0:.0f} s")
+    runs = {}
+    for (name, *_), r in zip([dr for dr in drivers for _ in REPLAY_DEMANDS], res):
+        runs.setdefault(name, {})[str(r["demand"])] = r
+    return {"q": {"pos": Q_POS, "th": Q_TH, "lamp": Q_LAMP}, "seed": REPLAY_SEED, "seconds": REPLAY_SECONDS,
+            "demands": REPLAY_DEMANDS, "runs": runs}
 
 
 def pol_entry(c: dict) -> tuple:
@@ -402,9 +497,11 @@ def header_html(current: str) -> str:
     return f'<header class="top"><a class="brand" href="index.html">{LOGO}Smart Crossing</a>{nav}</header>'
 
 
+REPO = "https://github.com/Sipsipl/smartcrossing"
 FOOTER = (
     '<footer>Smart Crossing – ein Hobbyprojekt. Alles läuft direkt in deinem Browser, '
-    "es werden keine Daten gesammelt. Stand: {built}.</footer>"
+    'es werden keine Daten gesammelt. Stand: {built}. '
+    f'<a href="{REPO}">Code auf GitHub</a></footer>'
 )
 
 
@@ -418,7 +515,7 @@ def copy_src(version: str, built: str):
         t = html.read_text()
         t = t.replace("<!-- HEADER -->", header_html(html.name)).replace("<!-- FOOTER -->", FOOTER.format(built=built))
         t = t.replace("{{VERSION}}", version)
-        if re.search(r'\s(src|href)="(https?:)?//', t):
+        if re.search(r'\s(src|href)="(https?:)?//', t.replace(f'href="{REPO}"', "")):
             raise SystemExit(f"{html.name}: external request found; the site must be self-contained")
         html.write_text(t)
 
@@ -430,12 +527,14 @@ def main(argv=None):
     ap.add_argument("--bench", action="store_true", help="ignore the bench cache and re-run all benchmarks")
     ap.add_argument("--timeline", type=int, default=6, help="max checkpoints per Zeitreise")
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--world", choices=["narrow", "wide", "any"], default="narrow",
+                    help="only use checkpoints trained on this crossing (narrow = original 7 m road, wide = 14 m road)")
     a = ap.parse_args(argv)
 
     cfg = SimConfig()
     layout = obs_layout(cfg)  # fails loudly if the sim's observation layout changed
     print("discovering checkpoints ...")
-    found = discover()
+    found = discover(a.world)
     print(f"  {len(found)} loadable checkpoints")
 
     # quick bench of every checkpoint at demand 0.15 -> pick the best per method
@@ -485,9 +584,13 @@ def main(argv=None):
         use(cid, TIMELINE_DEMANDS)
         others.append({"run": run, "id": cid, "method": found[cid]["method"], **run_info(run)})
 
+    # the rule-based drivers run in the same world (geometry, grip) as the best policy
+    main_id = picked.get("ppo") or picked.get("es")
+    world = {k: v for k, v in found[main_id]["physics"].items() if k in GEOMETRY_KEYS} if main_id else {}
+    base_phys = {**physics_of(cfg.__dict__), **world}
     baselines = {}
     for drv in ("light", "reservation"):
-        bench_entries.append((f"base:{drv}", "baseline", drv, physics_of(cfg.__dict__), DEMANDS))
+        bench_entries.append((f"base:{drv}", "baseline", drv, base_phys, DEMANDS))
     bench = run_bench(bench_entries, a.bench, a.workers)
     for cid, p in policies.items():
         key = f"pol:{found[cid]['hash']}" if cid in found else "pol:random7"
@@ -511,11 +614,27 @@ def main(argv=None):
         "demands": DEMANDS,
         "bench_setup": {"envs": BENCH_ENVS, "seconds": BENCH_SECONDS, "seed": BENCH_SEED},
     }
-    version = hashlib.sha1(json.dumps(data, sort_keys=True).encode()).hexdigest()[:8]
+    # side-by-side replays (same traffic) of the two rule-based drivers and the best policy
+    replays = None
+    if main_id:
+        mp_ = found[main_id]
+        _, _, payload, phys = pol_entry(mp_)
+        replays = record_replays([
+            ("light", "baseline", "light", base_phys),
+            ("reservation", "baseline", "reservation", base_phys),
+            ("policy", "policy", payload, phys),
+        ], a.workers)
+        replays["policy_id"] = main_id
+        replays["world"] = {k: base_phys[k] for k in ("L", "W", "Rc") if k in base_phys}
+    data["replay_world"] = world_of(base_phys)
+    version = hashlib.sha1(json.dumps([data, replays], sort_keys=True).encode()).hexdigest()[:8]
     copy_src(version, data["built"])
     (OUT / "data").mkdir(exist_ok=True)
     js = "// Generated by site/build.py - do not edit.\nwindow.SC_DATA = " + json.dumps(data, separators=(",", ":")) + ";\n"
     (OUT / "data" / "site-data.js").write_text(js)
+    rjs = "// Generated by site/build.py - do not edit.\nwindow.SC_REPLAYS = " + json.dumps(replays, separators=(",", ":")) + ";\n"
+    (OUT / "data" / "replays.js").write_text(rjs)
+    print(f"  replays.js: {len(rjs) / 1024:.0f} KiB")
     size = sum(f.stat().st_size for f in OUT.rglob("*") if f.is_file())
     print(f"wrote {OUT.relative_to(ROOT)}/ ({size / 1024:.0f} KiB, data {len(js) / 1024:.0f} KiB, version {version})")
     for m, pts in timelines.items():
