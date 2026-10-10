@@ -370,6 +370,7 @@ def main(argv=None):
     p.add_argument("--cfg", default="", help="JSON SimConfig overrides")
     p.add_argument("--init", default="", help="resume from a full checkpoint (state.npz)")
     p.add_argument("--reset-logstd", action="store_true", help="with --init: restart log-std at --logstd-init")
+    p.add_argument("--set-ceiling", type=float, default=0.0, help="with --init: override the stored curriculum ceiling")
     p.add_argument("--eval-every", type=int, default=25)
     p.add_argument("--render-every", type=int, default=100)
     p.add_argument("--seed", type=int, default=0)
@@ -405,6 +406,8 @@ def main(argv=None):
         total_steps = int(z["total_steps"]) if "total_steps" in z.files else 0
         if a.reset_logstd:
             logstd = np.full(A, a.logstd_init)
+        if a.set_ceiling:
+            ceiling = a.set_ceiling
     (out / "args.json").write_text(json.dumps({**vars(a), "actor_sizes": a_sizes, "critic_sizes": c_sizes, "cfg": cfg_d}, indent=1))
     print(f"actor {a_sizes} ({n_params(a_sizes)} params), critic {c_sizes}", flush=True)
 

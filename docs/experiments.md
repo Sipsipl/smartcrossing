@@ -89,3 +89,36 @@ demand 0.05/0.1/0.15/0.2/0.3: light 11.1/17.3/19.5/20.3/21.1, reservation
   well within what turn geometry alone explains.
 - Open: no braking/yielding learned (no gradient yet - crashes are rare at the low
   curriculum demand); low-demand offroad ~10%; ES progress slow (~0.1 exit_ok per 100 gens).
+
+## PPO (smartcrossing/ppo.py) — runs ppo1-ppo8 (reconstructed from runs/*/args.json + logs)
+Pure-numpy PPO with parameter sharing (every car = one sample of the shared policy, own
+per-car reward, alpha 0 = egoist), actor 64-64 tanh (exported in the policy.py format),
+critic with 4 privileged inputs, GAE per car, curriculum: env demand ~ U(demand_lo *
+ceiling, ceiling), ceiling x1.15 when training crash+offroad < safe_bad (0.03) and exit_ok
+> 0.9. Eval = deterministic policy, cli-bench settings (8 envs x 120 s, seed 1000) at
+demand 0.05 / 0.15 every 50 iters (`eval.jsonl`). All with signal on, gamma 0.995 (ppo1:
+0.99), r_time 0.1, r_crash = r_offroad = -2, r_exit +1.
+- ppo1a / ppo1b (n_slots 24, 4x24 envs, lr 3e-4 / 1e-3, demand_start 0.08): cars learned to
+  stand / crawl (timeouts, queue grows); eval @0.05 exit_ok 0.25 / 0.19. Killed at ~100-150 it.
+- ppo2 / ppo3 (2x24 envs, demand 0.03; ppo3 r_crash = r_offroad -3, r_time 0.2): **wrong exits**
+  dominate (~55% of finished cars take the cheapest exit, r_wrong_exit -1 < cost of turning).
+  @0.05 exit_ok 0.32 / 0.30. Killed at ~130 it.
+- ppo4 (n_slots 16, 4x64 envs): same wrong-exit attractor; killed at 37 it.
+- ppo5 (r_wrong_exit -2): wrong exits gone, replaced by offroad (59%); @0.05 exit_ok 0.29.
+- ppo6 (+ r_progress 0.02 route-aware): breakthrough, @0.05 exit_ok 0.70 at it 100
+  (crash 52 cars), @0.15 13.3/min. Killed at 120 it to restart with a smaller policy std.
+- ppo7 = ppo6 config from scratch with logstd_init -1.6, lr_std 1e-2; ppo8 = identical but
+  warm-started from ppo6 it 120 (`--init runs/ppo6/state.npz --reset-logstd`). Both stayed
+  at the curriculum floor (ceiling 0.05-0.058, training demand U(0.015, 0.05)): training
+  crash+offroad ~5% never got below the 3% gate.
+  - ppo7 best eval it 650: @0.05 11.1/min, exit_ok 0.90, 101/1000; @0.15 20.1/min, 0.60, 397/1000.
+  - ppo8 best eval it 700: @0.05 11.25/min, exit_ok 0.91, 91/1000; @0.15 22.3/min, 0.66, 342/1000
+    (beats light's 19.5/min on throughput, but with 1/3 of the cars crashing). Evals fluctuate
+    +-0.05 exit_ok between checkpoints, plateau from ~it 450.
+  - Render (`runs/ppo8/render_0700`): every car drives at ~v_max all the way (spacetime lines
+    straight, never a stop); turners cut diagonally; **no braking / yielding at all**.
+    Crashes = two cars arriving at the same conflict point.
+  - Diagnosis: at training demand ~0.03 a car meets another one in the box rarely (a few
+    crash events per 15k-sample batch), so the gradient for yielding is tiny and noisy;
+    the 3% safety gate keeps the curriculum at that density forever. Killed ppo7 (it 723)
+    and ppo8 (it 842, snapshot `runs/ppo8/state_0842.npz`).

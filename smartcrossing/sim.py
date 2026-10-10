@@ -66,6 +66,8 @@ class SimConfig:
     demand_range: tuple | None = None
     turn_probs: tuple = (1 / 3, 1 / 3, 1 / 3)  # right, straight, left
     signal_noise: float = 0.0  # std of gaussian noise on received signals
+    # perception range (m) of the neighbour block (positions stay scaled by NEIGHBOUR_RANGE)
+    neighbour_vis: float = 30.0
     signal_enabled: bool = True
     # reward weights. Per car (Sim.car_reward); the team reward returned by step() is
     # their sum over the cars of an environment minus the queue cost.
@@ -311,7 +313,7 @@ class Sim:
         ddx = self.x[bi] - x[:, None]  # (M, N) = x_j - x_i
         ddy = self.y[bi] - y[:, None]
         d = np.hypot(ddx, ddy)
-        valid = self.alive[bi] & (d < NEIGHBOUR_RANGE)
+        valid = self.alive[bi] & (d < cfg.neighbour_vis)
         valid[np.arange(len(bi)), ni] = False
         d = np.where(valid, d, np.inf)
         K = min(K_NEIGHBOURS, N)

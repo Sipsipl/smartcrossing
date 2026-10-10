@@ -133,10 +133,10 @@ def obs_layout(cfg: SimConfig) -> dict:
 
 
 # ------------------------------------------------------------------ physics
-PHYSICS_KEYS = ["v_max", "acc_max", "brake_max", "kappa_max", "kappa_rate"]
+PHYSICS_KEYS = ["v_max", "acc_max", "brake_max", "kappa_max", "kappa_rate", "neighbour_vis"]
 # Value a physics field had *before* it existed in SimConfig (checkpoints trained
 # with an older sim do not store it): kappa_rate absent = steering acts instantly.
-LEGACY_PHYSICS = {"kappa_rate": 1e6}
+LEGACY_PHYSICS = {"kappa_rate": 1e6, "neighbour_vis": 30.0}
 
 
 def physics_of(train_cfg: dict) -> dict:
