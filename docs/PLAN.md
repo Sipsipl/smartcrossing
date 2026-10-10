@@ -10,9 +10,17 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
 - No lanes, lane paths, traffic lights, priority rules or driving-side conventions for the
   learning agents. Steering is learned (2D kinematics), not just speed.
 - Old pygame/DQN code was replaced (moved to `legacy/`, kept for reference only).
-- Geometry: 4 arms, road 7 m wide (room for one car per direction), rounded curbs.
+- Geometry (since the wide-crossing change): 4 arms, roads 14 m wide (W = 7 m half width: room
+  for two cars side by side per direction), curb radius Rc = 9 m, arms L = 50 m. The original
+  7 m crossing (W 3.5, Rc 6, no grip limit) is `SimConfig(**sim.NARROW)`; checkpoints trained on
+  it still run on it (`PolicyDriver.load` / viewer physics apply the stored geometry).
+- Tyre grip (physics, not a style penalty): actual curvature <= min(kappa_max, a_lat_max / v^2),
+  a_lat_max = 4 m/s^2, applied after the steering-rate limit. Before, a 5 m turn radius at
+  14 m/s (39 m/s^2) was allowed, which made cars wobble visibly.
 - Reward principle: reward only outcomes (arriving, crashes/off-road, time/delay, waiting
-  demand). Physical limits (max speed, braking, turn radius, steering rate) are fine. No reward
+  demand). Crash / off-road cost = base + factor x impact speed (car-car: relative speed of the
+  pair; off-road: own speed), r_crash = r_offroad = -1.5, -0.1 per m/s; every car involved pays
+  its own term (no blame). Physical limits (max speed, braking, turn radius, steering rate) are fine. No reward
   terms that prescribe driving style (e.g. no penalty for wobbling, no lane-keeping bonus).
   Progress shaping (route distance) is tolerated as a learning aid only; prefer removing it once
   agents can learn without it.
@@ -21,18 +29,23 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
 
 ## Architecture
 - `smartcrossing/sim.py`: batched numpy simulator, state arrays (B envs, N slots).
-  Kinematic unicycle with curvature limit, dt=0.1 s. Cars spawn at a random lateral
-  offset (so no side is preferred), must exit through target arm. Car-car collision via
+  Kinematic unicycle with curvature, steering-rate and grip limits, dt=0.1 s. Cars spawn at a
+  random lateral offset across the full road width (so no side is preferred; `spawn_right` =
+  right half only, used by the rule-based baselines), must exit through target arm. Car-car collision via
   3 discs per car, off-road via rounded-corner distance. Removal on crash/offroad/exit/timeout.
-  Observations are mirror-neutral: own state in a canonical frame (entry arm = south),
-  goal vector, 5 edge rays, K=4 nearest neighbours (ego frame) incl. their signal but
-  NOT their destination. Action = (accel, curvature, signal[n_signal]) in [-1,1].
+  Observations are mirror-neutral: own state in a canonical frame (entry arm = south; position
+  in fixed 10 m units, not scaled by L/W), ego-frame vectors to the exit gate and to the exit
+  mouth (25 m units), 5 edge rays, own curvature and grip-limited max curvature, K=4 nearest
+  neighbours (ego frame: position, heading, speed, curvature, acceleration, signal) but NOT
+  their destination. Action = (accel, curvature, signal[n_signal]) in [-1,1].
   Common random numbers: env b uses traffic stream b % n_scenarios.
-- `smartcrossing/baselines.py`: rule-based references with lanes (light / reservation(AIM) / none).
+- `smartcrossing/baselines.py`: rule-based references with lanes (light / reservation(AIM) / none),
+  1 lane per direction on the 7 m road, 2 on the 14 m road (right-hand traffic).
 - `smartcrossing/render.py`, `metrics.py`, `cli.py` (bench / render).
 - `smartcrossing/ppo.py`: numpy PPO with parameter sharing (main training method since ppo6;
   see experiments.md). `smartcrossing/analyze.py`: signal zero/shuffle interventions,
-  MI(lamp; manoeuvre/braking/region), driving side per arm / manoeuvre.
+  MI(lamp; manoeuvre/braking/region), driving side per arm / manoeuvre, lateral-offset
+  histograms (lanes?), wobble metrics, failure breakdown (solo / per demand / per manoeuvre).
 - SimConfig `neighbour_vis` (perception range, default 30 m) and `speed_control` (action[0] as
   target speed instead of acceleration, default off) are per-policy "interface" settings:
   stored in the checkpoint cfg, applied by `PolicyDriver.load`, exported as viewer physics.
@@ -51,3 +64,15 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
 2. ES training without/with signal; curriculum over demand
 3. Emergence analysis (driving side, signal meaning), agent-type mixing
 4. Browser viewer with sliders (demand, turn mix, signal noise/on-off, population mix)
+
+## Roadmap (owner, after the wide-crossing change)
+- (A) Driving quality: failure breakdown (offroad vs crash, solo vs traffic, per manoeuvre and
+  demand), solo-driving gate (a car alone never leaves the road), impact-speed crash/offroad
+  cost, physically visible neighbour features (curvature, acceleration).  <- current
+- (B) Perception / network: set (attention) encoder over all neighbours instead of K nearest,
+  optional recurrent memory (GRU).
+- (C) Geometry-independent inputs throughout + randomized geometries during training; GPU port
+  (owner has an RTX 3070 Ti, local training later).
+- (D) Norm experiments: >= 20 seeds per configuration; lateral position (driving side, lanes),
+  priority patterns, signal MI, ablations, separately trained populations (cf. Pal et al.,
+  ICLR 2022, "Emergent Road Rules").

@@ -374,6 +374,8 @@ def main(argv=None):
     p.add_argument("--eval-every", type=int, default=25)
     p.add_argument("--render-every", type=int, default=100)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--zero-inputs", default="", help="comma-separated obs indices whose in_scale is set to 0 "
+                   "(input ablation, e.g. 5,6,7 = manoeuvre one-hot; stored in the checkpoint)")
     a = p.parse_args(argv)
 
     out = Path("runs") / a.name
@@ -384,6 +386,8 @@ def main(argv=None):
         cfg = SimConfig(**{**cfg.__dict__, **json.loads(a.cfg)})
     cfg_d = dict(cfg.__dict__)
     in_scale = default_in_scale(cfg)
+    if a.zero_inputs:
+        in_scale[[int(i) for i in a.zero_inputs.split(",")]] = 0.0
     A = act_dim(cfg)
     act_mask = np.ones(A)
     if not cfg.signal_enabled:

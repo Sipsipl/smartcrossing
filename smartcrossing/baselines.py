@@ -12,10 +12,14 @@ is drivable and (b) give lower/upper reference numbers for throughput:
   and then executes that speed plan exactly; an upper reference
 - ``none``: lane-following and car-following only, no intersection control
 
+Arrivals: the baselines set ``cfg.spawn_right`` (cars arrive in the right half of the road,
+as lane-disciplined traffic would; the learning agents spawn anywhere across the width).
+
 Lanes (right-hand traffic): the road has n_lanes(cfg) lanes per direction (1 on the 7 m
 crossing, 2 on the 14 m crossing). Right turners use the right (outer) lane, left turners
-the left (inner) lane, straight cars the lane nearest to their spawn offset; turns end in
-the corresponding lane of the target arm. Cars of different lanes queue independently.
+the left (inner) lane, straight cars the lane nearest to their spawn offset (reservation: every
+car keeps the lane nearest to its spawn offset, the manager resolves the crossing conflicts);
+turns end in the corresponding lane of the target arm. Cars of different lanes queue independently.
 
 All share a path-following steering law (curvature feed-forward + lateral and
 heading feedback, critically damped in the arc-length domain), a speed limit
@@ -34,9 +38,10 @@ K_E, K_H = 0.05, 2 * np.sqrt(0.05)  # lateral / heading feedback gains (per m)
 # merging (lateral error > MERGE_E on the approach, e.g. a car spawned in the oncoming half of
 # the wide road): heading-target law (desired heading offset -K_PM * e, capped at H_MAX, tracked
 # with gain K_HHM per m; ~critically damped), speed capped at V_MERGE_MAX so the grip limit
-# allows the sidestep, and V_MERGE while an oncoming car is in the current corridor
+# allows the sidestep; while an oncoming car is in the strip to cross: no sidestep, crawl at
+# V_MERGE (stop if it is right ahead in the own corridor)
 MERGE_E = 0.8
-K_PM, K_HHM, H_MAX = 0.12, 0.5, 0.35
+K_PM, K_HHM, H_MAX = 0.15, 0.5, 0.5
 V_MERGE, V_MERGE_MAX = 3.0, 9.0
 
 
@@ -111,6 +116,9 @@ class LaneDriver:
         assert control in ("none", "light", "reservation"), control
         self.sim = sim
         self.cfg = sim.cfg
+        # rule-based traffic arrives lane-disciplined (right half of the road); the arrival
+        # times, manoeuvres and the order of the random draws are unchanged (CRN)
+        sim.cfg.spawn_right = True
         self.control = control
         self.green, self.clear = green, clearance
         L, W = self.cfg.L, self.cfg.W
@@ -258,6 +266,8 @@ class LaneDriver:
         key = (b, int(self.sim.uid[b, n]))
         if key not in self.lane:
             m = int(self.sim.man[b, n])
+            if self.control == "reservation":  # the manager resolves every conflict: no lane changes
+                m = STRAIGHT
             if m == RIGHT:
                 lane = 0
             elif m == LEFT:
@@ -308,8 +318,8 @@ class LaneDriver:
                 elif mkey in self.merging and ((abs(e) < 0.15 and abs(np.sin(eh)) < 0.03) or s_now >= path.stop_s):
                     self.merging.discard(mkey)
                 merging = mkey in self.merging
-                hold, back = False, False
-                if merging and len(alive) > 1:
+                hold, back, stop = False, False, False
+                if merging and len(alive) > 1 and uid not in self.committed[b]:
                     # oncoming cars in the strip between me and my lane (incl. my own corridor):
                     # stop and wait (no sidestep) until they have passed or stopped for me;
                     # too close laterally: step back away from them
@@ -319,12 +329,14 @@ class LaneDriver:
                     onc = np.abs((ath[others] - th + np.pi) % (2 * np.pi) - np.pi) > 2 * np.pi / 3
                     toward = -np.sign(e) * lat  # > 0: on the side I have to move to
                     in_strip = (toward > -2.6) & (np.abs(lat) < abs(e) + 2.6)
-                    waiting_for_me = (av[others] < 0.3) & (f > 5.0)
-                    rel = onc & in_strip & (f > -5.0) & (f < 12.0 + 3.0 * av[others]) & ~waiting_for_me
+                    moving = av[others] > 0.3
+                    rel = onc & in_strip & moving & (f > -5.0) & (f < 12.0 + 3.0 * av[others])
                     hold = bool(rel.any())
-                    back = bool((rel & (np.abs(lat) < 2.4) & (toward > 0)).any())
+                    adj = onc & (np.abs(lat) < 2.3) & (f > -5.0) & (f < 9.0) & (toward > 0)
+                    stop = bool((adj & moving).any())  # it has not stopped for me (yet): stop
+                    back = bool((adj & ~moving).any()) and not stop  # it waits for me: give way sideways
                 if merging:
-                    h_des = (np.sign(e) * 0.15 if back else 0.0) if hold else -np.clip(K_PM * e, -H_MAX, H_MAX)
+                    h_des = np.sign(e) * 0.3 if back else 0.0 if hold or stop else -np.clip(K_PM * e, -H_MAX, H_MAX)
                     kappa = path.k[i_ff] + K_HHM * (h_des - eh)
                 else:
                     kappa = path.k[i_ff] - K_E * np.clip(e, -3.0, 3.0) - K_H * np.sin(eh)
@@ -351,7 +363,8 @@ class LaneDriver:
                     # oncoming cars (e.g. a fresh spawn merging out of my lane) only matter
                     # when close; they are treated as standing obstacles
                     oncoming = np.abs(dth) > 2 * np.pi / 3
-                    cand &= ~oncoming | (kmin * STEP < 25.0)
+                    # (not while I am still crossing the box: I must clear it first)
+                    cand &= ~oncoming | ((kmin * STEP < 40.0) & (s_now > path.box_out_s))
                     if self.control == "none":
                         # nobody manages crossing traffic in the box
                         cand &= ~(in_box & (np.abs(dth) > np.pi / 3))
@@ -361,14 +374,15 @@ class LaneDriver:
                         tight = True
                         cand &= ~(np.isin(alive[others], planned) & in_box)
                     if cand.any():
-                        g = (kmin + 1) * STEP - 4.6
+                        # oncoming cars (merging spawns): stop well before them so they can cross
+                        g = (kmin + 1) * STEP - 4.6 - np.where(oncoming, 8.0, 0.0)
                         g = np.where(cand, g, np.inf)
                         m = int(np.argmin(g))
                         gap, v_lead = float(g[m]), float(max(av[others][m] * np.cos(dth[m]), 0.0))
                 # intersection control: an uncommitted car treats the stop line as a wall
                 if before and self.control != "none" and not committed:
                     allowed = False
-                    if not arm_blocked.get((arm, lane)) and not merging:
+                    if not arm_blocked.get((arm, lane)) and abs(e) < 1.0 and not hold:
                         if self.control == "light":
                             if green == arm:
                                 ss, _ = self._predict(path, s_now, v, path.box_out_s + 4.6)
@@ -383,7 +397,7 @@ class LaneDriver:
                         committed = True
                     else:
                         arm_blocked[arm, lane] = True
-                        g = path.stop_s - s_now - 2.5
+                        g = path.stop_s - s_now - (6.0 if merging else 2.5)
                         if g < gap:
                             gap, v_lead = g, 0.0
                 self._path_cur = path
@@ -393,9 +407,9 @@ class LaneDriver:
                     # execute the reserved speed plan (IDM can only make it more careful)
                     a_plan = (plan[1][kk + 1 - plan[0]] - v) / cfg.dt
                     a_idm = self._idm(v, gap, v_lead, s0=1.0, T=0.3) if tight else self._idm(v, gap, v_lead)
-                    acc = min(a_plan, a_idm)
+                    acc = min(a_plan, a_idm, (path.vlim_at(s_now + v * cfg.dt) - v) / cfg.dt)
                 if merging:
-                    acc = min(acc, ((V_MERGE if back else 0.0 if hold else V_MERGE_MAX) - v) / cfg.dt)
+                    acc = min(acc, ((0.0 if stop else V_MERGE if hold or back else V_MERGE_MAX) - v) / cfg.dt)
                 acc = float(np.clip(acc, -cfg.brake_max, cfg.acc_max))
                 act[b, n, 0] = acc / cfg.acc_max if acc > 0 else acc / cfg.brake_max
                 act[b, n, 1] = np.clip(kappa / cfg.kappa_max, -1, 1)

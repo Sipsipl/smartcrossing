@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 
 from smartcrossing.policy import PolicyDriver, default_in_scale, export_json, init_params, layer_sizes, save_npz
-from smartcrossing.sim import LEFT, RIGHT, STRAIGHT, Sim, SimConfig, act_dim
+from smartcrossing.sim import LEFT, NARROW, RIGHT, STRAIGHT, Sim, SimConfig, act_dim
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "viewer" / "test" / "parity_runner.js"
@@ -46,6 +46,7 @@ def export_state(sim: Sim) -> dict:
         "th": sim.th[0].tolist(),
         "v": sim.v[0].tolist(),
         "kappa": sim.kappa[0].tolist(),
+        "acc": sim.acc[0].tolist(),
         "age": sim.age[0].tolist(),
         "prev_dist": sim._prev_dist[0].tolist(),
         "sig": sim.sig[0].tolist(),
@@ -134,7 +135,7 @@ def trajectory_cases(seed, cfg, n_steps=160, every=4):
     return cases
 
 
-def edge_cases(cfg):
+def edge_cases(cfg, tag=""):
     N, A = cfg.n_slots, act_dim(cfg)
     W, L = cfg.W, cfg.L
     hp = np.pi / 2
@@ -170,7 +171,7 @@ def edge_cases(cfg):
         a[13, 1] = -1.0
         if i == 0:  # threshold cases: keep them exactly on their lines
             a[[2, 3, 6, 7, 14, 15], :2] = 0.0
-        cases.append(make_case(f"edge_{i}", sim, a))
+        cases.append(make_case(f"{tag}edge_{i}", sim, a))
         a2 = rng.uniform(-0.2, 0.2, (N, A))
         sim.step(a2[None])  # evolve the same state a little (no arrivals: demand 0)
 
@@ -185,11 +186,25 @@ def edge_cases(cfg):
         push_queue(sp, k, lat, man, grp)
         push_queue(sp, k, -lat, STRAIGHT, 1)
     a = np.zeros((N, A))
-    cases.append(make_case("spawn", sp, a))
+    cases.append(make_case(f"{tag}spawn", sp, a))
     sp2 = copy.deepcopy(sp)
     sp2.alive[0] = False
     sp2.x[0], sp2.y[0] = 1e4, 1e4
-    cases.append(make_case("spawn_all_clear", sp2, a))
+    cases.append(make_case(f"{tag}spawn_all_clear", sp2, a))
+    # grip limit: fast cars steering hard (curvature clipped to a_lat_max / v^2), a slow one
+    # (kappa_max wins), and a head-on crash pair at speed (impact-speed penalty)
+    gp = Sim(dataclasses.replace(cfg, demand=0.0), 1, seed=2)
+    place(gp, 0, 0.5, -30.0, hp, 14.0)
+    gp.kappa[0, 0] = 0.15  # above the grip limit at 14 m/s: clipped in the step
+    place(gp, 1, -1.0, -10.0, hp, 2.0)
+    place(gp, 2, 1.0, 20.0, -hp, 9.0, arm=2)
+    place(gp, 3, 1.3, 15.8, hp, 9.0, arm=0)  # head-on with car 2
+    place(gp, 4, -W + 1.0, -20.0, hp + 0.3, 12.0)  # into the curb at speed
+    gp.acc[0, :5] = [2.0, -7.0, 0.5, -3.0, 0.0]
+    a = np.zeros((N, A))
+    a[:5, 1] = [1.0, 1.0, -1.0, 0.3, 0.8]
+    a[:5, 0] = [0.5, -0.4, 1.0, -1.0, 0.2]
+    cases.append(make_case(f"{tag}grip", gp, a))
     return cases
 
 
@@ -201,7 +216,11 @@ def parity(tmp_path_factory):
     cases += trajectory_cases(1, dataclasses.replace(cfg, demand=0.35, signal_enabled=False, turn_probs=(0.5, 0.2, 0.3)))
     cases += trajectory_cases(2, dataclasses.replace(cfg, demand=0.3, neighbour_vis=55.0), n_steps=80)
     cases += trajectory_cases(3, dataclasses.replace(cfg, demand=0.3, speed_control=True, speed_tau=0.4), n_steps=80)
+    # the old 7 m crossing without grip limit, and lane-disciplined arrivals with a strong grip limit
+    cases += trajectory_cases(4, dataclasses.replace(cfg, demand=0.4, **NARROW), n_steps=80)
+    cases += trajectory_cases(5, dataclasses.replace(cfg, demand=0.4, spawn_right=True, a_lat_max=1.5), n_steps=80)
     cases += edge_cases(cfg)
+    cases += edge_cases(dataclasses.replace(cfg, **NARROW), tag="narrow_")
 
     # policy: real export format (save_npz -> export_json)
     sizes = layer_sizes(cfg)
@@ -263,6 +282,7 @@ def test_case_coverage(parity):
             tot[k] += a[k] - b[k]
     assert all(v > 0 for v in tot.values()), tot
     assert len(parity["cases"]) >= 40
+    assert any(c["cfg"]["W"] == 3.5 for c in parity["cases"]) and any(c["cfg"]["W"] == 7.0 for c in parity["cases"])
 
 
 def test_observe_parity(parity):
@@ -280,7 +300,7 @@ def test_step_parity(parity):
         assert abs(j["queue_cost"] - c["expect"]["queue_cost"]) < TOL, name
         assert s["alive"] == e["alive"], name  # removals and spawns
         alive = np.array(e["alive"])
-        for k in ("x", "y", "th", "v", "age", "prev_dist", "kappa"):
+        for k in ("x", "y", "th", "v", "age", "prev_dist", "kappa", "acc"):
             np.testing.assert_allclose(np.array(s[k]), np.array(e[k]), atol=TOL, err_msg=f"{name}:{k}")
         np.testing.assert_allclose(np.array(s["sig"]), np.array(e["sig"]), atol=TOL, err_msg=f"{name}:sig")
         for k in ("arm", "man", "uid", "group"):

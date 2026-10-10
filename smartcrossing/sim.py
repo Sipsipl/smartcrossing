@@ -70,6 +70,10 @@ class SimConfig:
     # turn (right turn, r ~ 10.75 m) then allows ~6.6 m/s; at 14 m/s r_min = 49 m.
     # 0 disables the limit (the original physics: r_min = 5 m at any speed).
     a_lat_max: float = 4.0
+    # lateral spawn offset: False = uniform over the whole road width (both halves, no side
+    # preferred; the learning setting); True = only the right half (lane-disciplined arrivals,
+    # used by the rule-based baselines: they may rely on rules). Same random draws either way.
+    spawn_right: bool = False
     spawn_speed: float = 8.0
     spawn_clearance: float = 7.0
     # extra spawn clearance (s) per m/s of closing speed between the new car and an
@@ -530,7 +534,8 @@ class Sim:
         # draw every random number unconditionally so streams stay aligned (CRN)
         dem = cfg.demand if self._stream_demand is None else self._stream_demand[:, None]
         arrive = self.rng.random((S, 4)) < dem * cfg.dt
-        lat = self.rng.uniform(-(cfg.W - 1.2), cfg.W - 1.2, (S, 4))
+        lat_lo = 1.0 if cfg.spawn_right else -(cfg.W - 1.2)
+        lat = lat_lo + (cfg.W - 1.2 - lat_lo) * self.rng.random((S, 4))
         man = self.rng.choice([RIGHT, STRAIGHT, LEFT], size=(S, 4), p=np.asarray(cfg.turn_probs) / sum(cfg.turn_probs))
         grp = self.rng.choice(len(self.group_probs), size=(S, 4), p=self.group_probs)
         arrive, lat, man, grp = arrive[self.scen], lat[self.scen], man[self.scen], grp[self.scen]
