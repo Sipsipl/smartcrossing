@@ -39,7 +39,7 @@
       turn_probs: [1 / 3, 1 / 3, 1 / 3],
       signal_noise: 0.0, signal_enabled: true,
       r_exit: 1.0, r_wrong_exit: -1.0, r_crash: -2.0, r_offroad: -2.0,
-      r_timeout: -1.0, r_progress: 0.01, r_time: 0.0, r_queue: 0.0, r_steer: 0.0,
+      r_timeout: -1.0, r_progress: 0.01, r_time: 0.0, r_queue: 0.0,
     };
   }
 
@@ -185,7 +185,6 @@
       this.th = new Float64Array(N);
       this.v = new Float64Array(N);
       this.kappa = new Float64Array(N); // actual curvature (rate limited)
-      this.kappaCmd = new Float64Array(N); // last curvature target in [-1, 1]
       this.sig = new Float64Array(N * S);
       this.arm = new Int32Array(N);
       this.man = new Int32Array(N);
@@ -292,15 +291,12 @@
     step(action) {
       const cfg = this.cfg, N = this.N, S = cfg.n_signal, A = actDim(cfg), dt = cfg.dt;
       const clip = (a) => Math.min(Math.max(a, -1.0), 1.0);
-      const steerChange = new Float64Array(N);
       for (let n = 0; n < N; n++) {
         const a0 = clip(action[n * A]), a1 = clip(action[n * A + 1]);
         const alive = this.alive[n];
         const acc = a0 > 0 ? a0 * cfg.acc_max : a0 * cfg.brake_max;
         const dk = cfg.kappa_rate * dt;
         this.kappa[n] = alive ? this.kappa[n] + Math.min(Math.max(a1 * cfg.kappa_max - this.kappa[n], -dk), dk) : 0.0;
-        steerChange[n] = Math.abs(a1 - this.kappaCmd[n]);
-        this.kappaCmd[n] = alive ? a1 : 0.0;
         for (let q = 0; q < S; q++) this.sig[n * S + q] = alive ? clip(action[n * A + 2 + q]) : 0.0;
         const v = Math.min(Math.max(this.v[n] + acc * dt, 0.0), cfg.v_max);
         const th = this.th[n] + v * this.kappa[n] * dt;
@@ -319,7 +315,7 @@
       const cr = this.carReward, dk = this.doneKind;
       for (let n = 0; n < N; n++) {
         const d = this.distToGate(n);
-        cr[n] = this.alive[n] ? -cfg.r_time * dt - cfg.r_steer * steerChange[n] + cfg.r_progress * (this.prevDist[n] - d) : 0.0;
+        cr[n] = this.alive[n] ? -cfg.r_time * dt + cfg.r_progress * (this.prevDist[n] - d) : 0.0;
         this.prevDist[n] = d;
         dk[n] = 0;
         this.doneUid[n] = this.alive[n] ? this.uid[n] : -1;
@@ -472,7 +468,6 @@
         this.th[n] = Math.atan2(sh, ch);
         this.v[n] = cfg.spawn_speed;
         this.kappa[n] = 0.0;
-        this.kappaCmd[n] = 0.0;
         this.arm[n] = k;
         this.man[n] = head.man;
         this.group[n] = head.grp;
@@ -489,7 +484,7 @@
       const f64 = (a) => Float64Array.from(a);
       this.alive = Uint8Array.from(st.alive.map((b) => (b ? 1 : 0)));
       this.x = f64(st.x); this.y = f64(st.y); this.th = f64(st.th); this.v = f64(st.v);
-      this.kappa = f64(st.kappa); this.kappaCmd = f64(st.kappa_cmd); this.age = f64(st.age); this.prevDist = f64(st.prev_dist);
+      this.kappa = f64(st.kappa); this.age = f64(st.age); this.prevDist = f64(st.prev_dist);
       this.sig = f64(st.sig.flat()); if (this.sig.length !== this.N * S) throw new Error("sig shape");
       this.arm = Int32Array.from(st.arm); this.man = Int32Array.from(st.man);
       this.uid = Int32Array.from(st.uid); this.group = Int32Array.from(st.group);
@@ -504,7 +499,7 @@
       for (let n = 0; n < this.N; n++) sig.push(arr(this.sig.subarray(n * S, n * S + S)));
       return {
         alive: arr(this.alive).map((b) => !!b), x: arr(this.x), y: arr(this.y), th: arr(this.th),
-        v: arr(this.v), kappa: arr(this.kappa), kappa_cmd: arr(this.kappaCmd), age: arr(this.age), prev_dist: arr(this.prevDist), sig,
+        v: arr(this.v), kappa: arr(this.kappa), age: arr(this.age), prev_dist: arr(this.prevDist), sig,
         arm: arr(this.arm), man: arr(this.man), uid: arr(this.uid), group: arr(this.group),
         queues: this.queues.map((q) => q.map((e) => [e.lat, e.man, e.grp])),
         next_uid: this.nextUid, t: this.t,

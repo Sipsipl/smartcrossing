@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Vergleich – Smart Crossing</title>
+<meta name="description" content="Gelernte Autos ohne Regeln im Vergleich mit Ampel und zentralem Verkehrsrechner.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/site.css?v=4327103b">
+</head>
+<body data-page="vergleich">
+<div class="wrap">
+<header class="top"><a class="brand" href="index.html"><svg viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="5" fill="#3b5640"/><path d="M9 0h6v24H9zM0 9h24v6H0z" fill="#46484d"/><rect x="5" y="10.2" width="6" height="3.6" rx="1" fill="#f5a623"/><rect x="10.2" y="14" width="3.6" height="6" rx="1" fill="#4287f5"/></svg>Smart Crossing</a><nav class="nav" aria-label="Seiten"><a href="index.html">Start</a><a href="sehen.html">Was sieht ein Auto?</a><a href="tun.html">Was kann es tun?</a><a href="gehirn.html">Das Gehirn</a><a href="lernen.html">Wie lernen sie?</a><a href="vergleich.html" aria-current="page">Vergleich</a></nav></header>
+<h1>Wie gut sind sie?</h1>
+<p class="lead">Um zu wissen, was „gut“ heißt, gibt es zwei handgeschriebene Vergleichsfahrer. Die dürfen schummeln: Sie haben feste Spuren
+  und Regeln, die ich ihnen einprogrammiert habe.</p>
+<div class="two">
+  <div class="card"><h3 style="margin-top:0">Ampel</h3><p class="small">Jede Zufahrt bekommt reihum Grün, immer nur eine. Leere Zufahrten werden übersprungen.
+    Sicher, aber viel Warterei – die vorsichtige Untergrenze.</p></div>
+  <div class="card"><h3 style="margin-top:0">Zentraler Verkehrsrechner</h3><p class="small">Jedes Auto meldet sich per Funk an und bekommt ein genaues Zeitfenster,
+    in dem es durch die Kreuzung darf („Reservierung“). So würde man es mit perfekter Technik machen – die Obergrenze.</p></div>
+</div>
+
+<h2>Durchsatz: wie viele kommen pro Minute durch?</h2>
+<div id="c-thr"></div>
+<p class="muted small">Die gestrichelte Linie ist die Nachfrage: so viele Autos kommen pro Minute an. Wer darauf liegt, schafft alle.</p>
+<div class="tablewrap card" style="padding:4px 6px"><table class="data" id="t-thr"></table></div>
+
+<h2>Wie viele kommen heil an?</h2>
+<div class="tablewrap card" style="padding:4px 6px"><table class="data" id="t-ok"></table></div>
+<p class="muted small" id="bench-setup"></p>
+
+<h2>Ehrlich gesagt</h2>
+<div class="note warn">
+  <p>Die gelernten Autos sind <b>noch nicht so gut</b> wie Ampel oder Verkehrsrechner. Die beiden kommen ohne einen einzigen Unfall aus,
+    während von den gelernten Autos bei dichtem Verkehr noch viele im Bordstein oder ineinander landen. Sie fahren meistens Vollgas
+    und haben (noch) nicht gelernt zu bremsen oder jemanden vorzulassen.</p>
+  <p style="margin:0">Das ist der Stand eines Hobbyprojekts, kein Endergebnis. Das Spannende ist ja gerade, ob und wie sie ohne Regeln dahin kommen –
+    und dann, ob sie dabei ihre eigene Lampensprache oder einen Rechtsverkehr erfinden.</p>
+</div>
+<footer>Smart Crossing – ein Hobbyprojekt. Alles läuft direkt in deinem Browser, es werden keine Daten gesammelt. Stand: 2026-10-10.</footer>
+</div>
+<script src="data/site-data.js?v=4327103b"></script>
+<script src="js/sim.js?v=4327103b"></script>
+<script src="js/crossing.js?v=4327103b"></script>
+<script src="js/charts.js?v=4327103b"></script>
+<script src="js/pages.js?v=4327103b"></script>
+</body>
+</html>

@@ -101,6 +101,8 @@ class PolicyDriver:
             params, sizes, tcfg = load_npz(p)
             scale = load_in_scale(p)
             plist.append(params)
+        if mute is None:  # policies trained without signal never learned to use their lamp
+            mute = [not load_npz(p)[2].get("signal_enabled", True) for p in str(path).split("+")]
         return cls(sim, plist, sizes, mute=mute, train_cfg=tcfg, in_scale=scale)
 
     def act(self) -> np.ndarray:

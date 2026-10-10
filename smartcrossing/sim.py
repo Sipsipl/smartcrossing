@@ -77,7 +77,6 @@ class SimConfig:
     r_progress: float = 0.01  # per metre of route-aware distance to the target gate (route_dist)
     r_time: float = 0.0  # cost per car per second on the road
     r_queue: float = 0.0  # team-level cost per queued (not yet entered) car per second
-    r_steer: float = 0.0  # cost per car per unit change of the (normalised) curvature target
 
 
 # own state: canonical pos (2), heading (2), speed, manoeuvre one-hot (3), goal vector (2),
@@ -109,17 +108,6 @@ def offroad_point(x, y, W, Rc):
     return corner_dist(x, y, W, Rc) < Rc
 
 
-def _quarter_entry(u, v, du, dv, a, b):
-    """First t >= 0 at which the ray enters the quarter plane {u >= a, v >= b} (inf if
-    never). A zero direction component is treated as +1e-12 (keeps the formula branch-free)."""
-    du = np.where(np.abs(du) < 1e-12, 1e-12, du)
-    dv = np.where(np.abs(dv) < 1e-12, 1e-12, dv)
-    t1, t2 = (a - u) / du, (b - v) / dv
-    lo = np.maximum(np.maximum(np.where(du > 0, t1, -np.inf), np.where(dv > 0, t2, -np.inf)), 0.0)
-    hi = np.minimum(np.where(du < 0, t1, np.inf), np.where(dv < 0, t2, np.inf))
-    return np.where(lo <= hi, lo, np.inf)
-
-
 def _disc_entry(px, py, du, dv, R):
     """First t >= 0 at which the ray (unit direction) enters the disc of radius R around
     the origin, given the ray start (px, py) relative to the disc centre."""
@@ -141,10 +129,20 @@ def ray_edge_dist(x, y, dx, dy, W, Rc, tmax=RAY_RANGE):
     sx = np.array([1.0, 1.0, -1.0, -1.0]).reshape((4,) + (1,) * x.ndim)
     sy = np.array([1.0, -1.0, 1.0, -1.0]).reshape((4,) + (1,) * x.ndim)
     u, v, du, dv = sx * x, sy * y, sx * dx, sy * dy
-    t = np.minimum(
-        np.minimum(_quarter_entry(u, v, du, dv, W, c), _quarter_entry(u, v, du, dv, c, W)),
-        _disc_entry(u - c, v - c, du, dv, Rc),
-    )
+    # two quarter planes {u >= W, v >= c} and {u >= c, v >= W} ; a zero direction
+    # component is treated as +1e-12, which keeps the formula branch-free
+    du_ = np.where(np.abs(du) < 1e-12, 1e-12, du)
+    dv_ = np.where(np.abs(dv) < 1e-12, 1e-12, dv)
+    iu, iv = 1.0 / du_, 1.0 / dv_
+    tWu, tcu, tWv, tcv = (W - u) * iu, (c - u) * iu, (W - v) * iv, (c - v) * iv
+    pu, pv = du_ > 0, dv_ > 0
+    ninf, inf = -np.inf, np.inf
+    lo1 = np.maximum(np.maximum(np.where(pu, tWu, ninf), np.where(pv, tcv, ninf)), 0.0)
+    hi1 = np.minimum(np.where(pu, inf, tWu), np.where(pv, inf, tcv))
+    lo2 = np.maximum(np.maximum(np.where(pu, tcu, ninf), np.where(pv, tWv, ninf)), 0.0)
+    hi2 = np.minimum(np.where(pu, inf, tcu), np.where(pv, inf, tWv))
+    t = np.minimum(np.where(lo1 <= hi1, lo1, inf), np.where(lo2 <= hi2, lo2, inf))
+    t = np.minimum(t, _disc_entry(u - c, v - c, du, dv, Rc))
     return np.minimum(t.min(0), tmax)
 
 
@@ -234,7 +232,6 @@ class Sim:
         self.th = np.zeros((B, N))
         self.v = np.zeros((B, N))
         self.kappa = np.zeros((B, N))  # actual curvature (rate limited)
-        self.kappa_cmd = np.zeros((B, N))  # last curvature target in [-1, 1] (for r_steer)
         self.sig = np.zeros((B, N, cfg.n_signal))
         self.arm = np.zeros((B, N), dtype=np.int64)
         self.man = np.zeros((B, N), dtype=np.int64)  # manoeuvre 1..3
@@ -359,8 +356,6 @@ class Sim:
         acc = np.where(a[..., 0] > 0, a[..., 0] * cfg.acc_max, a[..., 0] * cfg.brake_max)
         dk = cfg.kappa_rate * cfg.dt
         self.kappa = np.where(alive, self.kappa + np.clip(a[..., 1] * cfg.kappa_max - self.kappa, -dk, dk), 0.0)
-        steer_change = np.abs(a[..., 1] - self.kappa_cmd)
-        self.kappa_cmd = np.where(alive, a[..., 1], 0.0)
         self.sig = np.where(alive[..., None], a[..., 2:], 0.0)
         v = np.clip(self.v + acc * cfg.dt, 0.0, cfg.v_max)
         th = self.th + v * self.kappa * cfg.dt
@@ -374,7 +369,7 @@ class Sim:
         self.done_kind = np.zeros(alive.shape, dtype=np.int8)
         self.done_uid = np.where(alive, self.uid, -1)
 
-        cr = np.where(alive, -cfg.r_time * cfg.dt - cfg.r_steer * steer_change, 0.0)
+        cr = np.where(alive, -cfg.r_time * cfg.dt, 0.0)
         dist = self.dist_to_gate()
         cr += np.where(alive, cfg.r_progress * (self._prev_dist - dist), 0.0)
         self._prev_dist = dist
@@ -509,7 +504,6 @@ class Sim:
                 self.th[b, n] = np.arctan2(np.sin(h), np.cos(h))
                 self.v[b, n] = cfg.spawn_speed
                 self.kappa[b, n] = 0.0
-                self.kappa_cmd[b, n] = 0.0
                 self.arm[b, n] = k
                 self.man[b, n] = self.queue_man[b, k]
                 self.group[b, n] = self.queue_grp[b, k]
