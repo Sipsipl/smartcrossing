@@ -347,3 +347,95 @@ reservation only with lateral error < 1 m, executes the plan capped by the path 
 All with 0 crashes, 0 offroad, 0 timeouts, exit_ok 1.00. Narrow crossing @0.15 (regression
 check): light 19.6/min, reservation 31.3/min, 0 crashes. The wide road lifts the light's
 saturation from ~21 to ~26/min and reservation's from 53 to 61/min @0.3 (81/min @0.5).
+
+### PPO on the wide crossing (wide_s0, wide_s1 -> wide_s0r / wide_s1r -> wide_s1ft)
+- Recipe = sig_s0 (dense traffic from the start: ceiling 0.15, demand_lo 0.15, safe_bad 0.05;
+  lr 1e-3 / critic 2e-3, logstd_init -1.6, gamma 0.995, r_progress 0.02 route-aware, r_time 0.1,
+  r_wrong_exit -2), n_slots 24, 1 worker x 64 envs, signal on, from scratch (obs layout changed).
+- wide_s0 / wide_s1 (seed 0 / 1, no reverse gear yet) ran to it ~700; the reverse gear was
+  added then and both were **warm-started** from their state.npz with v_reverse = 2 (same obs
+  layout, physics change only) as wide_s0r / wide_s1r. wide_s1r was switched at it 1067 to the
+  fine-tuning phase (lr 3e-4 / critic 1e-3, 2 workers x 64 envs) = **wide_s1ft**; wide_s0r kept
+  lr 1e-3. Stopped at it 1636 (s1ft) / 1936 (s0r) for the time budget (~1.3 h of training).
+- Learning speed: from scratch to @0.05 exit_ok 0.85 in ~300 it (sig_s0 on the narrow crossing
+  was at ~0.9 there); @0.15 plateau ~0.70-0.75 at lr 1e-3 (s0r until it 1900), fine-tuning
+  lifted s1 to 0.81-0.83 within 300 it (still rising slowly when stopped).
+- Ablation **wide_noman_s0** (`--zero-inputs 5,6,7`: manoeuvre one-hot hidden from actor and
+  critic, otherwise = wide_s0, no reverse, killed at it 330): at equal iterations it trails wide_s0
+  by 5-10 points (it 300: @0.05 0.78 vs 0.86, @0.15 0.59 vs 0.68). The goal vectors alone
+  are enough in principle, but the one-hot speeds learning -> kept.
+
+**Best: wide_s1ft ckpt_1400** (`results/wide_s1ft_ckpt1400.npz` / `.json`), cli-bench settings
+16 envs x 120 s (throughput/min, exit_ok, crash+offroad cars per 1000):
+
+| demand | light (wide) | reservation (wide) | **wide_s1ft 1400** | wide_s0r 1400 | ppo17 5250 (narrow, old physics) |
+|---|---|---|---|---|---|
+| 0.05 | 10.0 / 1.00 / 0 | 10.6 / 1.00 / 0 | 10.4 / 0.980 / 21 | 10.3 / 0.968 / 32 | 10.4 / 0.971 / 29 |
+| 0.15 | 23.0 / 1.00 / 0 | 31.6 / 1.00 / 0 | 26.4 / 0.825 / 175 | 24.8 / 0.779 / 221 | 28.6 / 0.883 / 117 |
+| 0.30 | 25.7 / 1.00 / 0 | 60.9 / 1.00 / 0 | 40.0 / 0.641 / 359 | 35.8 / 0.571 / 429 | 45.1 / 0.713 / 286 |
+| 0.50 | 26.1 / 1.00 / 0 | 81.1 / 1.00 / 0 | 47.5 / 0.480 / 520 | - | - |
+
+Failure breakdown wide_s1ft ckpt_1400 (% of finished cars):
+
+| condition | n | exit ok | crash | offroad | timeout+wrong | R exit/off | S exit/off | L exit/off | thr/min |
+|---|---|---|---|---|---|---|---|---|---|
+| solo | 224 | 100.0 | 0.0 | 0.0 | 0.0 | 100.0/0.0 | 100.0/0.0 | 100.0/0.0 | 7.0 |
+| d0.02 | 158 | 100.0 | 0.0 | 0.0 | 0.0 | 100.0/0.0 | 100.0/0.0 | 100.0/0.0 | 4.94 |
+| d0.05 | 341 | 98.0 | 1.8 | 0.3 | 0.0 | 98.3/0.8 | 97.2/0.0 | 98.3/0.0 | 10.44 |
+| d0.15 | 1024 | 82.5 | 17.2 | 0.3 | 0.0 | 92.0/0.3 | 81.0/0.3 | 73.8/0.3 | 26.41 |
+| d0.3 | 1996 | 64.1 | 35.4 | 0.5 | 0.0 | 81.1/0.1 | 57.6/0.6 | 53.8/0.9 | 39.97 |
+| d0.5 | 3166 | 48.0 | 51.1 | 0.9 | 0.0 | 70.2/0.4 | 41.9/1.0 | 33.4/1.2 | 47.53 |
+
+- **Solo gate passed** (already at it 400 of wide_s0): a single car on the wide crossing with
+  grip limit reaches its exit in 100% of the cases for all three manoeuvres, offroad 0. Offroad in
+  traffic <= 1% -> failures are car-car crashes; left turners and straight cars suffer most.
+- vs baselines: beats the light on throughput from 0.15 up (26.4 vs 23.0 @0.15, 40 vs 25.7 @0.3)
+  and is better than ppo17 at low demand (crash+offroad 21/1000 @0.05 vs 29), but crashes more
+  than ppo17 at 0.15+ (shorter training: ~1.6k vs 5.2k iterations; the wide box has more conflict
+  points and more speed variety). Reservation remains far ahead (61/min @0.3, 0 crashes).
+- **Reverse gear: never used** by the deterministic policies (0 of ~1100 cars at 0.15 in both
+  seeds, frac car-steps 0.0). Cars do brake more than on the narrow road (brake_frac 0.13-0.14 vs
+  0.01-0.04 before; the grip limit forces slowing for turns).
+- **Wobble** (straight arm segments, 16 envs @0.15; "leave" = after the box, no spawn merging):
+
+  | policy | mean abs yaw rate rad/s | kappa sign changes /s | heading std deg | abs lateral speed m/s |
+  |---|---|---|---|---|
+  | ppo17 5250 (narrow, no grip) all / leave | 0.139 / 0.127 | 1.01 / 1.03 | 4.9 / 3.2 | 0.77 / 0.59 |
+  | sig_s0 800 (narrow, no grip) all / leave | 0.116 / 0.108 | 0.94 / 0.82 | 4.5 / 3.1 | 0.64 / 0.55 |
+  | wide_s1ft 1400 (grip) all / leave | 0.194 / 0.190 | 0.83 / 0.80 | 9.4 / 6.8 | 1.29 / 1.06 |
+  | wide_s0r 1400 (grip) all / leave | 0.168 / 0.188 | 0.76 / 0.75 | 9.3 / 6.8 | 1.24 / 1.08 |
+  | reservation (wide) all / leave | 0.023 / 0.006 | 0.21 / 0.00 | 2.1 / 0.3 | 0.15 / 0.03 |
+
+  The grip limit lowers the weaving frequency (curvature sign changes 1.0 -> 0.8 /s) and caps the
+  yaw rate at speed (<= a_lat_max / v = 0.29 rad/s at 14 m/s), but it does **not** remove the
+  weaving: on the 14 m road the cars swing in wider, slower arcs (heading std 6.8 deg vs 3.2,
+  lateral speed ~1 m/s). With no cost for it (outcome-only reward) and room on the road, the
+  policy has no reason to drive straight; the only physics lever left would be stronger limits
+  (kappa_rate, a_lat_max) or a cost that weaving actually incurs physically (e.g. energy /
+  tyre-scrub speed loss; not modelled). Visible in `runs/wide/render_s1ft_1400/sheet.png` (cars 10-20 deg off
+  the arm axis).
+- **Driving side: right-hand traffic in both seeds** (s1ft: approach +1.69 m, 83% right of
+  centre; leave +2.65 m, 91%; s0r: +1.99 m / 86%, +2.86 m / 94%; all four arms alike). On the
+  narrow road seed 0 drove on the left; on the wide road both seeds chose the right (2 seeds only;
+  the conventions are still a symmetry breaking until >= 20 seeds say otherwise, roadmap D).
+- **Lanes: no.** The lateral-offset histograms on the arms are unimodal (approach peak at +2.25 m,
+  std 2.2 m; leave peak +2.75..3.75 m, std 1.4-1.7 m); Sarle's bimodality 0.43-0.48 (< 0.555
+  = uniform). Cars use the right half as one wide "lane", the leaving cars hug the outer side.
+  (`analyze.py --hist` prints the histograms per arm.)
+- **Signal**: still not used by receivers. @0.15 16 envs: s1ft normal 0.825 / zeroed 0.826 /
+  shuffled 0.811 exit_ok; s0r 0.779 / 0.772 / 0.785. (An 8-env run of s0r ckpt_1250 showed
+  0.751 -> 0.704 when zeroed; not reproduced at ckpt_1400 with 16 envs -> noise.) Own lamp
+  encodes manoeuvre (MI 0.35 bit s1ft, 0.12 s0r) and region (0.49 / 0.16 bit), not braking
+  (0.02 bit).
+- Not done (time): TTC / closing-speed neighbour features or a recurrent policy (open problem
+  "cars never brake/yield" - they now do brake 13% of the time, but crashes at 0.15 are still 17%).
+
+## Summary / open problems (after the wide crossing)
+- Physics: grip limit + reverse gear + wide geometry in place, parity-tested; baselines crash-free
+  on both geometries (wide: lane-disciplined arrivals via `spawn_right`).
+- Learning agents: solo driving is perfect; all residual failures are crashes in traffic, rising
+  steeply with demand (1.8% @0.05, 17% @0.15, 35% @0.3). Throughput beats the light from 0.15 up.
+- Wobble persists as a slow weave (physics alone does not remove it on a wide road).
+- No lanes, no signal use, reverse never used; right-hand traffic in both seeds.
+- Next (roadmap B): set/attention encoder over all neighbours, optional memory; longer fine-tuning
+  (wide_s1ft was still improving); more seeds.
