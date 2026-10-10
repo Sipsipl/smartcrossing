@@ -30,6 +30,12 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
   Common random numbers: env b uses traffic stream b % n_scenarios.
 - `smartcrossing/baselines.py`: rule-based references with lanes (light / reservation(AIM) / none).
 - `smartcrossing/render.py`, `metrics.py`, `cli.py` (bench / render).
+- `smartcrossing/ppo.py`: numpy PPO with parameter sharing (main training method since ppo6;
+  see experiments.md). `smartcrossing/analyze.py`: signal zero/shuffle interventions,
+  MI(lamp; manoeuvre/braking/region), driving side per arm / manoeuvre.
+- SimConfig `neighbour_vis` (perception range, default 30 m) and `speed_control` (action[0] as
+  target speed instead of acceleration, default off) are per-policy "interface" settings:
+  stored in the checkpoint cfg, applied by `PolicyDriver.load`, exported as viewer physics.
 - Planned: `policy.py` (shared MLP, numpy), `es.py` (OpenAI-ES, multiprocessing), `viewer/`
   (JS port of sim + policy, sliders, checked against Python via node test vectors).
 

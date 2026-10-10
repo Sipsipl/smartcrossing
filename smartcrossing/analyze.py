@@ -94,7 +94,7 @@ def region(cfg, arm, man, x, y):
 def signal_stats(R, cfg):
     arm, man, x, y, v, acc = R[:, 0].astype(int), R[:, 1].astype(int), R[:, 2], R[:, 3], R[:, 4], R[:, 5]
     sig = R[:, 6:]
-    if sig.shape[1] == 0:
+    if sig.shape[1] == 0 or not sig.any():  # no signal (muted policy)
         return None
     reg = region(cfg, arm, man, x, y)
     bins = np.digitize(sig, [-1 / 3, 1 / 3])
@@ -140,8 +140,10 @@ def side_stats(R, cfg):
     for name, r in (("approach", 0), ("leave", 2)):
         m = ok & (reg == r)
         per_arm = {int(k): round(float(off[m & (cur == k)].mean()), 2) for k in range(4) if (m & (cur == k)).any()}
+        per_man = {nm: round(float(off[m & (man == k)].mean()), 2) for k, nm in ((1, "right"), (2, "straight"), (3, "left"))
+                   if (m & (man == k)).any()}
         out[name] = {"mean_right_offset_m": round(float(off[m].mean()), 3), "frac_right": round(float((off[m] > 0).mean()), 3),
-                     "per_arm": per_arm, "n": int(m.sum())}
+                     "per_arm": per_arm, "per_manoeuvre": per_man, "n": int(m.sum())}
     return out
 
 

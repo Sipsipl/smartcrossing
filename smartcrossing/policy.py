@@ -30,7 +30,8 @@ def default_in_scale(cfg: SimConfig) -> np.ndarray:
     s[8:10] = 2.0  # goal vector
     blk = 6 + cfg.n_signal
     for k in range(K_NEIGHBOURS):
-        s[OBS_DIM + k * blk : OBS_DIM + k * blk + 2] = 3.0  # neighbour relative position
+        # neighbour relative position (~10 m units; a longer perception range keeps far cars in range)
+        s[OBS_DIM + k * blk : OBS_DIM + k * blk + 2] = 3.0 * min(1.0, 30.0 / getattr(cfg, "neighbour_vis", 30.0))
     return s
 
 
@@ -78,6 +79,10 @@ def forward(params: np.ndarray, obs: np.ndarray, sizes, in_scale=None) -> np.nda
     return h
 
 
+# SimConfig fields a checkpoint is run with (value for checkpoints saved before the field existed)
+LEGACY_INTERFACE = {"neighbour_vis": 30.0, "speed_control": False, "speed_tau": 0.5}
+
+
 class PolicyDriver:
     """Drives every car of a Sim with one of several parameter vectors chosen by
     ``sim.group``. ``mute[g]`` forces the signal output of group g to zero."""
@@ -103,9 +108,11 @@ class PolicyDriver:
             plist.append(params)
         if mute is None:  # policies trained without signal never learned to use their lamp
             mute = [not load_npz(p)[2].get("signal_enabled", True) for p in str(path).split("+")]
-        # sensors are part of what a policy learned: run it with the perception range it was
-        # trained with (first policy wins; checkpoints from before the field existed: 30 m)
-        sim.cfg.neighbour_vis = float(load_npz(str(path).split("+")[0])[2].get("neighbour_vis", 30.0))
+        # sensors and the action interface are part of what a policy learned: run it with the
+        # values it was trained with (first policy wins; older checkpoints: the legacy values)
+        tc = load_npz(str(path).split("+")[0])[2]
+        for k, legacy in LEGACY_INTERFACE.items():
+            setattr(sim.cfg, k, type(legacy)(tc.get(k, legacy)))
         return cls(sim, plist, sizes, mute=mute, train_cfg=tcfg, in_scale=scale)
 
     def act(self) -> np.ndarray:
