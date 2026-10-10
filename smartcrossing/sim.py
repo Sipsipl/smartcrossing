@@ -48,8 +48,8 @@ ARM_U = np.array([[0.0, -1.0], [1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]])  # outward 
 
 
 LANE_WIDTH = 3.5  # nominal lane width; only used by the rule-based baselines and delay metrics
-# the original crossing (one car per direction, no grip limit): SimConfig(**NARROW)
-NARROW = {"W": 3.5, "Rc": 6.0, "a_lat_max": 0.0}
+# the original crossing (one car per direction, no grip limit, no reverse): SimConfig(**NARROW)
+NARROW = {"W": 3.5, "Rc": 6.0, "a_lat_max": 0.0, "v_reverse": 0.0}
 
 
 @dataclass
@@ -61,6 +61,11 @@ class SimConfig:
     v_max: float = 14.0  # m/s (~50 km/h)
     acc_max: float = 3.0
     brake_max: float = 7.0
+    # slow reverse gear: speed range [-v_reverse, v_max] (0 = no reverse, the old physics).
+    # Heading/position use the signed speed (steering left while reversing turns the car
+    # clockwise, like a real car); grip uses v^2. Leaving through a wrong arm backwards is a
+    # wrong exit like any other.
+    v_reverse: float = 2.0
     kappa_max: float = 0.2  # 1 / minimum turning radius
     # steering rate limit: the curvature action is a target; the actual curvature moves
     # towards it by at most kappa_rate per second (0.4 = lock to lock in 1 s)
@@ -423,10 +428,18 @@ class Sim:
         if cfg.speed_control:
             v_t = (a[..., 0] + 1.0) * 0.5 * cfg.v_max
             acc = np.clip((v_t - self.v) / cfg.speed_tau, -cfg.brake_max, cfg.acc_max)
+            v = np.clip(self.v + acc * cfg.dt, 0.0, cfg.v_max)  # (no reverse in this interface)
         else:
-            acc = np.where(a[..., 0] > 0, a[..., 0] * cfg.acc_max, a[..., 0] * cfg.brake_max)
+            # pedal: + accelerates forward (acc_max) / brakes a reversing car (brake_max);
+            # - brakes a forward-moving car (brake_max) / accelerates backwards (acc_max) once
+            # stopped. Within one step the speed never crosses 0 (stop, then change direction).
+            u0 = a[..., 0]
+            fwd = self.v > 0
+            bwd = self.v < 0
+            acc = np.where(u0 > 0, u0 * np.where(bwd, cfg.brake_max, cfg.acc_max), u0 * np.where(fwd, cfg.brake_max, cfg.acc_max))
+            v = np.clip(self.v + acc * cfg.dt, -cfg.v_reverse, cfg.v_max)
+            v = np.where((fwd & (v < 0)) | (bwd & (v > 0)), 0.0, v)
         dk = cfg.kappa_rate * cfg.dt
-        v = np.clip(self.v + acc * cfg.dt, 0.0, cfg.v_max)
         kap = self.kappa + np.clip(a[..., 1] * cfg.kappa_max - self.kappa, -dk, dk)
         kg = grip_kappa(cfg, v)  # tyre grip at the new speed (after the steering-rate limit)
         self.kappa = np.where(alive, np.clip(kap, -kg, kg), 0.0)

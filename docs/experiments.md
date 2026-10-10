@@ -278,3 +278,72 @@ demand 0.05 / 0.15 every 50 iters (`eval.jsonl`). All with signal on, gamma 0.99
 - Driving side: a consistent convention per seed emerges with or without signal; seed 0 runs
   (sig_s0, nosig_s0, ppo9/13/17 lineage, coop_a05) drive on the left, seed 1 runs (sig_s1,
   nosig_s1) on the right.
+
+## Wide crossing, grip limit, reverse gear, new observation (runs wide_*)
+Sim changes (all mirrored in `viewer/sim.js`, parity cases added: narrow geometry, strong grip,
+reverse-heavy trajectory, grip/impact/reverse edge cases):
+- **Geometry** default W = 7 (14 m roads, two cars side by side per direction), Rc = 9, L = 50.
+  The old crossing is `SimConfig(**sim.NARROW)` (W 3.5, Rc 6, a_lat_max 0, v_reverse 0).
+  Spawns: uniform over the whole width (both halves), as before.
+- **Tyre grip**: actual curvature clipped to min(kappa_max, a_lat_max / v^2) after the steering-
+  rate limit, a_lat_max = 4 m/s^2 (~0.4 g). Old physics allowed r = 5 m at 14 m/s (39 m/s^2).
+  Turn feasibility: tightest baseline arc (right turn from the right lane, r = 10.75 m) at
+  6.6 m/s, left turn (r = 17.75 m) at 8.4 m/s; at 14 m/s r_min = 49 m.
+- **Reverse gear** (owner decision): speed in [-v_reverse, v_max], v_reverse = 2 m/s. Pedal < 0
+  brakes a forward car (brake_max) and, once stopped, accelerates backwards (acc_max); pedal > 0
+  the mirror image; speed never crosses 0 within a step. Heading uses the signed speed. Backing
+  out of an arm = wrong exit. Baselines never reverse. (`speed_control` interface: no reverse.)
+- **Crash / off-road cost = base + factor x impact speed**: r_crash = r_offroad = -1.5,
+  -0.1 per m/s (car-car: |relative velocity| of the pair, max over partners; off-road: own
+  speed); each car pays its own term (no blame). Range -1.5 (touch) ... -2.9 (14 m/s) ... -4.3
+  (head-on 2 x 14 m/s); order exit +1 > waiting (r_time 0.1/s) > timeout -1 > crash kept.
+  No standing-still / entrance-blocking relapse seen (timeouts 0 in all evals; with r_time 0.1/s a
+  car standing 60 s pays -7).
+- **Observation** (OBS_DIM 17 -> 19, neighbour block 6+2 -> 8+2, obs_dim 48 -> 59): own position
+  in fixed 10 m units (was / L then x5: same values for L = 50), exit-gate vector in 25 m units
+  (was / L x2: same for L = 50), NEW exit-mouth vector (centre of the target arm's mouth, 25 m
+  units), NEW own grip-limited max curvature / kappa_max; per neighbour NEW curvature / kappa_max
+  and actual acceleration / brake_max (brake lights; physically visible). Old checkpoints load
+  through `export_viewer.adapt_inputs` (feature-name remap, rescaled inputs folded into in_scale,
+  new inputs weight 0): ppo17 ckpt_5250 reproduces its bench exactly (28.56/min, 0.883 @0.15).
+- `PolicyDriver.load` / viewer physics now also apply the checkpoint's L, W, Rc, a_lat_max,
+  v_reverse (old checkpoints: the narrow values), so every policy runs on the crossing it learned.
+- New analysis (`analyze.py`): `--breakdown` (solo car = 1 slot per env, and demands; outcome per
+  manoeuvre), wobble (straight arm segments: mean |yaw rate|, curvature sign changes / s, heading
+  std, |lateral speed|; split approach / leave), lane histograms, reverse usage; baselines too.
+
+### Failure breakdown "before" (ppo17 ckpt_5250 on the narrow crossing, 16 envs x 120 s, % of finished cars)
+| condition | n | exit ok | crash | offroad | timeout+wrong | R exit/off | S exit/off | L exit/off | thr/min |
+|---|---|---|---|---|---|---|---|---|---|
+| solo | 256 | 100.0 | 0.0 | 0.0 | 0.0 | 100.0/0.0 | 100.0/0.0 | 100.0/0.0 | 8.0 |
+| d0.02 | 158 | 97.5 | 2.5 | 0.0 | 0.0 | 95.2/0.0 | 97.9/0.0 | 100.0/0.0 | 4.81 |
+| d0.05 | 343 | 97.1 | 2.9 | 0.0 | 0.0 | 95.0/0.0 | 96.3/0.0 | 100.0/0.0 | 10.41 |
+| d0.15 | 1035 | 88.3 | 11.4 | 0.3 | 0.0 | 85.0/0.3 | 85.2/0.6 | 95.4/0.0 | 28.56 |
+| d0.3 | 2024 | 71.3 | 27.7 | 0.9 | 0.0 | 62.2/0.9 | 62.4/0.9 | 90.0/1.1 | 45.12 |
+
+A solo ppo17 car never fails; essentially all failures are car-car crashes (offroad <= 1%).
+Light and reservation: 100% exit at every condition (light: 1.1% timeouts at 0.3).
+
+### Baselines on the wide crossing (cli bench, 16 envs x 120 s, seed 1000)
+Two lanes per direction, right-hand traffic. Lessons from making them crash-free: with uniform
+spawns across both halves, a rule-based car spawned in the oncoming half has to cross the
+leaving traffic (gap acceptance / mutual stopping produced head-on crashes or deadlocks in every
+variant tried). Final design: baselines set `cfg.spawn_right` (lane-disciplined arrivals; same
+arrival times / manoeuvres / random draws, only the lateral offset maps to the right half);
+light: right lane for right turns, left lane for left turns, straight = nearest lane, merging
+with a heading-target law at <= 9 m/s, per-lane stop-line queues; reservation: every car keeps
+the lane nearest its spawn offset (turns from either lane, the manager resolves conflicts),
+reservation only with lateral error < 1 m, executes the plan capped by the path speed limit.
+
+| demand | arrivals/min | light thr/min (delay s) | reservation thr/min (delay s) |
+|---|---|---|---|
+| 0.05 | 11.3 | 10.0 (6.6) | 10.6 (1.6) |
+| 0.10 | 23.2 | 18.5 (12.3) | 21.5 (1.8) |
+| 0.15 | 34.3 | 23.0 (16.8) | 31.6 (2.0) |
+| 0.20 | 45.6 | 24.3 (19.7) | 41.5 (2.2) |
+| 0.30 | 68.6 | 25.7 (21.5) | 60.9 (3.0) |
+| 0.50 | 116.1 | 26.1 (23.1) | 81.1 (4.4) |
+
+All with 0 crashes, 0 offroad, 0 timeouts, exit_ok 1.00. Narrow crossing @0.15 (regression
+check): light 19.6/min, reservation 31.3/min, 0 crashes. The wide road lifts the light's
+saturation from ~21 to ~26/min and reservation's from 53 to 61/min @0.3 (81/min @0.5).

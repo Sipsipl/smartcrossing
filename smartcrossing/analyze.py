@@ -268,28 +268,48 @@ def wobble_stats(T, cfg, min_kappa=0.002):
     # sign changes per car (consecutive steps of the same car inside the segment)
     key = T["env"] * 1e7 + T["uid"]
     order = np.lexsort((T["step"], key))
-    k_o, s_o, ok_o, kap_o = key[order], T["step"][order], ok[order], kap[order]
-    sg = np.where(np.abs(kap_o) < min_kappa, 0, np.sign(kap_o))
-    changes, prev_sign = 0, {}
-    cont = np.r_[False, (k_o[1:] == k_o[:-1]) & (s_o[1:] == s_o[:-1] + 1) & ok_o[1:] & ok_o[:-1]]
-    # last nonzero sign carried forward inside a contiguous run
-    last = 0.0
-    for i in range(len(sg)):
-        if not cont[i]:
-            last = sg[i] if ok_o[i] else 0.0
-            continue
-        if sg[i] != 0:
-            if last != 0 and sg[i] != last:
-                changes += 1
-            last = sg[i]
-    seconds = ok.sum() * cfg.dt
-    return {
-        "yaw_rate_abs_mean": round(float(np.mean(np.abs(v[ok] * kap[ok]))), 4),
-        "kappa_sign_changes_per_s": round(float(changes / max(seconds, 1e-9)), 4),
-        "heading_std_deg": round(float(np.degrees(np.sqrt(np.mean(dh[ok] ** 2)))), 3),
-        "lat_speed_abs_mean": round(float(np.mean(np.abs(v[ok] * np.sin(dh[ok])))), 4),
-        "car_seconds": round(float(seconds), 1),
-    }
+
+    def stats(mask):
+        k_o, s_o, ok_o, kap_o = key[order], T["step"][order], mask[order], kap[order]
+        sg = np.where(np.abs(kap_o) < min_kappa, 0, np.sign(kap_o))
+        cont = np.r_[False, (k_o[1:] == k_o[:-1]) & (s_o[1:] == s_o[:-1] + 1) & ok_o[1:] & ok_o[:-1]]
+        changes, last = 0, 0.0
+        for i in range(len(sg)):  # last nonzero sign carried forward inside a contiguous run
+            if not cont[i]:
+                last = sg[i] if ok_o[i] else 0.0
+                continue
+            if sg[i] != 0:
+                if last != 0 and sg[i] != last:
+                    changes += 1
+                last = sg[i]
+        seconds = mask.sum() * cfg.dt
+        if seconds == 0:
+            return None
+        return {
+            "yaw_rate_abs_mean": round(float(np.mean(np.abs(v[mask] * kap[mask]))), 4),
+            "kappa_sign_changes_per_s": round(float(changes / seconds), 4),
+            "heading_std_deg": round(float(np.degrees(np.sqrt(np.mean(dh[mask] ** 2)))), 3),
+            "lat_speed_abs_mean": round(float(np.mean(np.abs(v[mask] * np.sin(dh[mask])))), 4),
+            "car_seconds": round(float(seconds), 1),
+        }
+
+    # leaving segment: no spawn-offset merging, the cleanest wobble measure
+    return {**stats(ok), "approach": stats(ok & (reg == 0)), "leave": stats(ok & (reg == 2))}
+
+
+def reverse_stats(T):
+    """How much the reverse gear is used: share of car-steps with v < 0, share of cars that
+    ever reversed, mean / max reversing time per reversing car (s)."""
+    if len(T.get("uid", [])) == 0:
+        return None
+    key = T["env"] * 1e7 + T["uid"]
+    rev = T["v"] < -1e-6
+    cars = np.unique(key)
+    rcars, cnt = np.unique(key[rev], return_counts=True)
+    return {"frac_car_steps": round(float(rev.mean()), 5), "frac_cars": round(len(rcars) / max(len(cars), 1), 4),
+            "n_cars": int(len(cars)), "n_reversing_cars": int(len(rcars)),
+            "mean_rev_s": round(float(cnt.mean() * 0.1), 2) if len(cnt) else 0.0,
+            "max_rev_s": round(float(cnt.max() * 0.1), 2) if len(cnt) else 0.0}
 
 
 def side_stats(R, cfg):
@@ -346,6 +366,7 @@ def main(argv=None):
                       for k, v in ls.items() if k != "bin_edges_m"}
             res["lanes"] = ls
             res["wobble"] = wobble_stats(traj, cfg)
+            res["reverse"] = reverse_stats(traj)
     print(json.dumps(res))
 
 

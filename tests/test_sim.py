@@ -149,7 +149,7 @@ def test_crn_queue_attributes_independent_of_policy():
     for i in range(400):
         a = zeros(sim)
         a[0, :, 0] = 1.0  # env 0 drives on (straight ahead)
-        a[1, :, 0] = -1.0  # env 1 stops at once -> its queues back up
+        a[1, :, 0] = np.where(sim.v[1] > 0, -1.0, 0.0)  # env 1 stops at once (no reverse) -> queues back up
         sim.step(a)
         for b in range(2):
             for n in np.nonzero(sim.alive[b])[0]:
@@ -349,3 +349,37 @@ def test_demand_range_per_stream():
         sim.step(zeros(sim))
     lo, hi = np.argmin(sim.demand[:4]), np.argmax(sim.demand[:4])
     assert sim.stats.arrived[hi] > sim.stats.arrived[lo]
+
+
+def test_reverse_gear():
+    cfg = SimConfig(demand=0.0)
+    sim = Sim(cfg, 1, seed=0)
+    place(sim, 0, 0, 2.0, -30.0, np.pi / 2, v=0.5)
+    a = zeros(sim)
+    a[0, 0, 0] = -1.0
+    sim.step(a)
+    assert sim.v[0, 0] == 0.0  # braking stops the car, it does not jump into reverse
+    for _ in range(20):
+        sim.step(a)
+    assert sim.v[0, 0] == pytest.approx(-cfg.v_reverse)  # then reverses, capped
+    y = sim.y[0, 0]
+    a[0, 0, 1] = 1.0  # steer left while reversing: heading turns clockwise
+    th0 = sim.th[0, 0]
+    for _ in range(5):
+        sim.step(a)
+    assert sim.y[0, 0] < y and sim.th[0, 0] < th0
+    # the old physics: no reverse
+    old = Sim(SimConfig(demand=0.0, **NARROW), 1, seed=0)
+    place(old, 0, 0, 1.0, -30.0, np.pi / 2, v=0.0)
+    old.step(a)
+    assert old.v[0, 0] == 0.0
+
+
+def test_reversing_out_of_the_entry_arm_is_a_wrong_exit():
+    cfg = SimConfig(demand=0.0)
+    sim = Sim(cfg, 1, seed=0)
+    place(sim, 0, 0, 2.0, -cfg.L + 0.1, np.pi / 2, v=-2.0, arm=0, man=STRAIGHT)
+    sim.step(zeros(sim))
+    from smartcrossing.sim import DONE_WRONG
+
+    assert sim.done_kind[0, 0] == DONE_WRONG and sim.stats.wrong_exits[0] == 1

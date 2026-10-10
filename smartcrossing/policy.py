@@ -81,7 +81,7 @@ def forward(params: np.ndarray, obs: np.ndarray, sizes, in_scale=None) -> np.nda
 # existed): its sensors / action interface, and the crossing geometry + tyre grip it was
 # trained on (checkpoints from before the wide crossing ran on the 7 m road without grip limit)
 LEGACY_INTERFACE = {"neighbour_vis": 30.0, "speed_control": False, "speed_tau": 0.5,
-                    "L": 50.0, "W": 3.5, "Rc": 6.0, "a_lat_max": 0.0}
+                    "L": 50.0, "W": 3.5, "Rc": 6.0, "a_lat_max": 0.0, "v_reverse": 0.0}
 
 
 class PolicyDriver:

@@ -115,7 +115,7 @@ def push_queue(sim, k, lat, man, grp=0):
 
 
 # ---------------------------------------------------------------- cases
-def trajectory_cases(seed, cfg, n_steps=160, every=4):
+def trajectory_cases(seed, cfg, n_steps=160, every=4, acc_range=(-0.6, 1.0)):
     sim = Sim(cfg, 1, seed=seed)
     sim.group_probs = np.array([0.5, 0.3, 0.2])
     rng = np.random.default_rng(seed + 100)
@@ -126,7 +126,7 @@ def trajectory_cases(seed, cfg, n_steps=160, every=4):
         if t % 25 == 0:
             steer = rng.normal(0, 0.25, N)
         a = np.empty((N, A))
-        a[:, 0] = rng.uniform(-0.6, 1.0, N)
+        a[:, 0] = rng.uniform(*acc_range, N)
         a[:, 1] = steer + rng.normal(0, 0.1, N)
         a[:, 2:] = rng.uniform(-1.3, 1.3, (N, A - 2))  # some beyond [-1, 1] to test clipping
         if t % every == 0 and sim.alive.any():
@@ -200,10 +200,14 @@ def edge_cases(cfg, tag=""):
     place(gp, 2, 1.0, 20.0, -hp, 9.0, arm=2)
     place(gp, 3, 1.3, 15.8, hp, 9.0, arm=0)  # head-on with car 2
     place(gp, 4, -W + 1.0, -20.0, hp + 0.3, 12.0)  # into the curb at speed
+    place(gp, 5, -2.0, -35.0, hp, -1.5)  # reversing, steering left
+    place(gp, 6, 2.0, -38.0, hp, 0.0)  # standing, pedal back -> starts reversing
+    place(gp, 7, 4.0, -38.0, hp, 0.05)  # nearly stopped, braking: stops at 0 (no sign change)
+    place(gp, 8, -4.0, -40.0, hp, -0.1)  # reversing slowly, pedal forward: stops at 0
     gp.acc[0, :5] = [2.0, -7.0, 0.5, -3.0, 0.0]
     a = np.zeros((N, A))
-    a[:5, 1] = [1.0, 1.0, -1.0, 0.3, 0.8]
-    a[:5, 0] = [0.5, -0.4, 1.0, -1.0, 0.2]
+    a[:9, 1] = [1.0, 1.0, -1.0, 0.3, 0.8, 0.7, -0.5, 0.0, 0.2]
+    a[:9, 0] = [0.5, -0.4, 1.0, -1.0, 0.2, -0.6, -1.0, -1.0, 1.0]
     cases.append(make_case(f"{tag}grip", gp, a))
     return cases
 
@@ -219,6 +223,8 @@ def parity(tmp_path_factory):
     # the old 7 m crossing without grip limit, and lane-disciplined arrivals with a strong grip limit
     cases += trajectory_cases(4, dataclasses.replace(cfg, demand=0.4, **NARROW), n_steps=80)
     cases += trajectory_cases(5, dataclasses.replace(cfg, demand=0.4, spawn_right=True, a_lat_max=1.5), n_steps=80)
+    # mostly braking: cars stop and use the reverse gear
+    cases += trajectory_cases(6, dataclasses.replace(cfg, demand=0.4), n_steps=120, acc_range=(-1.0, 0.4))
     cases += edge_cases(cfg)
     cases += edge_cases(dataclasses.replace(cfg, **NARROW), tag="narrow_")
 

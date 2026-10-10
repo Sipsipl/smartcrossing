@@ -39,7 +39,7 @@
   function defaultConfig() {
     return {
       L: 50.0, W: 7.0, Rc: 9.0, dt: 0.1,
-      v_max: 14.0, acc_max: 3.0, brake_max: 7.0, kappa_max: 0.2, kappa_rate: 0.4, a_lat_max: 4.0,
+      v_max: 14.0, acc_max: 3.0, brake_max: 7.0, v_reverse: 2.0, kappa_max: 0.2, kappa_rate: 0.4, a_lat_max: 4.0,
       spawn_right: false, spawn_speed: 8.0, spawn_clearance: 7.0, spawn_headway: 1.5,
       max_age: 60.0, n_slots: 32, n_signal: 2, demand: 0.15, demand_range: null,
       turn_probs: [1 / 3, 1 / 3, 1 / 3],
@@ -321,11 +321,19 @@
       for (let n = 0; n < N; n++) {
         const a0 = clip(action[n * A]), a1 = clip(action[n * A + 1]);
         const alive = this.alive[n];
-        const acc = cfg.speed_control
-          ? Math.min(Math.max(((a0 + 1.0) * 0.5 * cfg.v_max - this.v[n]) / cfg.speed_tau, -cfg.brake_max), cfg.acc_max)
-          : (a0 > 0 ? a0 * cfg.acc_max : a0 * cfg.brake_max);
+        const v0 = this.v[n];
+        let v;
+        if (cfg.speed_control) {
+          const acc = Math.min(Math.max(((a0 + 1.0) * 0.5 * cfg.v_max - v0) / cfg.speed_tau, -cfg.brake_max), cfg.acc_max);
+          v = Math.min(Math.max(v0 + acc * dt, 0.0), cfg.v_max); // no reverse in this interface
+        } else {
+          // pedal (sim.py): + accelerates forward / brakes a reversing car, - brakes a forward car /
+          // accelerates backwards once stopped; never crosses 0 within one step
+          const acc = a0 > 0 ? a0 * (v0 < 0 ? cfg.brake_max : cfg.acc_max) : a0 * (v0 > 0 ? cfg.brake_max : cfg.acc_max);
+          v = Math.min(Math.max(v0 + acc * dt, -cfg.v_reverse), cfg.v_max);
+          if ((v0 > 0 && v < 0) || (v0 < 0 && v > 0)) v = 0.0;
+        }
         const dk = cfg.kappa_rate * dt;
-        const v = Math.min(Math.max(this.v[n] + acc * dt, 0.0), cfg.v_max);
         const kap = this.kappa[n] + Math.min(Math.max(a1 * cfg.kappa_max - this.kappa[n], -dk), dk);
         const kg = gripKappa(cfg, v); // tyre grip at the new speed (after the steering-rate limit)
         this.kappa[n] = alive ? Math.min(Math.max(kap, -kg), kg) : 0.0;

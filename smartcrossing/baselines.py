@@ -411,6 +411,8 @@ class LaneDriver:
                 if merging:
                     acc = min(acc, ((0.0 if stop else V_MERGE if hold or back else V_MERGE_MAX) - v) / cfg.dt)
                 acc = float(np.clip(acc, -cfg.brake_max, cfg.acc_max))
+                if v <= 0.0:  # the reference drivers never use the reverse gear
+                    acc = max(acc, 0.0)
                 act[b, n, 0] = acc / cfg.acc_max if acc > 0 else acc / cfg.brake_max
                 act[b, n, 1] = np.clip(kappa / cfg.kappa_max, -1, 1)
         return act
