@@ -22,10 +22,13 @@ networks are tiny, so a hand-written tanh-MLP backward pass is enough).
   poetry run python -m smartcrossing.ppo --name ppo1 --iters 400 [--no-signal] [--alpha 0.0]
 """
 
+import os
+
+os.environ.setdefault("OMP_NUM_THREADS", "1")  # small matmuls; avoid thread contention with workers
+
 import argparse
 import json
 import multiprocessing as mp
-import os
 import subprocess
 import sys
 import time
