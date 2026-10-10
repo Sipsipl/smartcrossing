@@ -437,5 +437,89 @@ Failure breakdown wide_s1ft ckpt_1400 (% of finished cars):
   steeply with demand (1.8% @0.05, 17% @0.15, 35% @0.3). Throughput beats the light from 0.15 up.
 - Wobble persists as a slow weave (physics alone does not remove it on a wide road).
 - No lanes, no signal use, reverse never used; right-hand traffic in both seeds.
-- Next (roadmap B): set/attention encoder over all neighbours, optional memory; longer fine-tuning
-  (wide_s1ft was still improving); more seeds.
+- Next (roadmap B): set/attention encoder over all neighbours, optional memory; more seeds.
+  (Longer fine-tuning was tried afterwards, see below: plateau at ~17% @0.15; best now
+  `results/wide_s1ft2_ckpt2650`.)
+
+## Fine-tune continuation on the wide crossing (wide_s1ft2, wide_s0ft)
+- Owner cap for this round: ~50 min of training per line (development phase; long runs only
+  before merges), then evaluate. No code or sim changes.
+- **wide_s1ft2**: warm start `runs/wide_s1ft/state.npz` (it 1636), same recipe as wide_s1ft
+  (lr 3e-4 / critic 1e-3, lam 0.95, 2 workers x 64 envs, seed 1, ceiling 0.15, demand_lo 0.15);
+  it 1637 -> 2723 (stopped). **wide_s0ft**: warm start `runs/wide_s0r/state.npz` (it 1936),
+  switched to the same fine-tuning lr (was 1e-3), 1 worker x 64 envs, seed 0; it 1937 -> 3507.
+  Its curriculum ceiling rose 0.15 -> 0.1725 at it 2306 (s1 never raised).
+- Training stats (mean of first / last 100 it): s1ft2 exit 0.876 -> 0.889, crash+off 0.124 ->
+  0.111; s0ft 0.835 -> 0.841, 0.165 -> 0.159. Both lines are **on a plateau**.
+- Every checkpoint (every 50 it) robust-benched @0.15 (cli bench 32 envs x 120 s, seed 1000):
+  s1ft2 1650-2700: 165-199 crash+offroad/1000 (mean ~178; ckpt_1400 of wide_s1ft: 185);
+  s0ft: 256 at it 1950, then 183-212 from it 2300 on. Finalists re-benched at 0.05 / 0.3 and at
+  0.15 with seed 2000 (a different traffic set; checkpoint selection on seed 1000 is biased).
+
+Robust bench (32 envs x 120 s; throughput/min, exit_ok, crash+offroad cars per 1000):
+
+| demand | light | reservation | wide_s1ft 1400 | **wide_s1ft2 2650** | wide_s1ft2 2500 | wide_s0ft 2850 | ppo17 5250 (narrow) |
+|---|---|---|---|---|---|---|---|
+| 0.05 | 9.8 / 1.00 / 0 | 10.4 / 1.00 / 0 | 10.0 / 0.951 / 49 | 10.0 / 0.949 / 51 | 10.0 / 0.960 / 40 | 9.9 / 0.951 / 49 | 10.2 / 0.962 / 38 |
+| 0.15 | 23.0 / 1.00 / 0 | 32.7 / 1.00 / 0 | 27.0 / 0.815 / 185 | 27.5 / 0.832 / 168 | 27.4 / 0.833 / 167 | 26.9 / 0.817 / 183 | 27.8 / 0.833 / 167 |
+| 0.15 seed 2000 | - | - | 26.4 / 0.807 / 193 | 27.1 / 0.827 / 173 | 27.3 / 0.836 / 164 | 26.4 / 0.809 / 191 | 28.4 / 0.859 / 141 |
+| 0.30 | 25.4 / 1.00 / 1 | 62.4 / 1.00 / 0 | 41.0 / 0.636 / 364 | 42.4 / 0.665 / 335 | 41.3 / 0.643 / 357 | 38.6 / 0.601 / 399 | 46.0 / 0.71 / 290 |
+
+(The 16-env numbers quoted for ckpt_1400 above, 21 / 175 / 359, are a luckier traffic set; at
+32 envs it is 49 / 185 / 364. The 0.05 rate is dominated by few events: ~10 crashed cars.)
+- Result: ~1.1k more fine-tuning iterations bought ~15-20 / 1000 at 0.15 and ~30 / 1000 at 0.3,
+  nothing at 0.05. On seed 1000 the wide policy now **matches ppo17 at 0.15 (168 vs 167)**, but
+  on the second traffic set ppo17 is still better (141 vs 173), so "matched" is within noise at
+  best. Throughput stays above the light from 0.15 up (27.5 vs 23.0; 42.4 vs 25.4 @0.3).
+  2500 vs 2650 are equivalent (mean over the four cells 182 both); **2650 chosen** for fewer
+  off-road cars (8-10 vs 28-32 @0.15) and the best 0.3 value.
+- Seed 0 trails seed 1 by ~15-35 / 1000 at every demand despite more iterations (it had the
+  higher lr until it 1936).
+
+Failure breakdown wide_s1ft2 ckpt_2650 (`analyze --breakdown`, 16 envs x 120 s, % of finished cars):
+
+| condition | n | exit ok | crash | offroad | timeout+wrong | R exit/off | S exit/off | L exit/off | thr/min |
+|---|---|---|---|---|---|---|---|---|---|
+| solo | 224 | 100.0 | 0.0 | 0.0 | 0.0 | 100.0/0.0 | 100.0/0.0 | 100.0/0.0 | 7.0 |
+| d0.02 | 158 | 98.7 | 1.3 | 0.0 | 0.0 | 100.0/0.0 | 97.9/0.0 | 97.9/0.0 | 4.88 |
+| d0.05 | 342 | 96.5 | 3.5 | 0.0 | 0.0 | 100.0/0.0 | 95.3/0.0 | 93.9/0.0 | 10.31 |
+| d0.15 | 1016 | 86.2 | 13.4 | 0.4 | 0.0 | 95.7/0.0 | 81.7/0.9 | 80.9/0.3 | 27.38 |
+| d0.3 | 1996 | 65.6 | 33.8 | 0.6 | 0.0 | 86.6/0.3 | 60.8/0.4 | 49.5/1.1 | 40.91 |
+| d0.5 | 3033 | 50.4 | 48.3 | 1.2 | 0.0 | 77.1/0.6 | 42.8/1.2 | 32.7/1.9 | 47.81 |
+
+Solo gate still 100%; offroad <= 1.2%; failures are car-car crashes of straight and left cars
+(right turners 96% ok @0.15). (This 16-env set gives 138 / 1000 @0.15; the 48-env run below
+201 - scenario variance is large, use the 32-env bench for comparisons.)
+
+Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
+- **Wobble** (straight arm segments; all / leave):
+
+  | policy | mean abs yaw rate rad/s | kappa sign changes /s | heading std deg | abs lateral speed m/s |
+  |---|---|---|---|---|
+  | wide_s1ft 1400 | 0.194 / 0.190 | 0.83 / 0.80 | 9.4 / 6.8 | 1.29 / 1.06 |
+  | wide_s1ft2 2650 | 0.228 / 0.223 | 1.02 / 1.13 | 9.7 / 6.7 | 1.31 / 1.02 |
+  | wide_s0ft 2850 | 0.197 / 0.208 | 0.93 / 0.91 | 9.0 / 7.0 | 1.17 / 1.07 |
+
+  Fine-tuning did not reduce the weave; s1 even steers a bit more often (sign changes 0.8 ->
+  1.1 /s on the leave segments) at the same amplitude (heading std ~6.7 deg). As expected with
+  an outcome-only reward.
+- **Braking / reverse**: brake_frac 0.178 (s1) / 0.174 (s0), up from 0.13-0.14. Reverse gear:
+  3 of 1090 cars in s1ft2 2650 reverse briefly (~1.7 s, 0.06% of car-steps); s0ft never.
+- **Driving side**: right-hand traffic in both seeds, all four arms: s1 approach +2.08 m (90%
+  right of centre), leave +3.24 m (94%); s0 approach +1.50 m (82%), leave +3.40 m (96%).
+- **Lanes: no.** Approach histograms unimodal (s1 peak +2.25 m, std 2.1 m, bimodality 0.49; s0
+  +1.25 m, 0.41). The s1 leave histogram (peak +4.0..+5.0 m, std 1.6 m) has a shoulder at
+  +2..+3 m and a bimodality coefficient of 0.57 (just above 0.555, driven by skew; one mode);
+  s0 leave 0.50. Not two lanes.
+- **Lamps**: no reliable receiver use. 16 envs showed normal 138 / zeroed 162 / shuffled 192
+  per 1000 for 2650, but with 48 envs: 2650 201 / 195 / 204, 2500 187 / 198 / 205, 2700
+  191 / 193 / 209 -> zeroing does nothing; shuffling costs ~+10-18 / 1000 in all three
+  (a hint at most; a shuffled lamp is out-of-distribution input). s0ft: 192 / 183 / 173 (16
+  envs). Own lamp: MI manoeuvre 0.25 bit, region 0.38, braking 0.02 (s1); 0.14 / 0.13 / 0.01 (s0).
+- Saved: `results/wide_s1ft2_ckpt2650.npz/.json` (best, seed 1), `results/wide_s0ft_ckpt2850.npz/.json`
+  (best seed 0 by 32-env bench @0.15, for the driving-side comparison). The .json is
+  `export_viewer.load_policy` output (same format as `wide_s1ft_ckpt1400.json`). Tests: 46 passed.
+- Conclusion: the K-nearest MLP with this reward has plateaued at ~17% crashed cars @0.15 on the
+  wide crossing (ppo17 needed 5.2k it for the same level on the narrow one). Further fine-tuning
+  is unlikely to reach < 50 / 1000; next steps remain roadmap B (set encoder, memory) or
+  TTC/closing-speed features.
