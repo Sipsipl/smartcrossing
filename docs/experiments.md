@@ -62,3 +62,30 @@ demand 0.05/0.1/0.15/0.2/0.3: light 11.1/17.3/19.5/20.3/21.1, reservation
   spawn point, time out (-1.5) but keep the queue from entering, so far fewer cars can
   fail. 0 exits. Team reward without a cost for queued demand has this exploit.
 - Fix: es-side `--r-queue` penalty per queued car per second.
+
+## es5 — warm start from es3 + input scaling + route-aware shaping + queue penalty (new sim)
+- Hypothesis: with the entrance-blocking exploit priced in (`--r-queue 0.1` per queued
+  car-second) and the corner-cutting pull removed (`--r-geo 0.03`, sim `r_progress 0`),
+  ES gets past the right-turn plateau. Warm start from es3 (first-layer weights divided by
+  the new input scale so the network function is unchanged; gen-0 exit_ok 0.61 = es3).
+- Config: `--init runs/es3/current.npz --seconds 35 --scen 3 --sigma 0.08 --lr 0.03
+  --demand-start 0.05 --r-geo 0.03 --r-queue 0.1 --cfg {"r_progress":0,"r_offroad":-1,
+  "r_timeout":-1.5,"max_age":20}`, signal on, pop 48, ~6.5-7 s/gen. Stopped at gen ~310
+  (time budget); curriculum ceiling reached only 0.078.
+- Per-manoeuvre (demand 0.05, 16 envs x 60 s): right 0.86 (was 0.00 in es2), straight 0.88,
+  left 0.86 exit_ok; residual losses mostly offroad, some crashes.
+- Bench (cli, 8 envs x 120 s), `runs/es5/final_g310.npz`:
+  - demand 0.05: throughput 9.9/min, exit_ok 0.80, crash+offroad 201/1000 (16 crash, 24 offroad)
+  - demand 0.15: throughput 17.6/min, exit_ok 0.52, 478/1000 (67 crash, 191 offroad)
+  - reference (new sim): light 11.1 / 19.5, reservation 12.0 / 32.2 per min, 0 crashes.
+  - `best.npz` (gen 160, best fixed-seed eval score) is slightly worse: 9.3/min @0.05, 15.6/min @0.15.
+- Observations (`runs/es5/render_final_d015/sheet.png`): cars always drive at ~v_max
+  (delay ~0.5 s, never brake or yield), turners cut diagonally through the box from the
+  entry mouth to the exit mouth. At 0.15 the dominant failure is offroad, presumably cars
+  swerving around each other at full speed. Roof lamps look manoeuvre-dependent (left
+  turners mostly magenta) - unverified, needs MI(signal; manoeuvre) analysis.
+- Driving side: none yet. Mean right-offset (relative to travel direction) on approach
+  +0.11 m (50% on right), when leaving +0.64 m (57% on right) - a weak right bias on exit,
+  well within what turn geometry alone explains.
+- Open: no braking/yielding learned (no gradient yet - crashes are rare at the low
+  curriculum demand); low-demand offroad ~10%; ES progress slow (~0.1 exit_ok per 100 gens).
