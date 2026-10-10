@@ -99,6 +99,7 @@
   function initStart() {
     const types = defaultTypes();
     const cx = makeCrossing($("stage"), { types, speeds: [1, 2, 4, 8], speed: 1, select: false, warmup: 20 });
+    window.__sc = cx;
     const c = cx.controls;
     const apply = () => {
       c.demand = +$("demand").value;
@@ -390,11 +391,12 @@
     function show() {
       const p = extra ? Object.assign({}, pol(extra.id)) : tl()[idx];
       $("tt-ticks").querySelectorAll("button").forEach((b, i) => b.setAttribute("aria-pressed", String(!extra && i === idx)));
-      const chain = (D.chains[method] || []).find((c) => c.run === p.run);
+      const chainAll = (D.chains[method] || []).filter((c) => ((D.curves[method] || {})[c.run] || []).length);
+      const phase = chainAll.findIndex((c) => c.run === p.run);
+      const chain = chainAll[phase];
       const note = extra ? extra.note : p.id === "zufall" ? "Vor dem Training: alle Gewichte sind Zufallszahlen. Die Autos fahren irgendwie los." : chain && chain.note;
       const b05 = p.bench["0.05"], b15 = p.bench["0.15"];
-      const runName = (r) => (chain && chain.label) || p.run_label || r;
-      $("tt-now").innerHTML = `<b>${extra ? (extra.label || extra.run) : genLabel(p)}</b>${p.run && !extra ? ` <span class="muted small">(${runName(p.run)})</span>` : ""}<br>
+      $("tt-now").innerHTML = `<b>${extra ? (extra.label || extra.run) : genLabel(p)}</b>${chain && !extra ? ` <span class="muted small">(Abschnitt <span class="num-inline">${phase + 1}</span> der Lernkurve)</span>` : ""}<br>
         <span class="small">${note || ""}</span><br>
         <span class="small muted">Gemessen in 8 × 2 Minuten Simulation: bei wenig Verkehr kommen <b>${pct(b05 && b05.exit_ok_rate)}</b> der Autos an,
         bei mittlerem Verkehr <b>${pct(b15 && b15.exit_ok_rate)}</b> (${num(b15 && b15.throughput_per_min)} Autos/min).</span>`;
@@ -419,15 +421,19 @@
 
     function drawCurves() {
       const curves = D.curves[method] || {};
-      const runs = Object.keys(curves);
-      const pts = runs.flatMap((r) => curves[r]);
-      if (!pts.length) { $("curves").innerHTML = `<p class="muted">Keine Logdaten.</p>`; return; }
-      const k = Math.max(1, Math.round(pts.length / 80));
-      const ser = (key) => runs.flatMap((r) => SCX.smooth(curves[r].filter((p) => p[key] !== undefined).map((p) => [p.x, p[key]]), k));
-      const chain = D.chains[method] || [];
-      const markers = chain.filter((c) => c.offset > 0).map((c) => ({ x: c.offset, label: c.short || c.run }));
+      const chain = (D.chains[method] || []).filter((c) => (curves[c.run] || []).length);
+      if (!chain.length) { $("curves").innerHTML = `<p class="muted">Keine Logdaten.</p>`; return; }
+      // phases = runs of the warm-start chain; each starts at the first logged point of its run
+      // (iteration counts continue across warm starts) and is cut where the next one starts
+      const starts = chain.map((c) => Math.min(...curves[c.run].map((p) => p.x)));
+      const part = (i) => curves[chain[i].run].filter((p) => i + 1 >= chain.length || p.x < starts[i + 1]);
+      const total = chain.reduce((a, _, i) => a + part(i).length, 0);
+      const k = Math.max(1, Math.round(total / 80));
+      const ser = (key) => chain.flatMap((_, i) => SCX.smooth(part(i).filter((p) => p[key] !== undefined).map((p) => [p.x, p[key]]), k));
+      const phases = chain.map((c, i) => ({ x: starts[i], n: i + 1, title: c.step || c.note || c.label || c.run }));
       const leg = $("chain-legend");
-      if (leg) leg.innerHTML = chain.map((c) => `<li><b>${c.short || c.run}</b> – ${c.label || c.run}${c.note ? `: <span class="muted">${c.note}</span>` : ""}</li>`).join("");
+      if (leg) leg.innerHTML = chain.map((c, i) => `<li><span class="num">${i + 1}</span><span>${c.step || c.note || c.label || c.run}</span></li>`).join("");
+      const markers = [];
       if (!extra) {
         const cur = tl()[idx];
         if (cur) markers.push({ x: cur.tlGen, label: "▼ Zeitreise" });
@@ -440,7 +446,7 @@
         ],
         yMin: 0, yMax: 1, yFmt: (v) => `${Math.round(v * 100)} %`, xLabel: method === "ppo" ? "Trainingsschritt" : "Generation",
         xTipFmt: (x) => `${method === "ppo" ? "Schritt" : "Generation"} ${Math.round(x)}`,
-        markers, directLabels: true, height: 280, aria: "Lernkurve: Anteil angekommener, verunglückter und abgekommener Autos",
+        markers, phases, directLabels: true, height: 300, aria: "Lernkurve: Anteil angekommener, verunglückter und abgekommener Autos, mit nummerierten Trainingsabschnitten",
       });
     }
     setupSlider();
@@ -450,7 +456,71 @@
   }
 
   // ------------------------------------------------------------------ comparison
+  /** Three canvases replaying the same traffic (pre-recorded by site/build.py) in sync. */
+  function initSideBySide(host) {
+    const R = window.SC_REPLAYS;
+    if (!host) return;
+    if (!R || !R.runs) { host.innerHTML = `<p class="muted">Keine Aufzeichnungen vorhanden.</p>`; return; }
+    const DRIVERS = [["light", "Ampel"], ["reservation", "Verkehrsrechner"], ["policy", "Gelernte Autos"]].filter(([k]) => R.runs[k]);
+    const LEVELS = ["wenig", "mittel", "viel"];
+    const dems = R.demands.map(String);
+    const world = Object.assign({ L: 50, W: 3.5, Rc: 6 }, R.world);
+    host.innerHTML = `
+      <div class="rp-ctl">
+        <div class="seg" role="radiogroup" aria-label="Verkehr">${dems.map((d, i) => `<input type="radio" name="rp-dem" id="rp-d${i}" value="${d}"${i === 1 ? " checked" : ""}><label for="rp-d${i}">${LEVELS[i] || d}</label>`).join("")}</div>
+        <button class="btn primary" type="button" data-act="play">Pause</button>
+        <div class="seg" role="radiogroup" aria-label="Tempo">${[1, 2, 4].map((s) => `<input type="radio" name="rp-spd" id="rp-s${s}" value="${s}"${s === 1 ? " checked" : ""}><label for="rp-s${s}">${s}×</label>`).join("")}</div>
+        <button class="btn" type="button" data-act="restart">Von vorn</button>
+        <span class="clock" data-act="clock"></span>
+      </div>
+      <div class="rp-grid">${DRIVERS.map(([k, name]) => `
+        <figure class="rp" data-k="${k}"><div class="rp-box"><canvas aria-label="${name}: Kreuzung von oben"></canvas></div>
+          <figcaption><div class="rp-name">${name}</div>
+          <div class="rp-stats"><span><b data-s="thr">–</b> Autos/min</span><span class="bad"><b data-s="bad">0</b> Unfälle</span></div></figcaption></figure>`).join("")}
+      </div>`;
+    const views = DRIVERS.map(([k]) => ({ k, fig: host.querySelector(`.rp[data-k=${k}]`) }));
+    for (const v of views) v.view = new SCX.ReplayView(v.fig.querySelector("canvas"), world);
+    let dem = dems[1] || dems[0], t = 0, speed = 1, running = true, lastTs = null, lastStats = 0, visible = true, dur = 0;
+    const load = () => {
+      for (const v of views) v.view.rep = SCX.decodeReplay(R.runs[v.k][dem], R.q);
+      dur = Math.min(...views.map((v) => v.view.rep.steps * v.view.rep.dt));
+      t = 0; render(true);
+    };
+    const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+    function render(stats) {
+      for (const v of views) v.view.draw(t);
+      if (!stats) return;
+      for (const v of views) {
+        const c = v.view.counts(t);
+        v.fig.querySelector("[data-s=thr]").textContent = c.thr === null ? "–" : num(c.thr);
+        v.fig.querySelector("[data-s=bad]").textContent = c.bad;
+      }
+      host.querySelector("[data-act=clock]").textContent = `${mmss(t)} / ${mmss(dur)}`;
+    }
+    function frame(ts) {
+      if (running && visible) {
+        if (lastTs !== null) t += Math.min((ts - lastTs) / 1000, 0.1) * speed;
+        if (t >= dur) t = 0; // loop
+        lastTs = ts;
+        const now = performance.now(), st = now - lastStats > 200;
+        if (st) lastStats = now;
+        render(st);
+      } else lastTs = null;
+      requestAnimationFrame(frame);
+    }
+    host.querySelectorAll("input[name=rp-dem]").forEach((el) => el.addEventListener("change", () => { dem = el.value; load(); }));
+    host.querySelectorAll("input[name=rp-spd]").forEach((el) => el.addEventListener("change", () => { speed = +el.value; }));
+    const play = host.querySelector("[data-act=play]");
+    play.addEventListener("click", () => { running = !running; play.textContent = running ? "Pause" : "Weiter"; lastTs = null; });
+    host.querySelector("[data-act=restart]").addEventListener("click", () => { t = 0; render(true); });
+    new IntersectionObserver((es) => { visible = es[0].isIntersecting; }).observe(host);
+    load();
+    requestAnimationFrame(frame);
+    window.__rp = { get t() { return t; }, views };
+  }
+
   function initVergleich() {
+    initSideBySide($("side"));
     const rows = [
       { name: "Ampel", note: "Regeln + Spuren", b: D.baselines.light, color: "--c1" },
       { name: "Verkehrsrechner", note: "Regeln + Spuren + Funk", b: D.baselines.reservation, color: "--c2" },

@@ -9,6 +9,8 @@
   const SCENE = { verge: "#3b5640", road: "#46484d", edge: "#8d938f", gate: "rgba(255,255,255,0.35)", text: "rgba(255,255,255,0.8)" };
   const MAX_TYPES = 3;
   const WINDOW_S = 60; // window for throughput and delay
+  const TRAIL_FADE = 5; // s: trails of removed cars fade out
+  const MARK_FADE = 5; // s: crash markers fade out
 
   // ------------------------------------------------------------------ state
   const types = []; // {name, source, placeholder, policy (loaded), share, mute, exits, bad, error}
@@ -35,6 +37,7 @@
 
   let seed = 1;
   let sim, crashMarks, trails, perType;
+  let prev = null; // state before the last sim step: cars are drawn interpolated between the two
   let running = true, speed = 1, acc = 0, lastTs = null;
 
   function activeTypes() {
@@ -47,6 +50,7 @@
     sim = new SC.Sim(cfg, seed);
     crashMarks = [];
     trails = new Map();
+    prev = null;
     perType = types.map(() => ({ exits: 0, bad: 0 }));
     applyControls();
   }
@@ -90,6 +94,7 @@
     if (!per[0]) return;
     const obs = sim.observe();
     const a = SC.act(sim, per.map((t) => t.policy), per.map((t) => t.mute), obs);
+    prev = { uid: Int32Array.from(sim.uid), x: Float64Array.from(sim.x), y: Float64Array.from(sim.y), th: Float64Array.from(sim.th), sig: Float64Array.from(sim.sig) };
     sim.step(a);
     for (const e of sim.events) {
       const g = sim.group[e.n];
@@ -97,9 +102,11 @@
         crashMarks.push({ x: e.x, y: e.y, kind: e.kind, t: sim.t });
         if (perType[g]) perType[g].bad += 1;
       } else if (e.kind === "exit" && perType[g]) perType[g].exits += 1;
-      trails.delete(e.uid);
+      const tr = trails.get(e.uid);
+      if (tr) tr.dead = sim.t; // keep the trail and fade it out
     }
     if (crashMarks.length > 60) crashMarks.splice(0, crashMarks.length - 60);
+    for (const [k, tr] of trails) if (tr.dead !== undefined && sim.t - tr.dead > TRAIL_FADE) trails.delete(k);
     for (let n = 0; n < sim.N; n++) {
       if (!sim.alive[n]) continue;
       const id = sim.uid[n];
@@ -110,7 +117,7 @@
     }
     if (trails.size > 200) {
       const live = new Set(Array.from(sim.uid).filter((u) => u >= 0));
-      for (const k of trails.keys()) if (!live.has(k)) trails.delete(k);
+      for (const [k, tr] of trails) if (!live.has(k) && tr.dead === undefined) tr.dead = sim.t;
     }
   }
 
@@ -127,9 +134,36 @@
     draw();
   }
 
+  function angDiff(a, b) { let d = a - b; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return d; }
+
+  /** Pose of every car between the previous and the current sim state (alpha = elapsed
+   *  fraction of the step); cars that spawned in the last step are not interpolated. */
+  function interp() {
+    const N = sim.N, NS = sim.cfg.n_signal, a = Math.max(0, Math.min(1, acc / sim.cfg.dt));
+    const ip = { x: new Float64Array(N), y: new Float64Array(N), th: new Float64Array(N), s0: new Float64Array(N), s1: new Float64Array(N), slot: new Map() };
+    const ok = prev && prev.uid.length === N;
+    for (let n = 0; n < N; n++) {
+      if (!sim.alive[n]) continue;
+      ip.slot.set(sim.uid[n], n);
+      const s0 = NS > 0 ? sim.sig[n * NS] : 0, s1 = NS > 1 ? sim.sig[n * NS + 1] : 0;
+      if (ok && prev.uid[n] === sim.uid[n]) {
+        ip.x[n] = prev.x[n] + (sim.x[n] - prev.x[n]) * a;
+        ip.y[n] = prev.y[n] + (sim.y[n] - prev.y[n]) * a;
+        ip.th[n] = prev.th[n] + angDiff(sim.th[n], prev.th[n]) * a;
+        const q0 = NS > 0 ? prev.sig[n * NS] : 0, q1 = NS > 1 ? prev.sig[n * NS + 1] : 0;
+        ip.s0[n] = q0 + (s0 - q0) * a; ip.s1[n] = q1 + (s1 - q1) * a;
+      } else {
+        ip.x[n] = sim.x[n]; ip.y[n] = sim.y[n]; ip.th[n] = sim.th[n]; ip.s0[n] = s0; ip.s1[n] = s1;
+      }
+    }
+    ip.t = ok ? sim.t - (1 - a) * sim.cfg.dt : sim.t;
+    return ip;
+  }
+
   function draw() {
     if (!sim) return;
     const cfg = sim.cfg, { L, W, Rc } = cfg;
+    const ip = interp();
     const view = L + 1.5;
     const S = canvas.width;
     px = S / (2 * view);
@@ -171,13 +205,18 @@
     ctx.stroke(); ctx.setLineDash([]);
 
     if ($("trails").checked) {
-      ctx.lineWidth = 0.25; ctx.globalAlpha = 0.45;
-      for (const tr of trails.values()) {
+      ctx.lineWidth = 0.25;
+      for (const [uid, tr] of trails) {
         const p = tr.pts;
-        if (p.length < 4) continue;
+        const f = tr.dead === undefined ? 1 : 1 - (ip.t - tr.dead) / TRAIL_FADE;
+        if (p.length < 4 || f <= 0) continue;
+        ctx.globalAlpha = 0.45 * Math.min(1, f);
         ctx.strokeStyle = MAN_COLOURS[tr.man];
+        const n = tr.dead === undefined ? ip.slot.get(uid) : undefined;
+        const end = n === undefined ? p.length : p.length - 2; // live car: end where it is drawn
         ctx.beginPath(); ctx.moveTo(p[0], p[1]);
-        for (let i = 2; i < p.length; i += 2) ctx.lineTo(p[i], p[i + 1]);
+        for (let i = 2; i < end; i += 2) ctx.lineTo(p[i], p[i + 1]);
+        if (n !== undefined) ctx.lineTo(ip.x[n], ip.y[n]);
         ctx.stroke();
       }
       ctx.globalAlpha = 1;
@@ -188,8 +227,8 @@
     for (let n = 0; n < sim.N; n++) {
       if (!sim.alive[n]) continue;
       ctx.save();
-      ctx.translate(sim.x[n], sim.y[n]);
-      ctx.rotate(sim.th[n]);
+      ctx.translate(ip.x[n], ip.y[n]);
+      ctx.rotate(ip.th[n]);
       roundRect(-2.3, -0.9, 4.6, 1.8, 0.45);
       ctx.fillStyle = MAN_COLOURS[sim.man[n]];
       ctx.fill();
@@ -201,7 +240,7 @@
       ctx.fillRect(0.7, -0.62, 0.6, 1.24);
       // roof lamp: signal (first two dims -> red / blue)
       if (NS > 0) {
-        const s0 = sim.sig[n * NS], s1 = NS > 1 ? sim.sig[n * NS + 1] : 0;
+        const s0 = ip.s0[n], s1 = ip.s1[n];
         ctx.beginPath(); ctx.arc(-0.6, 0, 0.62, 0, 2 * Math.PI);
         ctx.fillStyle = cfg.signal_enabled
           ? `rgb(${Math.round(127 + 127 * s0)},40,${Math.round(127 + 127 * s1)})`
@@ -212,11 +251,11 @@
       ctx.restore();
     }
 
-    // crash / off-road markers (fade over 3 s)
+    // crash / off-road markers (fade out)
     for (const m of crashMarks) {
-      const age = sim.t - m.t;
-      if (age > 3) continue;
-      ctx.globalAlpha = 1 - age / 3;
+      const age = Math.max(0, ip.t - m.t);
+      if (age > MARK_FADE) continue;
+      ctx.globalAlpha = 1 - age / MARK_FADE;
       ctx.strokeStyle = m.kind === "crash" ? "#ff3b30" : "#ffd60a";
       ctx.lineWidth = 0.55;
       const r = 1.6;
@@ -394,7 +433,8 @@
       let steps = 0;
       while (acc >= sim.cfg.dt && steps < 40) { simStep(); acc -= sim.cfg.dt; steps += 1; }
       if (steps === 40) acc = 0;
-      if (steps) { updateStats(); draw(); }
+      if (steps) updateStats();
+      draw(); // every display frame (interpolated between sim steps)
     }
     requestAnimationFrame(frame);
   }

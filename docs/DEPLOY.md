@@ -12,6 +12,8 @@ läuft komplett im Browser der Besucher, es gibt keinen Server und keine Datenba
 | `site/data/bench_cache.json` | Zwischenspeicher der Messungen (damit ein Neubau schnell geht) | ja |
 | `site/public/` | **die fertige Website** – genau dieser Ordner wird veröffentlicht | **ja** |
 
+Der Code liegt auf <https://github.com/Sipsipl/smartcrossing>; jede Seite verlinkt ihn in der Fußzeile.
+
 Warum wird `site/public/` mit eingecheckt? Der Build braucht die Trainingsläufe in `runs/`
 (gitignored, nur lokal vorhanden) sowie Python + Poetry. Cloudflare hat beides nicht. Also
 bauen wir lokal und Cloudflare liefert den fertigen Ordner einfach aus – ohne Build-Schritt.
@@ -51,9 +53,12 @@ poetry run python site/build.py     # baut site/public/ neu
 git add site/ && git commit -m "Website aktualisieren" && git push
 ```
 
-Cloudflare merkt den Push auf `main` und veröffentlicht automatisch neu. Pushes auf andere
-Branches bekommen eine eigene Vorschau-Adresse (`<branch>.<projekt>.pages.dev`) – praktisch,
-um etwas vorher anzusehen.
+Cloudflare merkt den Push auf `main` und veröffentlicht automatisch neu
+(<https://smartcrossing.pages.dev>). Pushes auf andere Branches bekommen eine eigene
+Vorschau-Adresse (`<branch>.<projekt>.pages.dev`) – praktisch, um etwas vorher anzusehen.
+Achtung: Cloudflare kürzt den Branch-Namen dafür auf **28 Zeichen** (Sonderzeichen wie `/`
+werden zu `-`). Beispiel: Branch `claude/youthful-ritchie-fc1lad` →
+<https://claude-youthful-ritchie-fc1l.smartcrossing.pages.dev>.
 
 Nützliche Optionen des Build-Skripts:
 
@@ -61,7 +66,17 @@ Nützliche Optionen des Build-Skripts:
 poetry run python site/build.py --main runs/es5/final_g310.npz   # bestimmtes Gehirn als "bestes" nehmen
 poetry run python site/build.py --bench                          # alle Messungen neu (statt Cache), ~5 min
 poetry run python site/build.py --timeline 8                     # mehr Zwischenstände in der Zeitreise
+poetry run python site/build.py --world wide                     # nur Gehirne der breiten Kreuzung (14 m)
 ```
+
+`--world` wählt, welche Kreuzung die Seite zeigt: `narrow` (Standard, die alte 7-m-Kreuzung),
+`wide` (14 m, Läufe `runs/wide_*`) oder `any`. Ampel und Verkehrsrechner werden immer auf der
+Kreuzung des besten Gehirns gemessen und aufgezeichnet.
+
+Der Build nimmt außerdem für die Seite „Vergleich“ kurze Fahrten auf (`public/data/replays.js`,
+ca. 0,4 MB): Ampel, Verkehrsrechner und das beste Gehirn fahren je 90 s mit genau demselben
+Verkehr (wenig / mittel / viel). Die Aufnahme läuft bei jedem Build neu (ca. 20 s), passt sich
+also automatisch an die aktuelle Simulation und das aktuell beste Gehirn an.
 
 Ohne Optionen nimmt der Build pro Methode (Evolution `runs/es*`, PPO `runs/ppo*`) den
 Checkpoint, der bei mittlerem Verkehr am besten fährt. Die Zeitreise folgt der Kette der

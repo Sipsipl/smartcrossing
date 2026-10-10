@@ -36,7 +36,7 @@
     }
     if (opts.series.length > 1) box.appendChild(legend);
     const W = Math.max(300, box.clientWidth || 600), H = opts.height || 260;
-    const m = { l: 46, r: opts.directLabels ? 92 : 14, t: 14, b: 40 };
+    const m = { l: 46, r: opts.directLabels ? 92 : 14, t: opts.phases && opts.phases.length ? 34 : 14, b: 40 };
     if (W < 420 && opts.directLabels) m.r = 14; // phone: legend only
     const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img", "aria-label": opts.aria || opts.yLabel || "Diagramm" }, box);
     const all = opts.series.flatMap((s) => s.points);
@@ -61,6 +61,19 @@
         const t = el("text", { x: X(mk.x) + (right ? -4 : 4), y: m.t + 10, class: "sep-label", "text-anchor": right ? "end" : "start" }, svg);
         t.textContent = mk.label;
       }
+    }
+    // numbered phase markers: dashed line at x, numbered circle above the plot
+    // (circles that would overlap are pushed right, with a short leader line)
+    let lastCx = -1e9;
+    for (const ph of opts.phases || []) {
+      const x = X(ph.x), cx = Math.max(x, lastCx + 19), cy = 14;
+      lastCx = cx;
+      if (ph.x > xMin) el("line", { x1: x, x2: x, y1: m.t, y2: H - m.b, class: "sep" }, svg);
+      const g = el("g", { class: "phase" }, svg);
+      el("path", { d: `M${cx},${cy + 8} L${x},${m.t}`, class: "sep", fill: "none" }, g);
+      el("circle", { cx, cy, r: 8.5 }, g);
+      const tx = el("text", { x: cx, y: cy + 4, "text-anchor": "middle" }, g); tx.textContent = String(ph.n);
+      if (ph.title) { const ti = el("title", {}, g); ti.textContent = ph.title; }
     }
     const lastYs = [];
     for (const s of opts.series) {
