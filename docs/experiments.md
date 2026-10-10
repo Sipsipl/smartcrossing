@@ -45,3 +45,20 @@ streams (common random numbers inside a worker), n_slots=16.
 - Diagnosis: (a) the sim's euclidean gate-distance progress pulls right/left turners
   straight into the curb corner block; (b) own position is fed as x/L (L = 50 m), so the
   whole intersection box spans only +-0.19 in input space.
+
+## Sim update (commit fd6f9ae, by the sim agent)
+spawn_headway=1.5 s (spawning considers closing speed), queued cars keep their arrival
+attributes (better CRN), separate RNG for signal noise. Runs es1-es4 used the older sim;
+numbers before/after are not directly comparable. Reference throughput (exits/min) at
+demand 0.05/0.1/0.15/0.2/0.3: light 11.1/17.3/19.5/20.3/21.1, reservation
+12.0/22.6/32.2/40.4/52.5 (both 0 crashes). (The baseline numbers above at 5adcdbd are obsolete.)
+
+## es4 — fresh start with input scaling + route-aware shaping
+- Changes: policy input scaling (`policy.default_in_scale`: own position x5, goal x2,
+  neighbour positions x3, stored in the npz/json); sim progress off (`r_progress 0`) and
+  replaced by es-side `--r-geo 0.03` = progress on a route-aware distance (target arm:
+  remaining length; box: distance to target mouth centre; other arms: via their mouth).
+- Result (stopped at gen 58): collapsed to **blocking the entrance**: cars stop near the
+  spawn point, time out (-1.5) but keep the queue from entering, so far fewer cars can
+  fail. 0 exits. Team reward without a cost for queued demand has this exploit.
+- Fix: es-side `--r-queue` penalty per queued car per second.

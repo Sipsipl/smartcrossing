@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Smart Crossing</title>
+<style>
+/* Layout: square intersection stage with a stats strip on top; a control column on the right that stacks below on narrow screens. */
+:root {
+  --bg: #eceeea;
+  --panel: #fbfcfa;
+  --fg: #1c221f;
+  --muted: #5b665f;
+  --line: #d3d9d3;
+  --accent: #1d6f62;
+  --accent-ink: #ffffff;
+  --chip: #e2e7e1;
+  --warn: #b4441c;
+  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-num: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121614; --panel: #1a1f1c; --fg: #e3e8e4; --muted: #95a39a; --line: #2b332e;
+    --accent: #4fbfa9; --accent-ink: #0d1412; --chip: #252c28; --warn: #f08a5d; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121614; --panel: #1a1f1c; --fg: #e3e8e4; --muted: #95a39a; --line: #2b332e;
+  --accent: #4fbfa9; --accent-ink: #0d1412; --chip: #252c28; --warn: #f08a5d; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--fg); font: 14px/1.45 var(--font-ui);
+  padding-inline: 16px; padding-block: 18px 28px;
+}
+.wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 16px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }
+h1 { font-size: 1.35rem; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+header p { margin: 0; color: var(--muted); max-width: 70ch; }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+@media (max-width: 860px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+.stage { display: grid; gap: 10px; min-width: 0; }
+.stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 1px; background: var(--line);
+  border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+@media (max-width: 620px) { .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.stat { background: var(--panel); padding: 8px 10px; min-width: 0; }
+.stat .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat .v { font: 600 1.25rem/1.2 var(--font-num); font-variant-numeric: tabular-nums; }
+.stat .u { font: 12px var(--font-ui); color: var(--muted); margin-left: 3px; }
+.stat.bad .v { color: var(--warn); }
+.canvas-box { position: relative; width: 100%; max-width: max(320px, min(760px, calc(100vh - 230px))); aspect-ratio: 1; justify-self: center; border-radius: 10px; overflow: hidden; background: #3b5640; }
+canvas { display: block; width: 100%; height: 100%; }
+.transport { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: center; }
+button, .seg label { font: inherit; cursor: pointer; }
+.btn { border: 1px solid var(--line); background: var(--panel); color: var(--fg); padding: 6px 12px; border-radius: 6px; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); min-width: 84px; font-weight: 600; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label { padding: 6px 10px; background: var(--panel); border-left: 1px solid var(--line); font-family: var(--font-num); font-size: 13px; }
+.seg label:first-of-type { border-left: 0; }
+.seg input:checked + label { background: var(--accent); color: var(--accent-ink); }
+.seg input:focus-visible + label { outline: 2px solid var(--accent); outline-offset: -2px; }
+.clock { font: 13px var(--font-num); color: var(--muted); font-variant-numeric: tabular-nums; min-width: 9ch; }
+.toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--fg); }
+aside { display: grid; gap: 12px; min-width: 0; }
+.group { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; display: grid; gap: 10px; }
+.group h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0; font-weight: 600; }
+.ctl { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; }
+.ctl label { font-size: 13px; }
+.ctl output { font: 12px var(--font-num); color: var(--muted); font-variant-numeric: tabular-nums; }
+.ctl input[type="range"] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); margin: 0; }
+.hint { font-size: 12px; color: var(--muted); margin: 0; }
+.type { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; padding-top: 8px; border-top: 1px solid var(--line); }
+.type:first-of-type { border-top: 0; padding-top: 0; }
+.swatch { width: 14px; height: 14px; border-radius: 3px; border: 3px solid; background: transparent; }
+.tname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tname .chip { font-weight: 400; font-size: 11px; background: var(--chip); color: var(--muted); padding: 1px 6px; border-radius: 9px; margin-left: 4px; }
+.type .row2 { grid-column: 2 / -1; display: flex; align-items: center; gap: 8px; }
+.type input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
+.type output { font: 12px var(--font-num); color: var(--muted); width: 4ch; text-align: right; }
+.type .meta { grid-column: 2 / -1; font: 12px var(--font-num); color: var(--muted); }
+.type.empty .tname { color: var(--muted); font-weight: 400; }
+.type .err { grid-column: 2 / -1; color: var(--warn); font-size: 12px; }
+.linkbtn { border: 0; background: none; color: var(--accent); padding: 0; font-size: 12px; text-decoration: underline; }
+.legend { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 10px; align-items: center; font-size: 13px; }
+.key { display: inline-flex; gap: 4px; align-items: center; }
+.car { width: 22px; height: 10px; border-radius: 3px; display: inline-block; border: 2px solid var(--muted); }
+.lamp { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.xmark { font: 700 15px var(--font-num); line-height: 1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Smart Crossing</h1>
+    <p>A four-way crossing with no lanes, lights or right of way. Every car steers by a learned policy and can show a free roof-lamp signal to the others.</p>
+  </header>
+  <div class="layout">
+    <section class="stage" aria-label="Simulation">
+      <div class="stats" id="stats">
+        <div class="stat"><div class="k">Throughput</div><div class="v"><span id="s-thr">0.0</span><span class="u">/min</span></div></div>
+        <div class="stat bad"><div class="k">Crashes</div><div class="v" id="s-crash">0</div></div>
+        <div class="stat bad"><div class="k">Off-road</div><div class="v" id="s-off">0</div></div>
+        <div class="stat"><div class="k">Queue</div><div class="v"><span id="s-queue">0</span><span class="u">cars</span></div></div>
+        <div class="stat"><div class="k">Mean delay</div><div class="v"><span id="s-delay">–</span><span class="u">s</span></div></div>
+        <div class="stat"><div class="k">On road</div><div class="v" id="s-road">0</div></div>
+      </div>
+      <div class="canvas-box"><canvas id="view" aria-label="Top-down view of the intersection"></canvas></div>
+      <div class="transport">
+        <button class="btn primary" id="play" type="button">Pause</button>
+        <div class="seg" role="radiogroup" aria-label="Speed">
+          <input type="radio" name="speed" id="sp1" value="1" checked><label for="sp1">1×</label>
+          <input type="radio" name="speed" id="sp2" value="2"><label for="sp2">2×</label>
+          <input type="radio" name="speed" id="sp4" value="4"><label for="sp4">4×</label>
+          <input type="radio" name="speed" id="sp8" value="8"><label for="sp8">8×</label>
+        </div>
+        <button class="btn" id="reset" type="button">Reset</button>
+        <label class="toggle"><input type="checkbox" id="trails"> Trails</label>
+        <span class="clock" id="clock">t = 0.0 s</span>
+      </div>
+    </section>
+
+    <aside>
+      <div class="group">
+        <h2>Traffic</h2>
+        <div class="ctl"><label for="demand">Arrivals per arm</label><output id="demand-o" for="demand"></output>
+          <input type="range" id="demand" min="0" max="0.5" step="0.01" value="0.15"></div>
+        <div class="ctl"><label for="pright">Right turns</label><output id="pright-o" for="pright"></output>
+          <input type="range" id="pright" min="0" max="100" step="1" value="33"></div>
+        <div class="ctl"><label for="pleft">Left turns</label><output id="pleft-o" for="pleft"></output>
+          <input type="range" id="pleft" min="0" max="100" step="1" value="33"></div>
+        <p class="hint" id="pstraight">Straight: 34%</p>
+      </div>
+      <div class="group">
+        <h2>Signal</h2>
+        <label class="toggle"><input type="checkbox" id="sigon" checked> Cars can see each other's lamps</label>
+        <div class="ctl"><label for="noise">Signal noise (std)</label><output id="noise-o" for="noise"></output>
+          <input type="range" id="noise" min="0" max="1" step="0.05" value="0"></div>
+      </div>
+      <div class="group">
+        <h2>Agent types</h2>
+        <div id="types"></div>
+        <p class="hint">Share sets the mix of newly arriving cars. Mute forces a type's lamp to 0.</p>
+        <input type="file" id="file" accept=".json,application/json" hidden>
+      </div>
+      <div class="group">
+        <h2>Legend</h2>
+        <div class="legend">
+          <span class="key"><span class="car" style="background:#4287f5"></span><span class="car" style="background:#f0f0f0"></span><span class="car" style="background:#f5a623"></span></span>
+          <span>Body: turning right, straight, left</span>
+          <span class="key"><span class="lamp" style="background:rgb(254,40,0)"></span><span class="lamp" style="background:rgb(0,40,254)"></span></span>
+          <span>Roof lamp: signal (red / blue channels)</span>
+          <span class="key"><span class="xmark" style="color:#ff3b30">×</span><span class="xmark" style="color:#ffd60a">×</span></span>
+          <span>Crash, off-road</span>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+<script src="sim.js"></script>
+<script src="policies.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

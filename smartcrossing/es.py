@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .policy import default_in_scale, forward, init_params, layer_sizes, load_npz, n_params, save_npz
+from .policy import default_in_scale, forward, init_params, layer_sizes, load_in_scale, load_npz, n_params, save_npz
 from .sim import Sim, SimConfig, rot
 
 STAT_KEYS = ("arrived", "spawned", "exits", "wrong_exits", "crashes", "offroad", "timeouts")
@@ -54,7 +54,7 @@ def geo_dist(sim: Sim) -> np.ndarray:
     return np.where(in_box, d_box, np.where(a == sim.man, d_target_arm, d_other))
 
 
-def rollout(cfg_d: dict, members: np.ndarray, sizes, n_scen: int, seconds: float, seed: int, demand: float, in_scale=None, r_geo=0.0):
+def rollout(cfg_d: dict, members: np.ndarray, sizes, n_scen: int, seconds: float, seed: int, demand: float, in_scale=None, r_geo=0.0, r_queue=0.0):
     """Evaluate members (P, D) on n_scen shared traffic streams.
     Returns fitness (P,) summed over streams and stats dict of (P,) arrays."""
     cfg = SimConfig(**{**cfg_d, "demand": demand})
@@ -69,6 +69,7 @@ def rollout(cfg_d: dict, members: np.ndarray, sizes, n_scen: int, seconds: float
         if mute:
             a[..., 2:] = 0.0
         total += sim.step(a)
+        total -= r_queue * cfg.dt * sim.queue.sum(1)  # cars kept from entering
         if r_geo:
             d = geo_dist(sim)
             same = sim.alive & (sim.uid == prev_uid)
@@ -146,6 +147,7 @@ def main(argv=None):
     p.add_argument("--eval-every", type=int, default=10)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--r-geo", type=float, default=0.0, help="route-aware progress reward per metre (es-side)")
+    p.add_argument("--r-queue", type=float, default=0.0, help="penalty per queued car per second (es-side)")
     p.add_argument("--no-in-scale", dest="in_scale", action="store_false", default=True)
     a = p.parse_args(argv)
 
@@ -163,6 +165,12 @@ def main(argv=None):
     if a.init:
         theta, s0, _ = load_npz(a.init)
         assert s0 == sizes
+        old = load_in_scale(a.init)
+        old = np.ones(sizes[0]) if old is None else old
+        new = in_scale if in_scale is not None else np.ones(sizes[0])
+        # keep the network function identical under the new input scaling
+        W1 = theta[: sizes[0] * sizes[1]].reshape(sizes[0], sizes[1])
+        theta[: sizes[0] * sizes[1]] = (W1 * (old / new)[:, None]).ravel()
     opt = Adam(D, a.lr)
     (out / "args.json").write_text(json.dumps({**vars(a), "sizes": sizes, "cfg": cfg_d}, indent=1))
     print(f"params {D}, sizes {sizes}", flush=True)
@@ -181,7 +189,7 @@ def main(argv=None):
             # worker 0 always at the ceiling, others spread below it (avoid forgetting)
             demands = [ceiling] + list(ceiling * rng.uniform(0.4, 1.0, a.workers - 1))
             seeds = rng.integers(1 << 30, size=a.workers)
-            jobs = [(cfg_d, members, sizes, a.scen, a.seconds, int(seeds[w]), float(demands[w]), in_scale, a.r_geo) for w in range(a.workers)]
+            jobs = [(cfg_d, members, sizes, a.scen, a.seconds, int(seeds[w]), float(demands[w]), in_scale, a.r_geo, a.r_queue) for w in range(a.workers)]
             res = pool.map(_worker, jobs)
             fit = sum(r[0] for r in res)
             st = {k: sum(r[1][k] for r in res) for k in res[0][1]}
@@ -212,7 +220,7 @@ def main(argv=None):
                 "wall_s": round(time.time() - t0, 2),
             }
             if a.eval_every and (gen % a.eval_every == 0 or gen == a.gens - 1):
-                ev = evaluate(pool, cfg_d, theta, sizes, a.seconds, a.workers, a.demand, in_scale, a.r_geo)
+                ev = evaluate(pool, cfg_d, theta, sizes, a.seconds, a.workers, a.demand, in_scale, a.r_geo, a.r_queue)
                 rec["eval"] = ev
                 if ev["score"] > best_eval:
                     best_eval = ev["score"]
@@ -229,11 +237,11 @@ def main(argv=None):
 EVAL_DEMANDS = (0.05, 0.15)
 
 
-def evaluate(pool, cfg_d, theta, sizes, seconds, workers, target, in_scale=None, r_geo=0.0):
+def evaluate(pool, cfg_d, theta, sizes, seconds, workers, target, in_scale=None, r_geo=0.0, r_queue=0.0):
     """Fixed-seed evaluation of the centre on low and target demand.
     score = sum of team reward (comparable across generations)."""
     demands = sorted(set(EVAL_DEMANDS) | {target})
-    jobs = [(cfg_d, theta[None], sizes, 4, seconds, 777 + i, d, in_scale, r_geo) for i, d in enumerate(demands)]
+    jobs = [(cfg_d, theta[None], sizes, 4, seconds, 777 + i, d, in_scale, r_geo, r_queue) for i, d in enumerate(demands)]
     res = pool.map(_worker, jobs)
     ev = {"score": round(float(sum(r[0][0] for r in res)), 3)}
     for d, (f, st) in zip(demands, res):
