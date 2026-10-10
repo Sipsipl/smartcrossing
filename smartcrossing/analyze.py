@@ -8,7 +8,11 @@ Prints one JSON object:
 - signal: mutual information (bits, plug-in estimate on 3x3 lamp bins) and correlations
   between the car's own lamp output and its manoeuvre, braking, speed and position;
 - side: signed lateral offset to the right of the travel direction (m) on the arms,
-  approaching (entry arm) vs leaving (target arm), overall and per world arm.
+  approaching (entry arm) vs leaving (target arm), overall and per world arm;
+- lanes: histogram of that lateral offset (approach / leave, 0.5 m bins) and a bimodality
+  measure (do cars form lanes on a road wide enough for two cars per direction?);
+- wobble: weaving on the straight arm segments (mean |yaw rate|, curvature sign changes
+  per second, heading std); computed for any driver (also baselines via --driver).
 """
 
 import argparse
@@ -56,19 +60,36 @@ def _intervene(sim: Sim, mode: str, rng):
     sim.observe = observe
 
 
-def run(ckpt, demand, envs, seconds, seed=1000, mode="normal", record=False):
-    sim = Sim(SimConfig(demand=demand), envs, seed=seed)
-    drv = PolicyDriver.load(ckpt, sim)
+def run(ckpt, demand, envs, seconds, seed=1000, mode="normal", record=False, cfg_over=None, traj=None):
+    """ckpt: a policy .npz (or 'light' / 'reservation' / 'none' for the baselines).
+    record: also return R (rows arm, man, x, y, v, accel action, lamps...). traj: a dict
+    that is filled with per-car-step arrays (env, uid, step, arm, man, x, y, v, th, kappa)
+    for the wobble analysis. Returns (summary, R, sim)."""
+    sim = Sim(SimConfig(demand=demand, **(cfg_over or {})), envs, seed=seed)
+    if ckpt in ("light", "reservation", "none"):
+        from .baselines import LaneDriver
+
+        drv = LaneDriver(sim, ckpt)
+    else:
+        drv = PolicyDriver.load(ckpt, sim)
     _intervene(sim, mode, np.random.default_rng(seed + 7))
-    rec = []
-    for _ in range(int(seconds / sim.cfg.dt)):
+    rec, tr = [], []
+    for k in range(int(seconds / sim.cfg.dt)):
         act = drv.act()
         if record:
             m = sim.alive
             rec.append(np.column_stack([sim.arm[m], sim.man[m], sim.x[m], sim.y[m], sim.v[m], act[m][:, 0],
                                         act[m][:, 2:] if act.shape[-1] > 2 else np.zeros((m.sum(), 0))]))
         sim.step(act)
-    return summarize(sim, seconds), (np.concatenate(rec) if record else None)
+        if traj is not None:  # state after the step (actual curvature incl. rate and grip limits)
+            bi, ni = np.nonzero(sim.alive)
+            tr.append(np.column_stack([bi, sim.uid[bi, ni], np.full(len(bi), k), sim.arm[bi, ni], sim.man[bi, ni],
+                                       sim.x[bi, ni], sim.y[bi, ni], sim.v[bi, ni], sim.th[bi, ni], sim.kappa[bi, ni]]))
+    if traj is not None:
+        T = np.concatenate(tr) if tr else np.zeros((0, 10))
+        for j, key in enumerate(("env", "uid", "step", "arm", "man", "x", "y", "v", "th", "kappa")):
+            traj[key] = T[:, j]
+    return summarize(sim, seconds), (np.concatenate(rec) if record else None), sim
 
 
 def mutual_info(a, b):
@@ -125,9 +146,8 @@ def signal_stats(R, cfg):
     return out
 
 
-def side_stats(R, cfg):
-    """Lateral offset (m) to the right of the direction of travel on the arms (10..40 m out)."""
-    arm, man, x, y = R[:, 0].astype(int), R[:, 1].astype(int), R[:, 2], R[:, 3]
+def _arm_offset(cfg, arm, man, x, y):
+    """(region, current arm, distance out along the arm, offset to the right of travel)."""
     reg = region(cfg, arm, man, x, y)
     cur = np.argmax(np.stack([-y, x, y, -x], -1), -1)
     u = ARM_U[cur]
@@ -135,7 +155,86 @@ def side_stats(R, cfg):
     # travel direction: -u approaching, +u leaving; right normal of d = (d_y, -d_x)
     sgn = np.where(reg == 0, -1.0, 1.0)
     off = sgn * (x * u[:, 1] - y * u[:, 0])
-    ok = (along > 10) & (along < 40)
+    return reg, cur, along, off
+
+
+def lane_stats(R, cfg, bin_m=0.5):
+    """Histogram of the right-offset on the arms (between the box and 5 m before the
+    spawn line), approaching and leaving. 'bimodality' = Sarle's coefficient
+    (skew^2 + 1) / kurtosis: > 5/9 ~ 0.555 (the uniform value) hints at two modes.
+    'modes' = local maxima of the 3-bin smoothed histogram above 40% of its peak."""
+    arm, man, x, y = R[:, 0].astype(int), R[:, 1].astype(int), R[:, 2], R[:, 3]
+    reg, cur, along, off = _arm_offset(cfg, arm, man, x, y)
+    ok = (along > cfg.W + cfg.Rc + 3.0) & (along < cfg.L - 5.0)
+    edges = np.arange(-cfg.W, cfg.W + 1e-9, bin_m)
+    out = {"bin_edges_m": [round(float(e), 2) for e in edges]}
+    for name, r in (("approach", 0), ("leave", 2)):
+        o = off[ok & (reg == r)]
+        if len(o) < 10:
+            continue
+        h, _ = np.histogram(o, edges)
+        hs = np.convolve(h, np.ones(3) / 3, mode="same")
+        pk = [int(i) for i in range(1, len(hs) - 1) if hs[i] >= hs[i - 1] and hs[i] > hs[i + 1] and hs[i] > 0.4 * hs.max()]
+        z = (o - o.mean()) / (o.std() + 1e-9)
+        bc = (np.mean(z**3) ** 2 + 1) / np.mean(z**4)
+        per_arm = {}
+        for k in range(4):
+            ok_k = ok & (reg == r) & (cur == k)
+            if ok_k.sum() > 10:
+                per_arm[k] = np.histogram(off[ok_k], edges)[0].tolist()
+        out[name] = {"hist": h.tolist(), "hist_per_arm": per_arm, "bimodality": round(float(bc), 3),
+                     "modes_m": [round(float(0.5 * (edges[i] + edges[i + 1])), 2) for i in pk],
+                     "std_m": round(float(o.std()), 3), "n": int(len(o))}
+    return out
+
+
+def wobble_stats(T, cfg, min_kappa=0.002):
+    """Weaving on the straight parts of the arms (between the box + 5 m and the spawn /
+    exit line - 5 m): mean |yaw rate| v*kappa (rad/s), sign changes per second of the
+    actual curvature (ignoring |kappa| < min_kappa), heading std (deg) relative to the arm
+    axis, and the mean |lateral speed| (m/s). Uses the per-car-step arrays of run(traj=...)."""
+    if len(T.get("uid", [])) == 0:
+        return None
+    arm, man = T["arm"].astype(int), T["man"].astype(int)
+    reg, cur, along, off = _arm_offset(cfg, arm, man, T["x"], T["y"])
+    ok = (reg != 1) & (along > cfg.W + cfg.Rc + 5.0) & (along < cfg.L - 5.0)
+    th, v, kap = T["th"], T["v"], T["kappa"]
+    # heading relative to the travel direction along the arm (approach: -u, leave/other: +u)
+    u = ARM_U[cur]
+    d_ang = np.arctan2(np.where(reg == 0, -u[:, 1], u[:, 1]), np.where(reg == 0, -u[:, 0], u[:, 0]))
+    dh = (th - d_ang + np.pi) % (2 * np.pi) - np.pi
+    # sign changes per car (consecutive steps of the same car inside the segment)
+    key = T["env"] * 1e7 + T["uid"]
+    order = np.lexsort((T["step"], key))
+    k_o, s_o, ok_o, kap_o = key[order], T["step"][order], ok[order], kap[order]
+    sg = np.where(np.abs(kap_o) < min_kappa, 0, np.sign(kap_o))
+    changes, prev_sign = 0, {}
+    cont = np.r_[False, (k_o[1:] == k_o[:-1]) & (s_o[1:] == s_o[:-1] + 1) & ok_o[1:] & ok_o[:-1]]
+    # last nonzero sign carried forward inside a contiguous run
+    last = 0.0
+    for i in range(len(sg)):
+        if not cont[i]:
+            last = sg[i] if ok_o[i] else 0.0
+            continue
+        if sg[i] != 0:
+            if last != 0 and sg[i] != last:
+                changes += 1
+            last = sg[i]
+    seconds = ok.sum() * cfg.dt
+    return {
+        "yaw_rate_abs_mean": round(float(np.mean(np.abs(v[ok] * kap[ok]))), 4),
+        "kappa_sign_changes_per_s": round(float(changes / max(seconds, 1e-9)), 4),
+        "heading_std_deg": round(float(np.degrees(np.sqrt(np.mean(dh[ok] ** 2)))), 3),
+        "lat_speed_abs_mean": round(float(np.mean(np.abs(v[ok] * np.sin(dh[ok])))), 4),
+        "car_seconds": round(float(seconds), 1),
+    }
+
+
+def side_stats(R, cfg):
+    """Lateral offset (m) to the right of the direction of travel on the arms (10..40 m out)."""
+    arm, man, x, y = R[:, 0].astype(int), R[:, 1].astype(int), R[:, 2], R[:, 3]
+    reg, cur, along, off = _arm_offset(cfg, arm, man, x, y)
+    ok = (along > cfg.W + cfg.Rc + 0.5) & (along < cfg.L - 10.0)
     out = {}
     for name, r in (("approach", 0), ("leave", 2)):
         m = ok & (reg == r)
@@ -149,21 +248,35 @@ def side_stats(R, cfg):
 
 def main(argv=None):
     p = argparse.ArgumentParser()
-    p.add_argument("ckpt")
+    p.add_argument("ckpt", help="policy .npz, or light / reservation / none (baselines: no signal stats)")
     p.add_argument("--demand", type=float, default=0.15)
     p.add_argument("--envs", type=int, default=16)
     p.add_argument("--seconds", type=float, default=120.0)
     p.add_argument("--modes", default="normal,zero,shuffle")
+    p.add_argument("--cfg", default="", help="JSON SimConfig overrides (a policy's own interface/geometry wins)")
+    p.add_argument("--hist", action="store_true", help="include the lateral-offset histograms")
     a = p.parse_args(argv)
-    cfg = SimConfig()
+    over = json.loads(a.cfg) if a.cfg else None
+    baseline = a.ckpt in ("light", "reservation", "none")
+    modes = ["normal"] if baseline else a.modes.split(",")
     res = {"ckpt": a.ckpt, "demand": a.demand, "bench": {}}
-    for mode in a.modes.split(","):
-        s, R = run(a.ckpt, a.demand, a.envs, a.seconds, mode=mode, record=mode == "normal")
+    for mode in modes:
+        traj = {} if mode == "normal" else None
+        s, R, sim = run(a.ckpt, a.demand, a.envs, a.seconds, mode=mode, record=mode == "normal", cfg_over=over, traj=traj)
         res["bench"][mode] = {k: round(s[k], 3) for k in ("throughput_per_min", "exit_ok_rate", "crash_cars_per_1000",
                                                           "crash_cars", "offroad_cars", "delay_mean_s")}
         if mode == "normal":
-            res["signal"] = signal_stats(R, cfg)
+            cfg = sim.cfg
+            res["geometry"] = {"W": cfg.W, "Rc": cfg.Rc, "L": cfg.L, "a_lat_max": getattr(cfg, "a_lat_max", None)}
+            if not baseline:
+                res["signal"] = signal_stats(R, cfg)
             res["side"] = side_stats(R, cfg)
+            ls = lane_stats(R, cfg)
+            if not a.hist:
+                ls = {k: {kk: vv for kk, vv in v.items() if not kk.startswith("hist")} if isinstance(v, dict) else v
+                      for k, v in ls.items() if k != "bin_edges_m"}
+            res["lanes"] = ls
+            res["wobble"] = wobble_stats(traj, cfg)
     print(json.dumps(res))
 
 

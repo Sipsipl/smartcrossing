@@ -2,7 +2,13 @@
 
 Geometry: two perpendicular roads of width 2*W crossing at the origin, each arm
 reaching out to distance L. There are no lanes, markings or rules: the drivable
-area is simply the cross-shaped union of both strips. Cars enter at the end of
+area is simply the cross-shaped union of both strips. Default: W = 7 m (14 m wide
+roads, room for two cars side by side per direction), curb radius 9 m; the old
+7 m crossing is ``SimConfig(**NARROW)``.
+
+Vehicle physics: kinematic unicycle with a speed and curvature limit, a steering-rate
+limit and a tyre-grip limit (lateral acceleration v^2 * kappa <= a_lat_max), so tight
+turns are only possible at low speed. Cars enter at the end of
 an arm (at a random lateral offset) and must leave through their target arm.
 
 Arms are indexed counter-clockwise: 0 = south, 1 = east, 2 = north, 3 = west.
@@ -38,11 +44,16 @@ DONE_NAMES = ("none", "exit", "wrong_exit", "crash", "offroad", "timeout")
 ARM_U = np.array([[0.0, -1.0], [1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]])  # outward unit vector of arm k
 
 
+LANE_WIDTH = 3.5  # nominal lane width; only used by the rule-based baselines and delay metrics
+# the original crossing (one car per direction, no grip limit): SimConfig(**NARROW)
+NARROW = {"W": 3.5, "Rc": 6.0, "a_lat_max": 0.0}
+
+
 @dataclass
 class SimConfig:
     L: float = 50.0  # arm length (spawn/exit distance from centre)
-    W: float = 3.5  # half road width
-    Rc: float = 6.0  # curb radius of the four inner corners
+    W: float = 7.0  # half road width (7 = two cars side by side per direction)
+    Rc: float = 9.0  # curb radius of the four inner corners
     dt: float = 0.1
     v_max: float = 14.0  # m/s (~50 km/h)
     acc_max: float = 3.0
@@ -51,6 +62,11 @@ class SimConfig:
     # steering rate limit: the curvature action is a target; the actual curvature moves
     # towards it by at most kappa_rate per second (0.4 = lock to lock in 1 s)
     kappa_rate: float = 0.4
+    # tyre grip: the actual curvature is limited to min(kappa_max, a_lat_max / v^2) (after
+    # the steering-rate limit). 4 m/s^2 ~ 0.4 g (normal driving); the tightest baseline
+    # turn (right turn, r ~ 10.75 m) then allows ~6.6 m/s; at 14 m/s r_min = 49 m.
+    # 0 disables the limit (the original physics: r_min = 5 m at any speed).
+    a_lat_max: float = 4.0
     spawn_speed: float = 8.0
     spawn_clearance: float = 7.0
     # extra spawn clearance (s) per m/s of closing speed between the new car and an
@@ -178,17 +194,36 @@ def route_dist(cfg, arm, man, x, y):
     return np.where(in_box, d_box, np.where(a == man, d_target_arm, d_other))
 
 
+def n_lanes(cfg: SimConfig) -> int:
+    """Lanes per direction a W-wide half road has room for (baselines / metrics only)."""
+    return max(1, int(round(cfg.W / LANE_WIDTH)))
+
+
+def lane_offsets(cfg: SimConfig):
+    """Lateral offset (right of travel) of the outermost (right) and innermost (left) lane centre."""
+    lw = cfg.W / n_lanes(cfg)
+    return cfg.W - lw / 2, lw / 2
+
+
 def free_flow_time(cfg: SimConfig, manoeuvre):
-    """Approximate travel time of an unobstructed car at v_max (for delay metrics)."""
+    """Approximate travel time of an unobstructed car (for delay metrics): v_max on the
+    arms, the turn arc (right: from the right lane, left: from the left lane) at the
+    grip-limited speed min(v_max, sqrt(a_lat_max * r))."""
     straight_len = 2 * cfg.L - 2.5
     c = cfg.W + cfg.Rc
     arm_len = 2 * (cfg.L - c) - 2.5
-    length = np.where(
-        manoeuvre == STRAIGHT,
-        straight_len,
-        np.where(manoeuvre == RIGHT, arm_len + np.pi / 2 * (c - cfg.W / 2), arm_len + np.pi / 2 * (c + cfg.W / 2)),
-    )
-    return length / cfg.v_max
+    off_r, off_l = lane_offsets(cfg)
+    r = np.where(manoeuvre == RIGHT, c - off_r, c + off_l)
+    v_arc = np.minimum(cfg.v_max, np.sqrt(cfg.a_lat_max * r)) if cfg.a_lat_max > 0 else cfg.v_max
+    turn = arm_len / cfg.v_max + np.pi / 2 * r / v_arc
+    return np.where(manoeuvre == STRAIGHT, straight_len / cfg.v_max, turn)
+
+
+def grip_kappa(cfg: SimConfig, v):
+    """Largest curvature the tyres allow at speed v."""
+    if cfg.a_lat_max <= 0:
+        return np.full(np.shape(v), cfg.kappa_max)
+    return np.minimum(cfg.kappa_max, cfg.a_lat_max / np.maximum(np.asarray(v, dtype=float) ** 2, 1e-9))
 
 
 @dataclass
@@ -367,9 +402,11 @@ class Sim:
         else:
             acc = np.where(a[..., 0] > 0, a[..., 0] * cfg.acc_max, a[..., 0] * cfg.brake_max)
         dk = cfg.kappa_rate * cfg.dt
-        self.kappa = np.where(alive, self.kappa + np.clip(a[..., 1] * cfg.kappa_max - self.kappa, -dk, dk), 0.0)
-        self.sig = np.where(alive[..., None], a[..., 2:], 0.0)
         v = np.clip(self.v + acc * cfg.dt, 0.0, cfg.v_max)
+        kap = self.kappa + np.clip(a[..., 1] * cfg.kappa_max - self.kappa, -dk, dk)
+        kg = grip_kappa(cfg, v)  # tyre grip at the new speed (after the steering-rate limit)
+        self.kappa = np.where(alive, np.clip(kap, -kg, kg), 0.0)
+        self.sig = np.where(alive[..., None], a[..., 2:], 0.0)
         th = self.th + v * self.kappa * cfg.dt
         self.x = np.where(alive, self.x + v * np.cos(th) * cfg.dt, self.x)
         self.y = np.where(alive, self.y + v * np.sin(th) * cfg.dt, self.y)

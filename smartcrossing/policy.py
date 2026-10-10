@@ -79,8 +79,11 @@ def forward(params: np.ndarray, obs: np.ndarray, sizes, in_scale=None) -> np.nda
     return h
 
 
-# SimConfig fields a checkpoint is run with (value for checkpoints saved before the field existed)
-LEGACY_INTERFACE = {"neighbour_vis": 30.0, "speed_control": False, "speed_tau": 0.5}
+# SimConfig fields a checkpoint is run with (value for checkpoints saved before the field
+# existed): its sensors / action interface, and the crossing geometry + tyre grip it was
+# trained on (checkpoints from before the wide crossing ran on the 7 m road without grip limit)
+LEGACY_INTERFACE = {"neighbour_vis": 30.0, "speed_control": False, "speed_tau": 0.5,
+                    "L": 50.0, "W": 3.5, "Rc": 6.0, "a_lat_max": 0.0}
 
 
 class PolicyDriver:
@@ -108,8 +111,9 @@ class PolicyDriver:
             plist.append(params)
         if mute is None:  # policies trained without signal never learned to use their lamp
             mute = [not load_npz(p)[2].get("signal_enabled", True) for p in str(path).split("+")]
-        # sensors and the action interface are part of what a policy learned: run it with the
-        # values it was trained with (first policy wins; older checkpoints: the legacy values)
+        # sensors, the action interface and the world (geometry, grip) are part of what a policy
+        # learned: run it with the values it was trained with (first policy wins; older
+        # checkpoints: the legacy values)
         tc = load_npz(str(path).split("+")[0])[2]
         for k, legacy in LEGACY_INTERFACE.items():
             setattr(sim.cfg, k, type(legacy)(tc.get(k, legacy)))
