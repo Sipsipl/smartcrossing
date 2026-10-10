@@ -11,6 +11,11 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
   learning agents. Steering is learned (2D kinematics), not just speed.
 - Old pygame/DQN code was replaced (moved to `legacy/`, kept for reference only).
 - Geometry: 4 arms, road 7 m wide (room for one car per direction), rounded curbs.
+- Reward principle: reward only outcomes (arriving, crashes/off-road, time/delay, waiting
+  demand). Physical limits (max speed, braking, turn radius, steering rate) are fine. No reward
+  terms that prescribe driving style (e.g. no penalty for wobbling, no lane-keeping bonus).
+  Progress shaping (route distance) is tolerated as a learning aid only; prefer removing it once
+  agents can learn without it.
 - Deliverable: a live, in-browser visualisation with a few sliders (keep it simple),
   incl. mixing agent types.
 
