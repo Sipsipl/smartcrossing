@@ -20,6 +20,10 @@ for (const c of input.cases) {
     name: c.name,
     obs: rows,
     reward,
+    car_reward: Array.from(sim.carReward),
+    done_kind: Array.from(sim.doneKind),
+    done_uid: Array.from(sim.doneUid),
+    queue_cost: sim.queueCost,
     state: sim.getState(),
     events: sim.events.filter((e) => e.kind === "offroad" || e.kind === "crash").map((e) => [e.kind, e.x, e.y]),
   });

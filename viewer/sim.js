@@ -21,10 +21,13 @@
   const SPAWN_LAT_MARGIN = 0.8;
   const N_RAYS = 5;
   const RAY_ANGLES = [-60.0, -30.0, 0.0, 30.0, 60.0].map((d) => d * (Math.PI / 180));
-  const N_RAY_STEPS = 20; // RAY_STEPS = 1, 2, ..., 20 m
+  const RAY_RANGE = 20.0; // rays report the exact distance to the road edge, capped here
   const K_NEIGHBOURS = 4;
   const NEIGHBOUR_RANGE = 30.0;
   const OBS_DIM = 4 + 1 + 3 + 2 + N_RAYS;
+  // why a slot was cleared in the last step (sim.doneKind)
+  const DONE = { none: 0, exit: 1, wrong_exit: 2, crash: 3, offroad: 4, timeout: 5 };
+  const ARM_U = [[0.0, -1.0], [1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]]; // outward unit vector of arm k
 
   // Mirrors the SimConfig dataclass defaults (checked by the parity test).
   function defaultConfig() {
@@ -32,11 +35,11 @@
       L: 50.0, W: 3.5, Rc: 6.0, dt: 0.1,
       v_max: 14.0, acc_max: 3.0, brake_max: 7.0, kappa_max: 0.2,
       spawn_speed: 8.0, spawn_clearance: 7.0, spawn_headway: 1.5,
-      max_age: 60.0, n_slots: 32, n_signal: 2, demand: 0.15,
+      max_age: 60.0, n_slots: 32, n_signal: 2, demand: 0.15, demand_range: null,
       turn_probs: [1 / 3, 1 / 3, 1 / 3],
       signal_noise: 0.0, signal_enabled: true,
       r_exit: 1.0, r_wrong_exit: -1.0, r_crash: -2.0, r_offroad: -2.0,
-      r_timeout: -1.0, r_progress: 0.01,
+      r_timeout: -1.0, r_progress: 0.01, r_time: 0.0, r_queue: 0.0,
     };
   }
 
@@ -55,6 +58,54 @@
   }
 
   const offroadPoint = (x, y, W, Rc) => cornerDist(x, y, W, Rc) < Rc;
+
+  /** First t >= 0 at which the ray enters {u >= a, v >= b} (Infinity if never). */
+  function quarterEntry(u, v, du, dv, a, b) {
+    if (Math.abs(du) < 1e-12) du = 1e-12;
+    if (Math.abs(dv) < 1e-12) dv = 1e-12;
+    const t1 = (a - u) / du, t2 = (b - v) / dv;
+    const lo = Math.max(du > 0 ? t1 : -Infinity, dv > 0 ? t2 : -Infinity, 0.0);
+    const hi = Math.min(du < 0 ? t1 : Infinity, dv < 0 ? t2 : Infinity);
+    return lo <= hi ? lo : Infinity;
+  }
+
+  /** First t >= 0 at which the ray (unit dir) enters the disc of radius R around the origin. */
+  function discEntry(px, py, du, dv, R) {
+    const bq = px * du + py * dv;
+    const disc = bq * bq - (px * px + py * py - R * R);
+    const sq = Math.sqrt(Math.max(disc, 0.0));
+    const t0 = -bq - sq, t1 = -bq + sq;
+    return disc >= 0 && t1 >= 0 ? Math.max(t0, 0.0) : Infinity;
+  }
+
+  /** Exact distance along a ray to the first off-road point, capped at tmax (sim.ray_edge_dist). */
+  function rayEdgeDist(x, y, dx, dy, W, Rc, tmax = RAY_RANGE) {
+    const c = W + Rc;
+    let best = tmax;
+    for (const sx of [1.0, -1.0]) {
+      for (const sy of [1.0, -1.0]) {
+        const u = sx * x, v = sy * y, du = sx * dx, dv = sy * dy;
+        best = Math.min(best, quarterEntry(u, v, du, dv, W, c), quarterEntry(u, v, du, dv, c, W),
+          discEntry(u - c, v - c, du, dv, Rc));
+      }
+    }
+    return best;
+  }
+
+  /** Route-aware distance to the target gate (sim.route_dist). */
+  function routeDist(cfg, arm, man, x, y) {
+    const c0 = cfg.W + cfg.Rc;
+    const [co, si] = rot(-arm);
+    const cx = co * x - si * y, cy = si * x + co * y;
+    const ut = ARM_U[man];
+    const cand = [-cy, cx, cy, -cx];
+    let a = 0;
+    for (let k = 1; k < 4; k++) if (cand[k] > cand[a]) a = k;
+    const ua = ARM_U[a];
+    if (Math.abs(cx) <= c0 && Math.abs(cy) <= c0) return Math.hypot(cx - c0 * ut[0], cy - c0 * ut[1]) + cfg.L - c0;
+    if (a === man) return cfg.L - (cx * ut[0] + cy * ut[1]);
+    return Math.hypot(cx - c0 * ua[0], cy - c0 * ua[1]) + c0 * Math.hypot(ua[0] - ut[0], ua[1] - ut[1]) + cfg.L - c0;
+  }
 
   /** numpy-style float remainder (result has the sign of the divisor). */
   function pyMod(a, b) {
@@ -141,6 +192,16 @@
       this.uid = new Int32Array(N).fill(-1);
       this.group = new Int32Array(N);
       this.prevDist = new Float64Array(N);
+      this.carReward = new Float64Array(N); // per-step outputs (see sim.py step())
+      this.doneKind = new Int8Array(N);
+      this.doneUid = new Int32Array(N).fill(-1);
+      this.queueCost = 0.0;
+      // per-reset demand when cfg.demand_range is set (else cfg.demand is used live)
+      this.demand = null;
+      if (this.cfg.demand_range) {
+        const [lo, hi] = this.cfg.demand_range;
+        this.demand = lo + (hi - lo) * this.rng();
+      }
       this.queues = [[], [], [], []]; // FIFO of {lat, man, grp} per arm
       this.nextUid = 0;
       this.t = 0.0;
@@ -155,10 +216,7 @@
       return [s * this.cfg.L, -c * this.cfg.L];
     }
 
-    distToGate(n) {
-      const [gx, gy] = this.gateXY(n);
-      return Math.hypot(this.x[n] - gx, this.y[n] - gy);
-    }
+    distToGate(n) { return routeDist(this.cfg, this.arm[n], this.man[n], this.x[n], this.y[n]); }
 
     queueLength(k) { return k === undefined ? this.queues.reduce((a, q) => a + q.length, 0) : this.queues[k].length; }
 
@@ -193,12 +251,7 @@
         for (let r = 0; r < N_RAYS; r++) {
           const ang = th + RAY_ANGLES[r];
           const ca = Math.cos(ang), sa = Math.sin(ang);
-          let first = N_RAY_STEPS;
-          for (let k = 0; k < N_RAY_STEPS; k++) {
-            const step = k + 1;
-            if (offroadPoint(x + ca * step, y + sa * step, W, cfg.Rc)) { first = k; break; }
-          }
-          obs[o + 10 + r] = first / N_RAY_STEPS;
+          obs[o + 10 + r] = rayEdgeDist(x, y, ca, sa, W, cfg.Rc) / RAY_RANGE;
         }
         // neighbours: nearest K alive cars within range
         cand.length = 0;
@@ -257,12 +310,13 @@
       }
       this.t += dt;
       this.events = [];
-
-      let reward = 0.0;
+      const cr = this.carReward, dk = this.doneKind;
       for (let n = 0; n < N; n++) {
         const d = this.distToGate(n);
-        if (this.alive[n]) reward += cfg.r_progress * (this.prevDist[n] - d);
+        cr[n] = this.alive[n] ? -cfg.r_time * dt + cfg.r_progress * (this.prevDist[n] - d) : 0.0;
         this.prevDist[n] = d;
+        dk[n] = 0;
+        this.doneUid[n] = this.alive[n] ? this.uid[n] : -1;
       }
 
       // exits
@@ -275,12 +329,12 @@
         let ea = 0;
         for (let k = 1; k < 4; k++) if (cand[k] > cand[ea]) ea = k;
         if (ea === this.tgt(n)) {
-          reward += cfg.r_exit;
+          cr[n] += cfg.r_exit; dk[n] = DONE.exit;
           this.stats.exits += 1;
           this.stats.travel.push([this.t, this.age[n], freeFlowTime(cfg, this.man[n]), this.group[n]]);
           this.events.push({ kind: "exit", n, uid: this.uid[n], x: this.x[n], y: this.y[n] });
         } else {
-          reward += cfg.r_wrong_exit;
+          cr[n] += cfg.r_wrong_exit; dk[n] = DONE.wrong_exit;
           this.stats.wrong_exits += 1;
           this.events.push({ kind: "wrong_exit", n, uid: this.uid[n], x: this.x[n], y: this.y[n] });
         }
@@ -319,13 +373,13 @@
       for (let n = 0; n < N; n++) {
         if (off[n]) {
           this.events.push({ kind: "offroad", n, uid: this.uid[n], x: this.x[n], y: this.y[n] });
-          reward += cfg.r_offroad; this.stats.offroad += 1; bad[n] = 1;
+          cr[n] += cfg.r_offroad; dk[n] = DONE.offroad; this.stats.offroad += 1; bad[n] = 1;
         }
       }
       for (let n = 0; n < N; n++) {
         if (col[n] && !off[n]) {
           this.events.push({ kind: "crash", n, uid: this.uid[n], x: this.x[n], y: this.y[n] });
-          reward += cfg.r_crash; this.stats.crashes += 1; bad[n] = 1;
+          cr[n] += cfg.r_crash; dk[n] = DONE.crash; this.stats.crashes += 1; bad[n] = 1;
         }
       }
       this._remove(bad);
@@ -333,14 +387,17 @@
       const tmo = new Uint8Array(N);
       for (let n = 0; n < N; n++) {
         if (this.alive[n] && this.age[n] > cfg.max_age) {
-          tmo[n] = 1; reward += cfg.r_timeout; this.stats.timeouts += 1;
+          tmo[n] = 1; cr[n] += cfg.r_timeout; dk[n] = DONE.timeout; this.stats.timeouts += 1;
           this.events.push({ kind: "timeout", n, uid: this.uid[n], x: this.x[n], y: this.y[n] });
         }
       }
       this._remove(tmo);
 
       this._arrivals();
-      return reward;
+      let reward = 0.0;
+      for (let n = 0; n < N; n++) reward += cr[n];
+      this.queueCost = cfg.r_queue * dt * this.queueLength();
+      return reward - this.queueCost;
     }
 
     _remove(mask) {
@@ -360,9 +417,10 @@
     // ---------------------------------------------------------------- spawning
     _arrivals() {
       const cfg = this.cfg, N = this.N, rng = this.rng;
-      if (cfg.demand > 0) {
+      const demand = this.demand === null ? cfg.demand : this.demand;
+      if (demand > 0) {
         for (let k = 0; k < 4; k++) {
-          const arrive = rng() < cfg.demand * cfg.dt;
+          const arrive = rng() < demand * cfg.dt;
           const lat = -(cfg.W - 1.2) + 2 * (cfg.W - 1.2) * rng();
           const man = 1 + rng.choice(cfg.turn_probs);
           const grp = rng.choice(this.groupProbs);
@@ -414,8 +472,7 @@
         this.age[n] = 0.0;
         this.uid[n] = this.nextUid++;
         this.stats.spawned += 1;
-        const [gx, gy] = this.gateXY(n);
-        this.prevDist[n] = Math.hypot(sx - gx, sy - gy);
+        this.prevDist[n] = routeDist(cfg, k, head.man, sx, sy);
       }
     }
 
@@ -505,8 +562,8 @@
   }
 
   return {
-    RIGHT, STRAIGHT, LEFT, DISC_R, K_NEIGHBOURS, NEIGHBOUR_RANGE, OBS_DIM,
-    defaultConfig, obsDim, actDim, rot, cornerDist, freeFlowTime, makeRng,
+    RIGHT, STRAIGHT, LEFT, DISC_R, K_NEIGHBOURS, NEIGHBOUR_RANGE, OBS_DIM, RAY_RANGE, DONE,
+    defaultConfig, obsDim, actDim, rot, cornerDist, rayEdgeDist, routeDist, freeFlowTime, makeRng,
     Sim, loadPolicy, forward, act,
   };
 });

@@ -85,6 +85,10 @@ def make_case(name, sim: Sim, action) -> dict:
         "expect": {
             "obs": obs,
             "reward": reward,
+            "car_reward": cp.car_reward[0].copy(),
+            "done_kind": cp.done_kind[0].tolist(),
+            "done_uid": cp.done_uid[0].tolist(),
+            "queue_cost": float(cp.queue_cost[0]),
             "state": export_state(cp),
             "travel": np.array(cp.stats.travel[0][n_travel:]).reshape(-1, 2),
             "events": [(k, float(x), float(y)) for _, k, x, y in cp.events],
@@ -192,7 +196,7 @@ def edge_cases(cfg):
 @pytest.fixture(scope="module")
 def parity(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("parity")
-    cfg = SimConfig(n_slots=16)
+    cfg = SimConfig(n_slots=16, r_time=0.05, r_queue=0.1)
     cases = trajectory_cases(0, dataclasses.replace(cfg, demand=0.5))
     cases += trajectory_cases(1, dataclasses.replace(cfg, demand=0.35, signal_enabled=False, turn_probs=(0.5, 0.2, 0.3)))
     cases += edge_cases(cfg)
@@ -268,6 +272,10 @@ def test_step_parity(parity):
     for c, j in zip(parity["cases"], parity["js"]["cases"]):
         e, s, name = c["expect"]["state"], j["state"], c["name"]
         assert abs(j["reward"] - c["expect"]["reward"]) < TOL, name
+        np.testing.assert_allclose(j["car_reward"], c["expect"]["car_reward"], atol=TOL, err_msg=name)
+        assert j["done_kind"] == c["expect"]["done_kind"], name
+        assert j["done_uid"] == c["expect"]["done_uid"], name
+        assert abs(j["queue_cost"] - c["expect"]["queue_cost"]) < TOL, name
         assert s["alive"] == e["alive"], name  # removals and spawns
         alive = np.array(e["alive"])
         for k in ("x", "y", "th", "v", "age", "prev_dist", "kappa"):
