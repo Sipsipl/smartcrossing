@@ -37,7 +37,8 @@
       spawn_speed: 8.0, spawn_clearance: 7.0, spawn_headway: 1.5,
       max_age: 60.0, n_slots: 32, n_signal: 2, demand: 0.15, demand_range: null,
       turn_probs: [1 / 3, 1 / 3, 1 / 3],
-      signal_noise: 0.0, signal_enabled: true,
+      signal_noise: 0.0, signal_enabled: true, neighbour_vis: 30.0,
+      speed_control: false, speed_tau: 0.5,
       r_exit: 1.0, r_wrong_exit: -1.0, r_crash: -2.0, r_offroad: -2.0,
       r_timeout: -1.0, r_progress: 0.01, r_time: 0.0, r_queue: 0.0,
     };
@@ -260,7 +261,7 @@
           if (j === i || !this.alive[j]) continue;
           const nx = this.x[j] - x, ny = this.y[j] - y;
           const d = Math.hypot(nx, ny);
-          if (d < NEIGHBOUR_RANGE) cand.push([d, j, nx, ny]);
+          if (d < cfg.neighbour_vis) cand.push([d, j, nx, ny]);
         }
         cand.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
         for (let k = 0; k < Math.min(K_NEIGHBOURS, cand.length); k++) {
@@ -294,7 +295,9 @@
       for (let n = 0; n < N; n++) {
         const a0 = clip(action[n * A]), a1 = clip(action[n * A + 1]);
         const alive = this.alive[n];
-        const acc = a0 > 0 ? a0 * cfg.acc_max : a0 * cfg.brake_max;
+        const acc = cfg.speed_control
+          ? Math.min(Math.max(((a0 + 1.0) * 0.5 * cfg.v_max - this.v[n]) / cfg.speed_tau, -cfg.brake_max), cfg.acc_max)
+          : (a0 > 0 ? a0 * cfg.acc_max : a0 * cfg.brake_max);
         const dk = cfg.kappa_rate * dt;
         this.kappa[n] = alive ? this.kappa[n] + Math.min(Math.max(a1 * cfg.kappa_max - this.kappa[n], -dk), dk) : 0.0;
         for (let q = 0; q < S; q++) this.sig[n * S + q] = alive ? clip(action[n * A + 2 + q]) : 0.0;

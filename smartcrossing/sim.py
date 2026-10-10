@@ -66,6 +66,14 @@ class SimConfig:
     demand_range: tuple | None = None
     turn_probs: tuple = (1 / 3, 1 / 3, 1 / 3)  # right, straight, left
     signal_noise: float = 0.0  # std of gaussian noise on received signals
+    # perception range (m) of the neighbour block (positions stay scaled by NEIGHBOUR_RANGE)
+    neighbour_vis: float = 30.0
+    # longitudinal action interface: False = action[0] is the acceleration (+: acc_max,
+    # -: brake_max); True = action[0] is a target speed in [0, v_max] reached with
+    # acc = clip((v_target - v) / speed_tau, -brake_max, acc_max) (same physical limits,
+    # but no flat region of the action at v_max, so "slow down" stays explorable)
+    speed_control: bool = False
+    speed_tau: float = 0.5
     signal_enabled: bool = True
     # reward weights. Per car (Sim.car_reward); the team reward returned by step() is
     # their sum over the cars of an environment minus the queue cost.
@@ -311,7 +319,7 @@ class Sim:
         ddx = self.x[bi] - x[:, None]  # (M, N) = x_j - x_i
         ddy = self.y[bi] - y[:, None]
         d = np.hypot(ddx, ddy)
-        valid = self.alive[bi] & (d < NEIGHBOUR_RANGE)
+        valid = self.alive[bi] & (d < cfg.neighbour_vis)
         valid[np.arange(len(bi)), ni] = False
         d = np.where(valid, d, np.inf)
         K = min(K_NEIGHBOURS, N)
@@ -353,7 +361,11 @@ class Sim:
         cfg = self.cfg
         a = np.clip(action, -1.0, 1.0)
         alive = self.alive
-        acc = np.where(a[..., 0] > 0, a[..., 0] * cfg.acc_max, a[..., 0] * cfg.brake_max)
+        if cfg.speed_control:
+            v_t = (a[..., 0] + 1.0) * 0.5 * cfg.v_max
+            acc = np.clip((v_t - self.v) / cfg.speed_tau, -cfg.brake_max, cfg.acc_max)
+        else:
+            acc = np.where(a[..., 0] > 0, a[..., 0] * cfg.acc_max, a[..., 0] * cfg.brake_max)
         dk = cfg.kappa_rate * cfg.dt
         self.kappa = np.where(alive, self.kappa + np.clip(a[..., 1] * cfg.kappa_max - self.kappa, -dk, dk), 0.0)
         self.sig = np.where(alive[..., None], a[..., 2:], 0.0)

@@ -6,7 +6,7 @@
 <title>Vergleich – Smart Crossing</title>
 <meta name="description" content="Gelernte Autos ohne Regeln im Vergleich mit Ampel und zentralem Verkehrsrechner.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/site.css?v=25d8224c">
+<link rel="stylesheet" href="css/site.css?v=04d45078">
 </head>
 <body data-page="vergleich">
 <div class="wrap">
@@ -28,22 +28,40 @@
 
 <h2>Wie viele kommen heil an?</h2>
 <div class="tablewrap card" style="padding:4px 6px"><table class="data" id="t-ok"></table></div>
+
+<h2>Wie viele verunglücken?</h2>
+<p>Unfälle und Abkommen von der Straße, gezählt pro 1000 Autos, die die Kreuzung verlassen haben.</p>
+<div class="tablewrap card" style="padding:4px 6px"><table class="data" id="t-bad"></table></div>
 <p class="muted small" id="bench-setup"></p>
 
 <h2>Ehrlich gesagt</h2>
 <div class="note warn">
-  <p>Die gelernten Autos sind <b>noch nicht so gut</b> wie Ampel oder Verkehrsrechner. Die beiden kommen ohne einen einzigen Unfall aus,
-    während von den gelernten Autos bei dichtem Verkehr noch viele im Bordstein oder ineinander landen. Sie fahren meistens Vollgas
-    und haben (noch) nicht gelernt zu bremsen oder jemanden vorzulassen.</p>
-  <p style="margin:0">Das ist der Stand eines Hobbyprojekts, kein Endergebnis. Das Spannende ist ja gerade, ob und wie sie ohne Regeln dahin kommen –
-    und dann, ob sie dabei ihre eigene Lampensprache oder einen Rechtsverkehr erfinden.</p>
+  <p>Beim <b>Durchsatz</b> schlagen die gelernten Autos (PPO) die Ampel deutlich: Ab mittlerem Verkehr kommen pro Minute
+    fast anderthalbmal so viele durch, und kaum jemand wartet. Aber: Bei mittlerem Verkehr verunglückt noch etwa
+    <b>jedes sechste bis siebte Auto</b> (rund 15 %), bei wenig Verkehr etwa 4 %. Ampel und Verkehrsrechner schaffen das ohne einen einzigen Unfall –
+    und der Verkehrsrechner ist auch beim Durchsatz noch besser.</p>
+  <p style="margin:0">Der Grund: Die Autos fahren fast immer Vollgas und haben nicht gelernt, zu bremsen oder jemanden vorzulassen –
+    obwohl sie das andere Auto rechtzeitig sehen. Das ist der Stand eines Hobbyprojekts, kein Endergebnis.</p>
 </div>
+
+<h2>Was ist von selbst entstanden?</h2>
+<ul>
+  <li><b>Rechts- oder Linksverkehr – ja.</b> Niemand hat den Autos eine Seite vorgegeben, und sie starten an zufälliger Stelle der Straße.
+    Trotzdem einigen sich alle Autos eines Trainingslaufs auf eine Seite: In einem Lauf (Startwert 0) fahren sie links,
+    in einem anderen, sonst gleichen Lauf (Startwert 1) rechts. Welche Seite es wird, ist Zufall – dass es eine feste Seite gibt, nicht.
+    Das passiert mit und ohne Lampe.</li>
+  <li><b>Eine Lampensprache – nein (bisher).</b> Die Lampe eines Autos verrät zwar etwas darüber, wohin es abbiegt und wie schnell es ist.
+    Aber die anderen Autos achten nicht darauf: Schaltet man alle Lampen ab oder vertauscht sie zufällig zwischen den Autos,
+    fahren sie genauso gut. Autos, die ganz ohne Lampe trainiert wurden, sind gleich gut.</li>
+  <li><b>Gemeinsinn hilft (noch) nicht.</b> Wenn ein Auto auch Punkte für das Wohl der anderen bekommt, fährt es nicht anders.
+    Bekommt es sie von Anfang an voll, lernen die Autos sogar, sofort von der Straße zu fahren – wer früh weg ist, muss die Unfälle der anderen nicht mittragen.</li>
+</ul>
 <footer>Smart Crossing – ein Hobbyprojekt. Alles läuft direkt in deinem Browser, es werden keine Daten gesammelt. Stand: 2026-10-10.</footer>
 </div>
-<script src="data/site-data.js?v=25d8224c"></script>
-<script src="js/sim.js?v=25d8224c"></script>
-<script src="js/crossing.js?v=25d8224c"></script>
-<script src="js/charts.js?v=25d8224c"></script>
-<script src="js/pages.js?v=25d8224c"></script>
+<script src="data/site-data.js?v=04d45078"></script>
+<script src="js/sim.js?v=04d45078"></script>
+<script src="js/crossing.js?v=04d45078"></script>
+<script src="js/charts.js?v=04d45078"></script>
+<script src="js/pages.js?v=04d45078"></script>
 </body>
 </html>

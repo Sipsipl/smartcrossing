@@ -48,14 +48,62 @@ RUNS = ROOT / "runs"
 DEMANDS = [0.05, 0.1, 0.15, 0.2, 0.3]
 TIMELINE_DEMANDS = [0.05, 0.15]
 BENCH_ENVS, BENCH_SECONDS, BENCH_SEED = 8, 120.0, 1000
-# Short German notes for known runs (shown in the "Zeitreise" / side notes).
-RUN_NOTES = {
-    "es1": "Irrweg: Die Autos lernten, einfach stehen zu bleiben – Stehen kostete nichts, Unfälle schon.",
-    "es2": "Erster Erfolg: Autos fahren zum Ziel, aber Rechtsabbiegen klappt nie (alle landen im Bordstein).",
-    "es3": "Mehr Ausprobieren (größere Mutationen): kaum Fortschritt, die Rechtskurve bleibt das Problem.",
-    "es4": "Irrweg: Die Autos blockierten die Einfahrt – wer gar nicht erst reinfährt, kann nicht verunglücken.",
-    "es5": "Neue Belohnung (Fortschritt entlang der Route, Strafe für Warteschlange): jetzt klappen alle drei Richtungen meistens.",
+# Plain German names for known runs: run id -> (short label for chart markers, label, one-line
+# explanation). Shown on "Wie lernen sie?" instead of the raw ids; unmapped runs fall back to the id.
+RUN_INFO = {
+    "es1": ("E1", "Evolution, Versuch 1: Stehenbleiben",
+            "Irrweg: Die Autos lernten, einfach stehen zu bleiben – Stehen kostete nichts, Unfälle schon."),
+    "es2": ("E2", "Evolution, Versuch 2: Stehen kostet jetzt",
+            "Erster Erfolg: Autos fahren zum Ziel, aber Rechtsabbiegen klappt nie (alle landen im Bordstein)."),
+    "es3": ("E3", "Evolution, Versuch 3: mehr ausprobieren",
+            "Größere Zufallsänderungen: kaum Fortschritt, die Rechtskurve bleibt das Problem."),
+    "es4": ("E4", "Evolution, Versuch 4: Einfahrt blockieren",
+            "Irrweg: Die Autos blockierten die Einfahrt – wer gar nicht erst reinfährt, kann nicht verunglücken."),
+    "es5": ("E5", "Evolution, Versuch 5: Weg entlang der Straße messen",
+            "Fortschritt wird entlang der Straße gemessen, wartende Autos kosten Punkte: jetzt klappen alle drei Richtungen meistens."),
+    "ppo1a": ("P1", "PPO Versuch 1: Schleichen",
+              "Irrweg: Die Autos kriechen nur noch und kommen kaum an."),
+    "ppo1b": ("P1b", "PPO Versuch 1b: schneller lernen",
+              "Irrweg: Größere Lernschritte – die Autos bleiben trotzdem stehen."),
+    "ppo2": ("P2", "PPO Versuch 2: falsche Ausfahrt",
+             "Irrweg: Über die Hälfte nimmt einfach die bequemste Ausfahrt, weil die falsche Ausfahrt billiger war als Abbiegen."),
+    "ppo3": ("P3", "PPO Versuch 3: härtere Strafen",
+             "Irrweg: Mehr Strafe für Unfälle – die Autos nehmen weiter die falsche Ausfahrt."),
+    "ppo4": ("P4", "PPO Versuch 4: mehr Autos pro Runde",
+             "Irrweg: Mehr Simulationen pro Runde – dasselbe Problem mit der falschen Ausfahrt."),
+    "ppo5": ("P5", "PPO Versuch 5: falsche Ausfahrt teurer",
+             "Falsche Ausfahrt kostet jetzt mehr – dafür landen die meisten im Bordstein."),
+    "ppo6": ("P6", "PPO Teil 1: mehr Punkte für Fortschritt",
+             "Durchbruch: Doppelte Krümel-Punkte für jeden Meter Richtung Ausfahrt – die meisten kommen an."),
+    "ppo7": ("P7", "PPO Versuch 7: neu von vorn",
+             "Gleiche Einstellungen wie Teil 2, aber von Null an gelernt; endet am selben Punkt."),
+    "ppo8": ("P8", "PPO Teil 2: ruhigeres Ausprobieren",
+             "Weniger zufälliges Zappeln beim Üben. Gut bei wenig Verkehr, aber geübt wurde nur mit fast leeren Straßen."),
+    "ppo9": ("P9", "PPO Teil 3: dichter Verkehr beim Üben",
+             "Üben mit viel mehr Autos gleichzeitig: Begegnungen werden häufiger, die Unfälle gehen deutlich zurück."),
+    "ppo10": ("P10", "PPO Versuch 10: Unfälle doppelt so teuer",
+              "Kein Gewinn, früh abgebrochen."),
+    "ppo11": ("P11", "PPO Versuch 11: weiter gucken (60 m)",
+              "Die Autos sehen andere aus 60 statt 30 m – musste sich erst umgewöhnen, kein klarer Gewinn."),
+    "ppo12": ("P12", "PPO Versuch 12: Unfälle 2,5-mal so teuer",
+              "Etwas mehr Bremsen, aber nicht weniger Unfälle."),
+    "ppo13": ("P13", "PPO Teil 4: Feinschliff mit kleinerer Lernrate",
+              "Kleinere Lernschritte: langsam, aber stetig weniger Unfälle."),
+    "ppo14": ("P14", "PPO Versuch 14: 60 m Sicht, neu von vorn",
+              "Irrweg: Die weit entfernten Autos überfluten das Gehirn mit großen Zahlen – alle landen im Bordstein."),
+    "ppo15": ("P15", "PPO Versuch 15: 60 m Sicht, richtig skaliert",
+              "Lernt genauso gut wie mit 30 m – die Sichtweite war nicht das Problem."),
+    "ppo16": ("P16", "PPO Versuch 16: Wunschtempo statt Gaspedal",
+              "Das Gehirn wählt eine Zielgeschwindigkeit statt Gas/Bremse. Anfangs vorsichtiger, am Ende gleich gut."),
+    "ppo17": ("P17", "PPO Teil 5: noch feiner, mehr Weitblick",
+              "Noch kleinere Lernschritte und längerer Blick auf Folgen: der beste Stand."),
 }
+
+
+def run_info(run: str | None) -> dict:
+    short, label, note = RUN_INFO.get(run, (run, run, None)) if run else (None, None, None)
+    return {"short": short, "label": label, "note": note}
+
 
 PAGES = [
     ("index.html", "Start"),
@@ -301,7 +349,13 @@ def timeline(found: dict, best_id: str, n_max: int) -> list[dict]:
     pts = sorted(by_gen.items())
     # drop near-duplicates (closer than 3% of the whole span to the next point)
     span = max((g for g, _ in pts), default=0) or 1
-    pts = [p for i, p in enumerate(pts) if i == len(pts) - 1 or pts[i + 1][0] - p[0] > 0.03 * span]
+    kept = []
+    for p in pts:  # keep a point only if it is far enough from the previously kept one
+        if not kept or p[0] - kept[-1][0] > 0.03 * span:
+            kept.append(p)
+        elif p == pts[-1] or p[1] == best_id:  # the final / chosen checkpoint always stays
+            kept[-1] = p
+    pts = kept
     if len(pts) > n_max:
         idx = np.unique(np.linspace(0, len(pts) - 1, n_max).round().astype(int))
         pts = [pts[i] for i in idx]
@@ -384,7 +438,7 @@ def main(argv=None):
         c = found[cid]
         if cid not in policies:
             policies[cid] = {
-                "id": cid, "run": c["run"], "file": c["file"], "method": c["method"], "gen": c["gen"],
+                "id": cid, "run": c["run"], "run_label": run_info(c["run"])["label"], "file": c["file"], "method": c["method"], "gen": c["gen"],
                 "physics": c["physics"], "adapted": c["adapted"], "policy": round_policy(c["policy"], 4),
                 "bench": {},
             }
@@ -394,7 +448,7 @@ def main(argv=None):
     for method, cid in picked.items():
         use(cid, DEMANDS)
         pts, chain = timeline(found, cid, a.timeline)
-        chains[method] = [{"run": r, "offset": off, "note": RUN_NOTES.get(r)} for r, off in chain]
+        chains[method] = [{"run": r, "offset": off, **run_info(r)} for r, off in chain]
         for p in pts:
             use(p["id"], TIMELINE_DEMANDS)
         timelines[method] = pts
@@ -416,7 +470,7 @@ def main(argv=None):
         cands = [cid for cid, c in found.items() if c["run"] == run]
         cid = max(cands, key=lambda k: (found[k]["gen"] or 0))
         use(cid, TIMELINE_DEMANDS)
-        others.append({"run": run, "id": cid, "method": found[cid]["method"], "note": RUN_NOTES.get(run)})
+        others.append({"run": run, "id": cid, "method": found[cid]["method"], **run_info(run)})
 
     baselines = {}
     for drv in ("light", "reservation"):

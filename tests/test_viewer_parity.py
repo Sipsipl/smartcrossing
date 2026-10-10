@@ -199,6 +199,8 @@ def parity(tmp_path_factory):
     cfg = SimConfig(n_slots=16, r_time=0.05, r_queue=0.1)
     cases = trajectory_cases(0, dataclasses.replace(cfg, demand=0.5))
     cases += trajectory_cases(1, dataclasses.replace(cfg, demand=0.35, signal_enabled=False, turn_probs=(0.5, 0.2, 0.3)))
+    cases += trajectory_cases(2, dataclasses.replace(cfg, demand=0.3, neighbour_vis=55.0), n_steps=80)
+    cases += trajectory_cases(3, dataclasses.replace(cfg, demand=0.3, speed_control=True, speed_tau=0.4), n_steps=80)
     cases += edge_cases(cfg)
 
     # policy: real export format (save_npz -> export_json)

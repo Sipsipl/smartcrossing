@@ -18,7 +18,7 @@
     if (!entry) return "";
     if (entry.id === "zufall") return "Start: zufälliges Gehirn";
     const unit = entry.method === "ppo" ? "Trainingsschritt" : "Generation";
-    return entry.tlGen !== undefined ? `${unit} ${entry.tlGen}` : `${entry.run}`;
+    return entry.tlGen !== undefined ? `${unit} ${entry.tlGen}` : `${entry.run_label || entry.run}`;
   }
 
   /** Default agent types: best policy (+ the other method or a beginner, share 0). */
@@ -393,12 +393,13 @@
       const chain = (D.chains[method] || []).find((c) => c.run === p.run);
       const note = extra ? extra.note : p.id === "zufall" ? "Vor dem Training: alle Gewichte sind Zufallszahlen. Die Autos fahren irgendwie los." : chain && chain.note;
       const b05 = p.bench["0.05"], b15 = p.bench["0.15"];
-      $("tt-now").innerHTML = `<b>${extra ? `Irrweg ${extra.run}` : genLabel(p)}</b>${p.run && !extra ? ` <span class="muted small">(Lauf ${p.run})</span>` : ""}<br>
+      const runName = (r) => (chain && chain.label) || p.run_label || r;
+      $("tt-now").innerHTML = `<b>${extra ? (extra.label || extra.run) : genLabel(p)}</b>${p.run && !extra ? ` <span class="muted small">(${runName(p.run)})</span>` : ""}<br>
         <span class="small">${note || ""}</span><br>
         <span class="small muted">Gemessen in 8 × 2 Minuten Simulation: bei wenig Verkehr kommen <b>${pct(b05 && b05.exit_ok_rate)}</b> der Autos an,
         bei mittlerem Verkehr <b>${pct(b15 && b15.exit_ok_rate)}</b> (${num(b15 && b15.throughput_per_min)} Autos/min).</span>`;
       cx.seed = 3; // same traffic for every checkpoint
-      cx.setTypes([SCX.makeType(p, extra ? extra.run : genLabel(p))]);
+      cx.setTypes([SCX.makeType(p, extra ? (extra.label || extra.run) : genLabel(p))]);
       drawCurves();
     }
     // dead-end runs
@@ -408,9 +409,9 @@
       const list = (D.others || []).filter((o) => (o.method || "es") === method);
       for (const o of list) {
         const b = document.createElement("button");
-        b.type = "button"; b.className = "btn"; b.textContent = `${o.note ? "Irrweg" : "Lauf"} ${o.run}`;
+        b.type = "button"; b.className = "btn"; b.textContent = o.label || o.run;
         b.title = o.note || "";
-        b.addEventListener("click", () => { extra = Object.assign({ note: "Ein anderer, früherer Trainingslauf." }, o.note ? o : { run: o.run, id: o.id }); show(); });
+        b.addEventListener("click", () => { extra = Object.assign({}, o, { note: o.note || "Ein anderer, früherer Trainingslauf." }); show(); });
         ow.appendChild(b);
       }
       ow.parentElement.style.display = list.length ? "" : "none";
@@ -424,7 +425,9 @@
       const k = Math.max(1, Math.round(pts.length / 80));
       const ser = (key) => runs.flatMap((r) => SCX.smooth(curves[r].filter((p) => p[key] !== undefined).map((p) => [p.x, p[key]]), k));
       const chain = D.chains[method] || [];
-      const markers = chain.filter((c) => c.offset > 0).map((c) => ({ x: c.offset, label: c.run }));
+      const markers = chain.filter((c) => c.offset > 0).map((c) => ({ x: c.offset, label: c.short || c.run }));
+      const leg = $("chain-legend");
+      if (leg) leg.innerHTML = chain.map((c) => `<li><b>${c.short || c.run}</b> – ${c.label || c.run}${c.note ? `: <span class="muted">${c.note}</span>` : ""}</li>`).join("");
       if (!extra) {
         const cur = tl()[idx];
         if (cur) markers.push({ x: cur.tlGen, label: "▼ Zeitreise" });
@@ -462,6 +465,7 @@
     const head = `<thead><tr><th>Verkehr →</th>${dem.map((d) => `<th>${num(demPerMin(d), 0)}/min</th>`).join("")}</tr></thead>`;
     $("t-thr").innerHTML = head + "<tbody>" + rows.map((r) => `<tr><td>${r.name}</td>${dem.map((d) => `<td>${r.b[d] ? num(r.b[d].throughput_per_min) : "–"}</td>`).join("")}</tr>`).join("") + "</tbody>";
     $("t-ok").innerHTML = head + "<tbody>" + rows.map((r) => `<tr><td>${r.name}</td>${dem.map((d) => `<td>${r.b[d] ? pct(r.b[d].exit_ok_rate) : "–"}</td>`).join("")}</tr>`).join("") + "</tbody>";
+    if ($("t-bad")) $("t-bad").innerHTML = head + "<tbody>" + rows.map((r) => `<tr><td>${r.name}</td>${dem.map((d) => `<td>${r.b[d] ? num(r.b[d].crash_cars_per_1000, 0) : "–"}</td>`).join("")}</tr>`).join("") + "</tbody>";
     const draw = () => SCX.lineChart($("c-thr"), {
       series: [
         { name: "Nachfrage", color: SCX.cssVar("--c5"), dash: true, points: dem.map((d) => [demPerMin(d), demPerMin(d)]) },
