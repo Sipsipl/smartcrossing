@@ -349,7 +349,13 @@ def timeline(found: dict, best_id: str, n_max: int) -> list[dict]:
     pts = sorted(by_gen.items())
     # drop near-duplicates (closer than 3% of the whole span to the next point)
     span = max((g for g, _ in pts), default=0) or 1
-    pts = [p for i, p in enumerate(pts) if i == len(pts) - 1 or pts[i + 1][0] - p[0] > 0.03 * span]
+    kept = []
+    for p in pts:  # keep a point only if it is far enough from the previously kept one
+        if not kept or p[0] - kept[-1][0] > 0.03 * span:
+            kept.append(p)
+        elif p == pts[-1] or p[1] == best_id:  # the final / chosen checkpoint always stays
+            kept[-1] = p
+    pts = kept
     if len(pts) > n_max:
         idx = np.unique(np.linspace(0, len(pts) - 1, n_max).round().astype(int))
         pts = [pts[i] for i in idx]
