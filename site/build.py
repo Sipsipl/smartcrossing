@@ -99,10 +99,23 @@ RUN_INFO = {
               "Noch kleinere Lernschritte und längerer Blick auf Folgen: der beste Stand."),
 }
 
+# One short line per phase of the main training chain, shown next to the numbered markers
+# ①②③ of the learning curve ("what changed -> what happened"). Plain words, no run ids.
+STEP_INFO = {
+    "es2": "Start mit Zufallsgehirn; Stehenbleiben kostet Punkte → die Autos fahren los, aber Rechtsabbiegen endet im Bordstein",
+    "es3": "Größere Zufallsänderungen → kaum Fortschritt",
+    "es5": "Weg wird entlang der Straße gemessen, Warten kostet → alle drei Richtungen klappen meistens",
+    "ppo6": "Start bei Null; Punkte für jeden Meter Richtung Ziel → die meisten kommen an",
+    "ppo8": "Ruhiger ausprobieren, weniger Zappeln → gut, aber nur auf fast leeren Straßen geübt",
+    "ppo9": "Üben mit viel dichterem Verkehr → Kurve fällt erst, weil es schwerer wird; dann weniger Unfälle",
+    "ppo13": "Kleinere Lernschritte → stetig besser; gegen Ende noch mehr Verkehr, daher wieder etwas mehr Unfälle",
+    "ppo17": "Noch kleinere Schritte, mehr Blick auf die Folgen → der beste Stand",
+}
+
 
 def run_info(run: str | None) -> dict:
     short, label, note = RUN_INFO.get(run, (run, run, None)) if run else (None, None, None)
-    return {"short": short, "label": label, "note": note}
+    return {"short": short, "label": label, "note": note, "step": STEP_INFO.get(run) if run else None}
 
 
 PAGES = [
