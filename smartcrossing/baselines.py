@@ -32,11 +32,12 @@ A_LAT = 4.0  # m/s^2 lateral acceleration bound on the turns
 A_DEC = 3.0  # m/s^2 comfortable deceleration when approaching a turn
 K_E, K_H = 0.05, 2 * np.sqrt(0.05)  # lateral / heading feedback gains (per m)
 # merging (lateral error > MERGE_E on the approach, e.g. a car spawned in the oncoming half of
-# the wide road): stiffer feedback, and while an oncoming car is in the current corridor the
-# car slows to V_MERGE so the grip limit allows a sharp sidestep
+# the wide road): heading-target law (desired heading offset -K_PM * e, capped at H_MAX, tracked
+# with gain K_HHM per m; ~critically damped), speed capped at V_MERGE_MAX so the grip limit
+# allows the sidestep, and V_MERGE while an oncoming car is in the current corridor
 MERGE_E = 0.8
-K_EM, K_HM = 0.2, 2 * np.sqrt(0.2)
-V_MERGE = 3.0
+K_PM, K_HHM, H_MAX = 0.12, 0.5, 0.35
+V_MERGE, V_MERGE_MAX = 3.0, 9.0
 
 
 def canonical_path(man, L, W, Rc, off=None):
@@ -307,8 +308,26 @@ class LaneDriver:
                 elif mkey in self.merging and ((abs(e) < 0.15 and abs(np.sin(eh)) < 0.03) or s_now >= path.stop_s):
                     self.merging.discard(mkey)
                 merging = mkey in self.merging
-                ke, kh = (K_EM, K_HM) if merging else (K_E, K_H)
-                kappa = path.k[i_ff] - ke * np.clip(e, -3.0, 3.0) - kh * np.sin(eh)
+                hold, back = False, False
+                if merging and len(alive) > 1:
+                    # oncoming cars in the strip between me and my lane (incl. my own corridor):
+                    # stop and wait (no sidestep) until they have passed or stopped for me;
+                    # too close laterally: step back away from them
+                    others = np.arange(len(alive)) != j
+                    dx, dy = ax[others] - sim.x[b, n], ay[others] - sim.y[b, n]
+                    f, lat = np.cos(th) * dx + np.sin(th) * dy, -np.sin(th) * dx + np.cos(th) * dy
+                    onc = np.abs((ath[others] - th + np.pi) % (2 * np.pi) - np.pi) > 2 * np.pi / 3
+                    toward = -np.sign(e) * lat  # > 0: on the side I have to move to
+                    in_strip = (toward > -2.6) & (np.abs(lat) < abs(e) + 2.6)
+                    waiting_for_me = (av[others] < 0.3) & (f > 5.0)
+                    rel = onc & in_strip & (f > -5.0) & (f < 12.0 + 3.0 * av[others]) & ~waiting_for_me
+                    hold = bool(rel.any())
+                    back = bool((rel & (np.abs(lat) < 2.4) & (toward > 0)).any())
+                if merging:
+                    h_des = (np.sign(e) * 0.15 if back else 0.0) if hold else -np.clip(K_PM * e, -H_MAX, H_MAX)
+                    kappa = path.k[i_ff] + K_HHM * (h_des - eh)
+                else:
+                    kappa = path.k[i_ff] - K_E * np.clip(e, -3.0, 3.0) - K_H * np.sin(eh)
                 committed = uid in self.committed[b]
                 if j == 0:
                     self.pending[b] = False
@@ -349,7 +368,7 @@ class LaneDriver:
                 # intersection control: an uncommitted car treats the stop line as a wall
                 if before and self.control != "none" and not committed:
                     allowed = False
-                    if not arm_blocked.get((arm, lane)):
+                    if not arm_blocked.get((arm, lane)) and not merging:
                         if self.control == "light":
                             if green == arm:
                                 ss, _ = self._predict(path, s_now, v, path.box_out_s + 4.6)
@@ -375,13 +394,8 @@ class LaneDriver:
                     a_plan = (plan[1][kk + 1 - plan[0]] - v) / cfg.dt
                     a_idm = self._idm(v, gap, v_lead, s0=1.0, T=0.3) if tight else self._idm(v, gap, v_lead)
                     acc = min(a_plan, a_idm)
-                if merging and len(alive) > 1:
-                    others = np.arange(len(alive)) != j
-                    dx, dy = ax[others] - sim.x[b, n], ay[others] - sim.y[b, n]
-                    f, lat = np.cos(th) * dx + np.sin(th) * dy, -np.sin(th) * dx + np.cos(th) * dy
-                    onc = np.abs((ath[others] - th + np.pi) % (2 * np.pi) - np.pi) > 2 * np.pi / 3
-                    if (onc & (f > 0) & (f < 40.0) & (np.abs(lat) < 2.6)).any():
-                        acc = min(acc, (V_MERGE - v) / cfg.dt)
+                if merging:
+                    acc = min(acc, ((V_MERGE if back else 0.0 if hold else V_MERGE_MAX) - v) / cfg.dt)
                 acc = float(np.clip(acc, -cfg.brake_max, cfg.acc_max))
                 act[b, n, 0] = acc / cfg.acc_max if acc > 0 else acc / cfg.brake_max
                 act[b, n, 1] = np.clip(kappa / cfg.kappa_max, -1, 1)
