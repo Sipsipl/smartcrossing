@@ -67,16 +67,18 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
 - Subagents look at images themselves and report numbers; orchestrator keeps context small.
 - Emergence claims require ablations: signal zeroed/shuffled, no-comm training, MI(signal; intent).
 
-## Phases
-1. Simulator, baselines, metrics, rendering, tests  ← in progress
-2. ES training without/with signal; curriculum over demand
-3. Emergence analysis (driving side, signal meaning), agent-type mixing
-4. Browser viewer with sliders (demand, turn mix, signal noise/on-off, population mix)
+## Status (2026-10-11)
+Done: simulator + baselines + metrics + tests; ES and PPO training; emergence analysis tooling;
+website (site/) incl. sliders, agent mixing, side-by-side comparison; wide crossing, grip limit,
+reverse gear, impact-speed crash cost, higher inflow; refactor (single frontend, shared JS config).
+Main brain: results/wide_s1ft2_ckpt2650 (beats the light from demand 0.15 up, ~19 % crashes at 0.15).
+Open: crashes in traffic (cars rarely yield), weaving, lamps unused. Next: see "Decided for the
+next training round" and Roadmap (B), (C), (D).
 
 ## Roadmap (owner, after the wide-crossing change)
 - (A) Driving quality: failure breakdown (offroad vs crash, solo vs traffic, per manoeuvre and
   demand), solo-driving gate (a car alone never leaves the road), impact-speed crash/offroad
-  cost, physically visible neighbour features (curvature, acceleration).  <- current
+  cost, physically visible neighbour features (curvature, acceleration).  <- done
 - (B) Perception / network: set (attention) encoder over all neighbours instead of K nearest,
   optional recurrent memory (GRU).
 - (C) Geometry-independent inputs throughout + randomized geometries during training; GPU port
