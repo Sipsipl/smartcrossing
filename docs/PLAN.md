@@ -104,6 +104,15 @@ next training round" and Roadmap (B), (C), (D).
   Diagnosis 2026-10-11 (experiments.md): cars see the obstacle but don't brake to a stop. Stop gate
   (acceptance test for every new brain, like the solo-driving gate): a car alone with a wreck or a
   standing car on its path (several speeds/gaps) must stop without crashing in >= 95% of cases.
+  The stop gate only measures; the fix belongs in training. Reward check: for a single car, stopping
+  for a wreck is clearly better (~+2) than hitting it (~-6), so the reward is right in principle.
+  Suspected causes: (1) no exploration of hard braking (warm start from a never-stopping brain,
+  logstd -2); (2) multi-agent trap of the equal crash cost: a car that brakes gets rear-ended and pays
+  as much as the hitter, so braking is punished while nobody brakes; (3) standing obstacles were rare.
+  Round 2 (owner, 2026-10-11): three variants, equal training time, paired comparison:
+  A = more exploration; B = A + obstacle scenarios (some envs start with a wreck/standing car on a
+  path); C = B + crash cost by OWN impact speed (standing car pays only the base cost; still
+  outcome-only physics). The owner decides on C after the numbers.
 - (F) Geometry variety (long term): roundabout-like and non-right-angled crossings, then a whole
   village (road network; cars start/end at driveways or the map edge). Needs geometry-independent
   inputs (C), a road-graph representation instead of the hard-coded 4-arm crossing, and route
