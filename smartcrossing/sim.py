@@ -652,8 +652,10 @@ class Sim:
                 b, clear, cnt = b[ok], clear[ok], cnt[ok]
                 head = self._qhead[b, k]
                 qu, qman, qgrp = self._qbuf[b, k, head].T
+                # own spot (u across the range) if clear, else the clear spot of the same rank u
+                j0 = np.rint(qu * (len(lats) - 1)).astype(np.int64)
                 pick = np.minimum(np.floor(qu * cnt).astype(np.int64), cnt - 1)
-                j = np.argmax(np.cumsum(clear, 1) > pick[:, None], 1)
+                j = np.where(clear[np.arange(len(b)), j0], j0, np.argmax(np.cumsum(clear, 1) > pick[:, None], 1))
                 n = np.argmin(self.alive[b], 1)
                 self.alive[b, n] = True
                 self.x[b, n], self.y[b, n] = px[j], py[j]
