@@ -51,6 +51,30 @@ Owners, damit Kontext frisch ist und GPU-Training möglich wird.
   von claude.ai/code), darfst du Aufgaben ohne GPU-Bedarf dorthin geben (z. B. Website,
   Analyse, Refactoring). GPU-Arbeit bleibt lokal. Falls nicht verfügbar: lokale Subagents.
 
+## Workflow-Tipps aus der bisherigen Zusammenarbeit
+- **Subagent-Aufträge selbsttragend schreiben:** Ziel, zu lesende Dateien, **Dateizuständigkeit**
+  („du besitzt X; fass Y nicht an“), Abbruch-/Zeitlimit, „nicht committen“ (du committest),
+  und ein festes Berichtsformat: max. 150–300 Wörter, Zahlen + Pfade, kein Code.
+- **Abnahmebedingungen mitgeben**, nicht nur Aufgaben: z. B. „pytest grün“, „Bench vorher/nachher
+  identisch“ (Refactoring), „Screenshots selbst ansehen“, „keine Konsolenfehler“.
+- **Simulationsänderungen seriell:** `sim.py` + `site/src/js/sim.js` + Paritätstest hängen
+  zusammen; immer nur ein Agent darin. Website-Arbeit parallel nur in `site/`-Dateien.
+- **Erst lesen, dann ändern:** Bei unklarer Lage zuerst einen read-only Prüf-Agent (Audit,
+  Messung, Ausfall-Aufschlüsselung) und auf Basis der Liste handeln. Messen vor Optimieren.
+- **Robuste Zahlen:** Bench über mehrere Verkehrs-Seeds; ein einzelner Seed täuscht (±10–20
+  Unfälle/1000). Immer mit Ampel/Verkehrsrechner und dem bisherigen besten Modell vergleichen.
+- **Trainings:** vor dem Start Iterationen/min messen und Dauer hochrechnen; Zeitlimit im Auftrag;
+  CPU-Last im Blick (Training + Website-Build gleichzeitig überbucht die Kerne).
+- **Berichte kritisch prüfen:** Subagent-Berichte und externe Handover sind Behauptungen. Gegen
+  Repo/Daten prüfen (eine frühere Analyse beruhte auf einem veralteten Commit). Stichprobe:
+  ein Bild ansehen, eine Zahl nachrechnen, Tests selbst laufen lassen.
+- **Häufig committen** (WIP auf dem Branch), damit Abbrüche (Ausgabenlimit, Neustart) nichts
+  kosten. Abgebrochene Agents mit kurzem Statusupdate fortsetzen statt neu starten.
+- **Gedächtnis ist das Repo:** nach jeder Runde `docs/experiments.md` (was, warum, Ergebnis) und
+  bei Entscheidungen `docs/PLAN.md` aktualisieren lassen. Neue Owner-Regeln sofort dort festhalten.
+- **Dem Owner berichten:** kurz, Tabelle mit Vergleichswerten, ehrliche Einordnung (was hat
+  nicht geklappt), dann ein konkreter Vorschlag. Kein Fachjargon ohne Erklärung.
+
 ## Nächste Schritte (Vorschlag, mit dem Owner abstimmen)
 1. Einrichtung (Schritt 0) abschließen und kurz berichten (Hardware, was fehlte, Tests grün).
 2. **Roadmap C – GPU-Port vorbereiten:** Simulation + PPO nach PyTorch (läuft nativ unter
