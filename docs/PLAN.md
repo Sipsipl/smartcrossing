@@ -101,6 +101,9 @@ next training round" and Roadmap (B), (C), (D).
   traffic. Owner's choice: a fixed, clearly higher crash/off-road cost (instead of an adaptive crash
   budget); the right factor is found by short comparison runs (too high -> cars refuse to enter).
   Still outcome-only. Perception (B) and brake lights should help as well.
+  Diagnosis 2026-10-11 (experiments.md): cars see the obstacle but don't brake to a stop. Stop gate
+  (acceptance test for every new brain, like the solo-driving gate): a car alone with a wreck or a
+  standing car on its path (several speeds/gaps) must stop without crashing in >= 95% of cases.
 - (F) Geometry variety (long term): roundabout-like and non-right-angled crossings, then a whole
   village (road network; cars start/end at driveways or the map edge). Needs geometry-independent
   inputs (C), a road-graph representation instead of the hard-coded 4-arm crossing, and route

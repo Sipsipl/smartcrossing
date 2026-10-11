@@ -678,3 +678,24 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
 - **Next**: longer runs with several seeds and paired sweeps at equal iterations; hard iteration caps
   (not shell timeouts); curriculum weighted to 0.15-0.3; Roadmap B (attention over all neighbours)
   for yielding.
+
+## Diagnosis: why cars drive into standing cars / wrecks (2026-10-11, read-only, runs/diag_rearend/)
+- Owner's observation: cars often don't stop for a standing car or wreck ahead; chain pile-ups.
+- Crash taxonomy (share of crash pairs, round1_x3 vs old brain): rear-end into wreck 6% / 13% (new,
+  0.15 / 0.3) vs 30% / 52% (old); crossing in the box 60% / 56% vs 36% / 18%; head-on ~20-26%.
+  Chains (>= 3 cars): new 24% / 46% of crashed cars, old 58% / 82%.
+- **Perception is not the cause**: the obstacle was among the K=4 neighbours at impact in 100% of
+  rear-ends (whole last 3 s: 87%); 119 of 136 wrecks showed the hazard feature >= 1 s before impact.
+- **Braking is the cause**: first seen at ~10 m gap, median TTC 2.8 s, 99-100% could have stopped
+  with full braking; only 61% braked at all (median strongest -0.55 of -1), re-acceleration in the
+  last 0.5 s, 40% never reacted. Old brain worse (braked in ~20%).
+- Solo test (one car, one wreck in its path, v0 6-14 m/s, gap 10-30 m, 0/3 distractors): new brain
+  stopped in 0 of 36 cases (crash or swerve past); old 18/18 crashes.
+- Spawning is not the cause: 0 of ~24,500 entries physically unavoidable (min gap 13 m).
+- What-if "prefer neighbours ahead" (untrained): worse; not conclusive.
+- **Root causes**: (1) training gap: the policy never learned to come to a stop (warm start from a
+  brain that never stops, 1180 it, low exploration logstd -2; standing obstacles are rare in
+  training); (2) no-blame crash cost: stopping in traffic risks being hit from behind; (3) slot-order
+  neighbour inputs (same reaction learned per slot).
+- **Consequences**: add a stop gate (solo car must stop for a wreck/standing car); scenario
+  curriculum with obstacles on the path; more exploration / from-scratch comparison; Roadmap B.
