@@ -3,12 +3,14 @@
 Goal: a signal-free four-way intersection crossed only by learning autonomous cars.
 Questions: (1) how high can throughput get without crashes, (2) does coordination emerge
 when cars can emit a free, un-predefined "light" signal, (3) do conventions such as
-right- vs left-hand traffic emerge on their own, (4) what happens when differently
+right- vs left-hand traffic emerge on their own (driving side: answered by earlier runs, now
+given by right-half spawning; lanes, priority, lamp meaning stay open), (4) what happens when differently
 trained agent types share the road (ncase.me "Evolution of Trust" style).
 
 ## Fixed decisions (from the owner)
 - No lanes, lane paths, traffic lights, priority rules or driving-side conventions for the
-  learning agents. Steering is learned (2D kinematics), not just speed.
+  learning agents. Steering is learned (2D kinematics), not just speed. Exception (owner,
+  2026-10-11): cars enter the map on the right half of their road (see next training round).
 - Old pygame/DQN code was replaced (deleted; it is in the git history before the refactor).
 - Geometry (since the wide-crossing change): 4 arms, roads 14 m wide (W = 7 m half width: room
   for two cars side by side per direction), curb radius Rc = 9 m, arms L = 50 m. The original
@@ -83,11 +85,33 @@ next training round" and Roadmap (B), (C), (D).
   optional recurrent memory (GRU).
 - (C) Geometry-independent inputs throughout + randomized geometries during training; GPU port
   (owner has an RTX 3070 Ti, local training later).
-- (D) Norm experiments: >= 20 seeds per configuration; lateral position (driving side, lanes),
+- (D) Norm experiments: >= 20 seeds per configuration; lateral position (lanes; driving side is
+  no longer open once spawning is right-only),
   priority patterns, signal MI, ablations, separately trained populations (cf. Pal et al.,
   ICLR 2022, "Emergent Road Rules").
 
+- (E) Safety: "rather a jam than a crash" (owner, 2026-10-11). Target: almost no crashes even in dense
+  traffic. Owner's choice: a fixed, clearly higher crash/off-road cost (instead of an adaptive crash
+  budget); the right factor is found by short comparison runs (too high -> cars refuse to enter).
+  Still outcome-only. Perception (B) and brake lights should help as well.
+- (F) Geometry variety (long term): roundabout-like and non-right-angled crossings, then a whole
+  village (road network; cars start/end at driveways or the map edge). Needs geometry-independent
+  inputs (C), a road-graph representation instead of the hard-coded 4-arm crossing, and route
+  information (next turn) as input instead of only the exit arm.
+- Quick wins: small GIF of the crossing at the top of README.md (rendered from the main brain);
+  short, plain explanation on /lernen of how training with many cars works (PPO: all cars share one
+  brain, each learns from its own reward; ES: each mutation drives in its own environments, all
+  cars there use it, fitness = sum over all cars).
+
 ## Decided for the next training round (owner)
+- Spawn on the right half of the road in driving direction, always (`spawn_right` for the learners
+  too; owner, 2026-10-11): fewer crashes / space problems at the map edge. This gives up the
+  "does a driving side emerge on its own" question (earlier runs already showed the cars agree on a
+  side); the other norm questions in (D) remain.
+- Wrecks: crashed cars stay for 5 s as standing obstacles (driving into one = own crash) with hazard
+  lights that other cars can see (a physically visible signal, no rule information), then vanish.
+  Mirror in sim.js / site rendering.
+- Higher fixed crash/off-road cost, see (E).
 - One free lamp channel instead of two (n_signal = 1): easier to read and to analyse.
 - Neighbour acceleration observation becomes a binary brake light (on when braking), as on real cars.
 - No turn signals: a built-in blinker would leak the destination, which is deliberately hidden so
