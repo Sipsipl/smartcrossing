@@ -31,6 +31,10 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
 - Before every training run (owner, 2026-10-11): give a duration estimate and, if the scope can be
   fixed in advance, 2-3 options (short for fast iteration ... long for quality) with expected
   benefit; the owner chooses. Training runs on the owner's PC (GPU), which is busy meanwhile.
+- Clean code (owner, 2026-10-11): insert refactoring steps regularly (dead code, duplication,
+  stale docs/compat layers, unclear names) so no technical debt builds up. The coordinator decides
+  when: between rounds, not while a sim change or training is in flight. Procedure: read-only audit
+  first, then refactor with acceptance "pytest green + bench/parity identical before vs after".
 - Deliverable: a live, in-browser visualisation with a few sliders (keep it simple),
   incl. mixing agent types.
 
