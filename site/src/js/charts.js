@@ -91,7 +91,10 @@
       if (opts.directLabels && W >= 420) {
         const p = s.points[s.points.length - 1];
         let y = Y(p[1]) + 4;
-        for (const o of lastYs) if (Math.abs(o - y) < 14) y = o + 14 * Math.sign(y - o || 1);
+        // move away from labels already placed until it overlaps none (a few passes for crowded ends)
+        for (let pass = 0; pass < 6 && lastYs.some((o) => Math.abs(o - y) < 14); pass++) {
+          for (const o of lastYs) if (Math.abs(o - y) < 14) y = o + 14 * Math.sign(y - o || 1);
+        }
         lastYs.push(y);
         const t = el("text", { x: X(p[0]) + 8, y, "text-anchor": "start" }, svg); t.textContent = s.name;
       }

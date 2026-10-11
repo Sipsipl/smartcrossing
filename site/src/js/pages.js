@@ -165,9 +165,18 @@
       $("status").innerHTML = `Bei mittlerem Verkehr (${num(r15.demand_per_min, 0)} Autos pro Minute) schaffen es die besten gelernten Autos
         zu <b>${pct(r15.exit_ok_rate)}</b> heil ans Ziel – <b>${num(r15.throughput_per_min)}</b> Autos pro Minute.
         Eine Ampel schafft ${num(l15.throughput_per_min)} pro Minute, ein zentraler Verkehrsrechner ${num(v15.throughput_per_min)} – beide ohne einen einzigen Unfall.
-        Die Autos lernen also noch. Rechtsverkehr entstand von selbst, Spuren und eine Lampensprache nicht.
+        Die Autos lernen also noch.${prevNote()}
         <a href="vergleich.html">Zum Vergleich →</a>`;
     }
+  }
+
+  /** What is new in the main brain vs the previous one (crash numbers from the bench data). */
+  function prevNote() {
+    const a = D.previous && pol(D.previous) && pol(D.previous).bench["0.15"], b = pol(MAIN_ID) && pol(MAIN_ID).bench["0.15"];
+    if (!a || !b || !(a.crash_cars_per_1000 > 0)) return "";
+    const less = Math.round((1 - b.crash_cars_per_1000 / a.crash_cars_per_1000) * 10) * 10;
+    return ` Neu beim aktuellen Gehirn: Es hat mit Wracks und Warnblinkern, Bremslichtern und nur einer Lampe weitergelernt, und alle Autos fahren rechts ein.
+      Bei mittlerem Verkehr baut es rund ${less} % weniger Unfälle als das vorherige (${num(b.crash_cars_per_1000, 0)} statt ${num(a.crash_cars_per_1000, 0)} pro 1000 Autos) – bei dichtem Verkehr aber immer noch viele.`;
   }
 
   // ------------------------------------------------------------------ obs panel ("Was sieht ein Auto?")
@@ -566,6 +575,7 @@
     const mainWorld = MAIN_ID ? worldOf(pol(MAIN_ID)) : D.main_world || "wide";
     const brains = [];
     if (MAIN_ID) brains.push({ name: "Gelernte Autos", e: pol(MAIN_ID), color: "--c4" });
+    if (D.previous && pol(D.previous)) brains.push({ name: "Vorheriges Gehirn", e: pol(D.previous), color: "--c3" });
     if (D.history && D.history !== MAIN_ID) brains.push({ name: worldOf(pol(D.history)) === mainWorld ? "Gelernt (älter)" : "Gelernt (PPO)", e: pol(D.history), color: "--c3" });
     if (D.best.es && D.best.es !== MAIN_ID) brains.push({ name: "Evolution", e: pol(D.best.es), color: "--c5" });
     const worlds = [mainWorld, ...Object.keys(byWorld).filter((w) => w !== mainWorld)];
@@ -593,6 +603,8 @@
     const mb = MAIN_ID && pol(MAIN_ID).bench, badPct = (d) => mb && mb[d] ? pct(mb[d].crash_cars_per_1000 / 1000) : null;
     if (badPct("0.15")) $("h-mid").textContent = `rund ${badPct("0.15")}`;
     if (badPct("0.05")) $("h-low").textContent = `rund ${badPct("0.05")}`;
+    const pb = D.previous && pol(D.previous) && pol(D.previous).bench["0.15"];
+    if (mb && mb["0.15"] && pb) $("h-prev").textContent = ` Das vorherige Gehirn hatte bei mittlerem Verkehr noch ${num(pb.crash_cars_per_1000, 0)} Unfälle pro 1000 Autos, das aktuelle ${num(mb["0.15"].crash_cars_per_1000, 0)}.`;
     if ($("c-thr-note")) $("c-thr-note").textContent = groups.length > 1 ? `Diagramm: ${WORLD_NAMES[mainWorld].replace(/ \(.*/, "")}. In den Tabellen steht jedes Gehirn neben Ampel und Verkehrsrechner auf der Kreuzung, auf der es trainiert wurde.` : "";
     const draw = () => SCX.lineChart($("c-thr"), {
       series: [

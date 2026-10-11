@@ -97,7 +97,8 @@
         let s0 = tr.l0 ? tr.l0[i] : 0, s1 = tr.l1 ? tr.l1[i] : 0;
         if (i + 1 < tr.len) {
           x += (tr.x[i + 1] - x) * a; y += (tr.y[i + 1] - y) * a; th += (tr.th[i + 1] - th) * a;
-          if (tr.l0) { s0 += (tr.l0[i + 1] - s0) * a; s1 += (tr.l1[i + 1] - s1) * a; }
+          if (tr.l0) s0 += (tr.l0[i + 1] - s0) * a;
+          if (tr.l1) s1 += (tr.l1[i + 1] - s1) * a;
         }
         if (tr.l0) lamp = SCX.lampCSS(tr.l1 ? 2 : 1, s0, s1);
         SCX.drawCar(ctx, x, y, th, tr.man, null, lamp, tr.brake[i] === 1);
