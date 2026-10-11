@@ -1,7 +1,7 @@
 """Build the static website into site/public/ (commit the result; Cloudflare Pages
 serves that folder as is, see docs/DEPLOY.md).
 
-    poetry run python site/build.py                       # auto: best checkpoints from runs/
+    poetry run python site/build.py                       # runs/ if present, else results/site/
     poetry run python site/build.py --main runs/es5/final_g310.npz --bench
 
 What it does:
@@ -16,7 +16,11 @@ What it does:
    policy weights, physics and the sim source, so rebuilding is fast and reproducible,
 5. writes everything the pages need into public/data/site-data.js (no fetch needed).
 
-runs/ is gitignored, so the build only works where the runs exist; the committed
+runs/ is gitignored. A build from runs/ also writes a compact snapshot of everything it used
+to results/site/ (committed): the chosen checkpoints (brains/<run>/<name>.npz, exact weights,
+so the bench cache keys stay valid), the warm-start chain info and the thinned learning curves
+(manifest.json). Without runs/ (a fresh clone) the build reads that snapshot instead
+(--source), so `poetry run python site/build.py` works from a checkout. The committed
 site/public/ is what gets deployed.
 """
 
@@ -46,13 +50,17 @@ SRC = SITE / "src"
 OUT = SITE / "public"
 CACHE = SITE / "data" / "bench_cache.json"
 RUNS = ROOT / "runs"
+SNAPSHOT = ROOT / "results" / "site"  # committed copy of what the build uses from runs/ (see docstring)
+SOURCE = {"kind": "runs", "manifest": None}  # set in main(): "runs" or "snapshot"
 
 DEMANDS = [0.05, 0.1, 0.15, 0.2, 0.3]
 # the site's main brain (wide crossing) and the end of the older line whose training history is
 # shown before it (narrow crossing); override with --main / --history
-DEFAULT_MAIN = ["runs/wide_s1ft2/ckpt_2650.npz"]
-DEFAULT_HISTORY = "runs/ppo17/ckpt_5250.npz"
-DEFAULT_MIX = "runs/wide_s0ft/ckpt_2850.npz"  # second brain offered for mixing on the start page
+# Checkpoints are named <run>/<file stem> (found in runs/ or in the snapshot); a path to an
+# .npz anywhere (e.g. results/wide_s1ft2_ckpt2650.npz) works too if its weights match one.
+DEFAULT_MAIN = ["wide_s1ft2/ckpt_2650"]  # = results/wide_s1ft2_ckpt2650.npz
+DEFAULT_HISTORY = "ppo17/ckpt_5250"
+DEFAULT_MIX = "wide_s0ft/ckpt_2850"  # = results/wide_s0ft_ckpt2850.npz; second brain for mixing on the start page
 TIMELINE_DEMANDS = [0.05, 0.15]
 BENCH_ENVS, BENCH_SECONDS, BENCH_SEED = 8, 120.0, 1000
 # Plain German names for known runs: run id -> (short label for chart markers, label, one-line
@@ -188,10 +196,30 @@ def policy_vector(d: dict) -> np.ndarray:
     return np.concatenate([np.concatenate([np.ravel(np.asarray(l["W"], dtype=float)), np.asarray(l["b"], dtype=float)]) for l in d["layers"]])
 
 
+def policy_hash(pol: dict) -> str:
+    return hashlib.sha1(policy_vector(pol).tobytes() + json.dumps(pol["in_scale"]).encode()).hexdigest()[:16]
+
+
+def _entry(run: str, stem: str, file: str, method: str, gen, physics: dict, pol: dict) -> dict:
+    return {"id": f"{run}/{stem}", "run": run, "file": file, "method": method, "gen": gen,
+            "physics": physics, "policy": pol, "adapted": pol.get("adapted"), "hash": policy_hash(pol)}
+
+
 def discover(world: str = "any") -> dict:
-    """All loadable checkpoints of runs/es*, runs/ppo* and runs/wide*: id -> info
-    (only those trained on `world` = narrow / wide crossing, unless 'any')."""
+    """All loadable checkpoints of runs/es*, runs/ppo* and runs/wide* (or of the snapshot):
+    id -> info (only those trained on `world` = narrow / wide crossing, unless 'any')."""
     found = {}
+    if SOURCE["kind"] == "snapshot":
+        for f in sorted((SNAPSHOT / "brains").glob("*/*.npz")):
+            with np.load(f) as z:
+                info = json.loads(str(z["info"]))
+                pol = {**info["policy"], "in_scale": z["in_scale"].tolist(),
+                       "layers": [{"W": z[f"W{i}"].tolist(), "b": z[f"b{i}"].tolist()} for i in range(info["n_layers"])]}
+            if world != "any" and world_of(info["physics"]) != world:
+                continue
+            e = _entry(info["run"], f.stem, info["file"], info["method"], info["gen"], info["physics"], pol)
+            found[e["id"]] = e
+        return found
     if not RUNS.exists():
         return found
     for run_dir in sorted(p for p in RUNS.iterdir() if p.is_dir()):
@@ -207,43 +235,43 @@ def discover(world: str = "any") -> dict:
             meta = ckpt_meta(f)
             if world != "any" and world_of(physics_of(meta["cfg"])) != world:
                 continue
-            cid = f"{run_dir.name}/{f.stem}"
-            found[cid] = {
-                "id": cid, "run": run_dir.name, "file": str(f.relative_to(ROOT)), "method": method,
-                "gen": meta["gen"], "physics": physics_of(meta["cfg"]), "policy": pol,
-                "adapted": pol.get("adapted"),
-                "hash": hashlib.sha1(policy_vector(pol).tobytes() + json.dumps(pol["in_scale"]).encode()).hexdigest()[:16],
-            }
+            e = _entry(run_dir.name, f.stem, str(f.relative_to(ROOT)), method, meta["gen"], physics_of(meta["cfg"]), pol)
+            found[e["id"]] = e
     return found
 
 
-def run_args(run: str) -> dict:
+def init_of(run: str) -> tuple[str, int] | None:
+    """(run, generation) of the checkpoint `run` was warm-started from, if it is a known run."""
+    if SOURCE["kind"] == "snapshot":
+        r = SOURCE["manifest"]["runs"].get(run, {}).get("init")
+        return tuple(r) if r else None
     p = RUNS / run / "args.json"
-    return json.loads(p.read_text()) if p.exists() else {}
+    init = (json.loads(p.read_text()) if p.exists() else {}).get("init") or ""
+    if not init:
+        return None
+    ip = ROOT / init
+    if not ip.exists() or not method_of(ip.parent.name):
+        return None
+    return ip.parent.name, ckpt_meta(ip)["gen"] or 0
 
 
 def chain_of(run: str) -> list[tuple[str, int]]:
     """Warm-start chain ending in `run`: [(run, gen offset), ...] oldest first."""
-    chain, seen = [], set()
-    cur, init_gen = run, None
+    chain, gens, seen = [], {}, set()
+    cur = run
     while cur and cur not in seen:
         seen.add(cur)
         chain.append(cur)
-        init = run_args(cur).get("init") or ""
-        if not init:
+        nxt = init_of(cur)
+        if not nxt:
             break
-        ip = ROOT / init
-        nxt = ip.parent.name
-        if not ip.exists() or not method_of(nxt):
-            break
-        cur = nxt
+        gens[cur] = nxt[1]
+        cur = nxt[0]
     chain.reverse()
     out, offset = [], 0
     for i, r in enumerate(chain):
         if i > 0:
-            ip = ROOT / run_args(r)["init"]
-            g = ckpt_meta(ip)["gen"] or 0
-            offset = dict(out)[chain[i - 1]] + g
+            offset = dict(out)[chain[i - 1]] + gens[r]
         out.append((r, offset))
     return out
 
@@ -419,6 +447,9 @@ def read_curve(run: str, offset: int) -> list[dict]:
     """Learning curve of one run: x (cumulative generation / iteration), exit, crash,
     offroad (fractions of finished cars) and exit at demand 0.15 where evaluated.
     Robust to the field names: ES logs use centre.exit_ok etc."""
+    if SOURCE["kind"] == "snapshot":  # stored with offset 0 (already thinned)
+        rows = SOURCE["manifest"]["curves"].get(run, [])
+        return [{**r, "x": round(r["x"] + offset, 4)} for r in rows]
     p = RUNS / run / "log.jsonl"
     if not p.exists():
         return []
@@ -451,6 +482,62 @@ def read_curve(run: str, offset: int) -> list[dict]:
 
 
 # ------------------------------------------------------------------ selection
+def resolve(found: dict, spec: str) -> str:
+    """Checkpoint id of `spec`: an id (<run>/<name>), its runs/ path, or any .npz / .json file
+    whose weights equal a discovered checkpoint (e.g. results/wide_s1ft2_ckpt2650.npz)."""
+    cid = next((k for k, c in found.items() if c["file"] == spec or k == spec), None)
+    if cid is None and (ROOT / spec).is_file():
+        h = policy_hash(load_adapted_policy(ROOT / spec))
+        cid = next((k for k, c in found.items() if c["hash"] == h), None)
+    if cid is None:
+        raise SystemExit(f"{spec}: not a loadable checkpoint in {SOURCE['kind']} (see skip messages)")
+    return cid
+
+
+def run_world(run: str, found: dict) -> str | None:
+    c = next((c for c in found.values() if c["run"] == run), None)
+    if c is not None:
+        return world_of(c["physics"])
+    if SOURCE["kind"] == "snapshot":
+        return SOURCE["manifest"]["runs"].get(run, {}).get("world")
+    return None
+
+
+def write_snapshot(found: dict, used: list[str], chain_runs: list[str]):
+    """results/site/: the used checkpoints (exact weights) + manifest (chains, worlds, curves)."""
+    brains = SNAPSHOT / "brains"
+    old = {f.relative_to(brains).as_posix() for f in brains.glob("*/*.npz")} if brains.exists() else set()
+    keep = set()
+    for cid in used:
+        c = found[cid]
+        pol = c["policy"]
+        rel = f"{c['run']}/{cid.split('/', 1)[1]}.npz"
+        keep.add(rel)
+        info = {"run": c["run"], "file": c["file"], "method": c["method"], "gen": c["gen"], "physics": c["physics"],
+                "n_layers": len(pol["layers"]),
+                "policy": {k: v for k, v in pol.items() if k not in ("layers", "in_scale")}}
+        arrays = {"in_scale": np.asarray(pol["in_scale"], dtype=float)}
+        for i, l in enumerate(pol["layers"]):
+            arrays[f"W{i}"], arrays[f"b{i}"] = np.asarray(l["W"], dtype=float), np.asarray(l["b"], dtype=float)
+        path = brains / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(path, info=json.dumps(info, sort_keys=True), **arrays)
+    for rel in old - keep:
+        (brains / rel).unlink()
+    for d in brains.iterdir():
+        if d.is_dir() and not any(d.iterdir()):
+            d.rmdir()
+    runs = sorted(set(chain_runs) | {found[cid]["run"] for cid in used})
+    manifest = {
+        "note": "written by site/build.py from runs/ (see its docstring); read when runs/ is absent",
+        "runs": {r: {"init": list(init_of(r)) if init_of(r) else None, "world": run_world(r, found)} for r in runs},
+        "curves": {r: read_curve(r, 0) for r in sorted(set(chain_runs))},
+    }
+    (SNAPSHOT / "manifest.json").write_text(json.dumps(manifest, separators=(",", ":"), sort_keys=True) + "\n")
+    size = sum(f.stat().st_size for f in SNAPSHOT.rglob("*") if f.is_file())
+    print(f"  snapshot: {len(keep)} brains + manifest in {SNAPSHOT.relative_to(ROOT)}/ ({size / 1024:.0f} KiB)")
+
+
 def choose(found: dict, main: list[str], quick: dict) -> dict:
     """Best checkpoint per method by quick bench score (exit-weighted throughput at 0.15)."""
     best = {}
@@ -463,9 +550,7 @@ def choose(found: dict, main: list[str], quick: dict) -> dict:
             best[c["method"]] = (score, cid)
     picked = {m: cid for m, (_, cid) in best.items()}
     for spec in main:  # explicit --main overrides
-        cid = next((k for k, c in found.items() if c["file"] == spec or k == spec), None)
-        if cid is None:
-            raise SystemExit(f"--main {spec}: not a loadable checkpoint under runs/ (see skip messages)")
+        cid = resolve(found, spec)
         picked[found[cid]["method"]] = cid
     return picked
 
@@ -577,9 +662,21 @@ def main(argv=None):
     ap.add_argument("--world", choices=["narrow", "wide", "any"], default="any",
                     help="only use checkpoints trained on this crossing (narrow = original 7 m road, wide = 14 m road)")
     ap.add_argument("--mix", default=DEFAULT_MIX, metavar="PATH", help="second brain for mixing on the start page ('' = none)")
+    ap.add_argument("--source", choices=["auto", "runs", "snapshot"], default="auto",
+                    help="where the checkpoints / logs come from: runs/ (also refreshes the snapshot), the committed "
+                         "snapshot results/site/, or auto (runs/ if it holds training runs, else the snapshot)")
     a = ap.parse_args(argv)
     if a.main is None:
         a.main = list(DEFAULT_MAIN)
+    kind = a.source
+    if kind == "auto":
+        kind = "runs" if RUNS.exists() and any(method_of(p.name) for p in RUNS.iterdir() if p.is_dir()) else "snapshot"
+    SOURCE["kind"] = kind
+    if kind == "snapshot":
+        if not (SNAPSHOT / "manifest.json").exists():
+            raise SystemExit(f"no runs/ and no snapshot in {SNAPSHOT.relative_to(ROOT)}/")
+        SOURCE["manifest"] = json.loads((SNAPSHOT / "manifest.json").read_text())
+    print(f"source: {kind}")
 
     cfg = SimConfig()
     layout = obs_layout(cfg)  # fails loudly if the sim's observation layout changed
@@ -588,10 +685,7 @@ def main(argv=None):
     print(f"  {len(found)} loadable checkpoints")
 
     def cid_of(spec):
-        cid = next((k for k, c in found.items() if c["file"] == spec or k == spec), None)
-        if cid is None:
-            raise SystemExit(f"{spec}: not a loadable checkpoint under runs/ (see skip messages)")
-        return cid
+        return resolve(found, spec)
 
     # methods without an explicit --main: quick bench of all their checkpoints at demand 0.15
     fixed = {found[cid_of(s)]["method"] for s in a.main}
@@ -637,8 +731,7 @@ def main(argv=None):
             chain_all += chain
             curves.setdefault(method, {}).update(crv)
             shift = 1 + max([row["x"] for rows in crv.values() for row in rows] + [p["gen"] for p in pts_all] + [0])
-        chains[method] = [{"run": r, "offset": off, "world": world_of(found[next(k for k, c in found.items() if c["run"] == r)]["physics"])
-                           if any(c["run"] == r for c in found.values()) else None, **run_info(r)} for r, off in chain_all]
+        chains[method] = [{"run": r, "offset": off, "world": run_world(r, found), **run_info(r)} for r, off in chain_all]
         for p in pts_all:
             use(p["id"], TIMELINE_DEMANDS)
         timelines[method] = pts_all
@@ -722,6 +815,8 @@ def main(argv=None):
         replays["policy_id"] = main_id
         replays["world"] = {k: base_phys[k] for k in ("L", "W", "Rc") if k in base_phys}
     data["replay_world"] = world_of(base_phys)
+    if kind == "runs":
+        write_snapshot(found, [cid for cid in policies if cid in found], [r["run"] for ch in chains.values() for r in ch])
     src_hash = hashlib.sha1(b"".join(f.read_bytes() for f in sorted(SRC.rglob("*")) if f.is_file())
                             + sim_config_js().encode()).hexdigest()
     version = hashlib.sha1((json.dumps([data, replays], sort_keys=True) + src_hash).encode()).hexdigest()[:8]
