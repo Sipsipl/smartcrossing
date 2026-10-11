@@ -12,6 +12,7 @@ The math mirrors ppo.py operation by operation (hand-written backward pass inste
 autograd, same Adam, same clipping, same minibatch permutation drawn from the numpy ``rng``),
 so in float64 it matches the numpy update to rounding (tests/test_ppo_torch.py). float32 on
 cuda is the fast path. One host sync per minibatch (the target-KL early stop needs it).
+The batch may be numpy arrays (rollout workers) or device tensors (rollout_torch, stage 2).
 """
 
 import os
@@ -98,6 +99,8 @@ class TorchPPO:
             torch.set_num_threads(max(1, (os.cpu_count() or 2) // 2))
 
     def _t(self, x):
+        if isinstance(x, torch.Tensor):  # batch from rollout_torch: already on the device
+            return x.to(device=self.dev, dtype=self.dt)
         return torch.as_tensor(np.asarray(x), device=self.dev).to(self.dt)
 
     def update(self, actor, logstd, critic, opt_a, opt_c, data, a, act_mask, in_scale, rng):

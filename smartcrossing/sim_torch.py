@@ -580,6 +580,34 @@ class TorchSim:
         self._prev_dist = torch.where(spawned, self.dist_to_gate(), self._prev_dist)
 
     # ------------------------------------------------------------------ CUDA graphs
+    def _widen_fifo(self, cap):
+        """Grow the arrival FIFO to capacity cap (keeps the queue order)."""
+        if self._qcap >= cap:
+            return
+        B = self.B
+        j = (self._qhead[..., None] + torch.arange(self._qcap, device=self.device)) % self._qcap
+        old = torch.gather(self._qbuf, 2, j[..., None].expand(B, 4, self._qcap, 3))
+        self._qbuf = torch.cat([old, torch.zeros(B, 4, cap - self._qcap, 3, dtype=self.dtype, device=self.device)], 2)
+        self._qhead = torch.zeros_like(self._qhead)
+        self._qcap = cap
+
+    def reset_inplace(self, seed: int, cfg: SimConfig | None = None):
+        """New episode without reallocating: the state of a fresh ``TorchSim(cfg, seed=seed)`` (rng
+        "torch") is copied into the existing tensors, so a captured CUDA graph stays valid. cfg may
+        only differ in ``demand_range`` (must stay set / unset as before); the device generator is
+        not reseeded (its stream continues)."""
+        cfg = cfg or self.cfg
+        assert (cfg.demand_range is None) == (self.cfg.demand_range is None)
+        fresh = TorchSim(cfg, self.B, seed, n_scenarios=self.S, device=self.device, dtype=self.dtype, rng="torch")
+        fresh._widen_fifo(self._qcap)
+        for o, f in ((self, fresh), (self.stats, fresh.stats)):
+            fv = vars(f)
+            for n, v in vars(o).items():
+                if isinstance(v, torch.Tensor) and n in fv and fv[n].shape == v.shape:
+                    v.copy_(fv[n])
+        self.cfg = cfg
+        self.t = 0.0
+
     def _run_static(self, fn):
         """Run fn() and copy every reassigned tensor attribute back into its old storage, so the
         state lives at fixed addresses (needed for CUDA-graph replay)."""
@@ -600,13 +628,7 @@ class TorchSim:
         assert self.device.type == "cuda" and self.rng_mode == "torch"
         if self.fifo_sync:
             self.fifo_sync = False
-            if self._qcap < 256:  # widen the FIFO once (keeps order) before the addresses are fixed
-                B = self.B
-                j = (self._qhead[..., None] + torch.arange(self._qcap, device=self.device)) % self._qcap
-                old = torch.gather(self._qbuf, 2, j[..., None].expand(B, 4, self._qcap, 3))
-                self._qbuf = torch.cat([old, torch.zeros(B, 4, 256 - self._qcap, 3, dtype=self.dtype, device=self.device)], 2)
-                self._qhead = torch.zeros_like(self._qhead)
-                self._qcap = 256
+            self._widen_fifo(256)  # once, before the addresses are fixed
         st = torch.cuda.Stream()
         st.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(st):

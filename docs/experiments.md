@@ -626,3 +626,29 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
   per iteration cuda 1.10 s (rollout 0.89 / update 0.21) vs numpy 5.41 s (0.76 / 4.65): ~5x.
   Curves identical up to iter 6, then same trend (f32 rounding). The rollout is now the bottleneck
   -> stage 2: TorchSim rollouts on the GPU (CUDA graph, f32, 1024-4096 envs, GAE/buffers on GPU).
+
+## Roadmap C stage 2: rollouts on the GPU (2026-10-11)
+- `smartcrossing/rollout_torch.py` (`TorchRollout`: one TorchSim, CUDA-graph step, buffers/GAE on the
+  GPU, batch handed to TorchPPO as device tensors); `ppo.py --rollout-device cuda --rollout-envs B
+  --rollout-dtype`; eval stays on the numpy path (paired traffic); log/checkpoint format unchanged.
+- Parity (`tests/test_ppo_gpu_rollout.py`): float64 with numpy traffic + injected noise, 3 rollouts incl.
+  an episode reset: obs, actions, log-probs, values, advantages, returns, rewards identical (0.0) on cpu
+  and cuda.
+- Timing (demand 0.3, early training; runs/bench_ppo_gpu.jsonl):
+
+  | config | car-steps/iter | s/iter | car-steps/s | GPU mem |
+  |---|---|---|---|---|
+  | numpy rollout + numpy update | 65k | 3.58 | 18k | - |
+  | numpy rollout + cuda update | 65k | 0.79 | 82k | small |
+  | GPU B1024 T32 | 158k | 0.46 | 343k | 1.0 GB |
+  | GPU B2048 T32 | 312k | 0.62 | 502k | 2.1 GB |
+  | GPU B2048 T64 | 661k | 1.19 | 557k | 4.1 GB |
+  | GPU B4096 T32 | 617k | 1.70 | 364k | 4.4 GB |
+
+  ~28x more car-steps/s than the old path. Bigger batches mean fewer updates per car-step, so
+  car-steps/s is not learning speed; the first real round has to show the sample efficiency.
+- Smoke run from scratch (runs/smoke_ppo_gpu, B1024 T32, 150 it, 65M car-steps in 88 s): like the numpy
+  smoke run it settles into "stand and wait" early (few finished cars, crash shares of the few finished
+  ones noisy); no qualitative check beyond that. A warm-start check was not possible locally (the
+  committed checkpoints hold only the actor; full state.npz files were in the cloud runs/).
+- Limits: torch RNG streams differ from numpy (same distributions); graph-mode arm queue capped at 256.
