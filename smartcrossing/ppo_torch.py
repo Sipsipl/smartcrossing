@@ -1,4 +1,4 @@
-"""PyTorch port of :func:`smartcrossing.ppo.ppo_update` (Roadmap C, stage 1: the update on the GPU).
+"""PyTorch port of :func:`smartcrossing.ppo.ppo_update` (``ppo --update-device cpu|cuda``).
 
 Drop-in replacement: ``TorchPPO(device, dtype).update`` takes exactly the arguments of
 ``ppo_update`` (numpy ``MLP`` actor/critic, numpy ``Adam`` optimisers, log-std array, rollout
@@ -12,7 +12,7 @@ The math mirrors ppo.py operation by operation (hand-written backward pass inste
 autograd, same Adam, same clipping, same minibatch permutation drawn from the numpy ``rng``),
 so in float64 it matches the numpy update to rounding (tests/test_ppo_torch.py). float32 on
 cuda is the fast path. One host sync per minibatch (the target-KL early stop needs it).
-The batch may be numpy arrays (rollout workers) or device tensors (rollout_torch, stage 2).
+The batch may be numpy arrays (rollout workers) or device tensors (rollout_torch.py).
 """
 
 import os
@@ -20,7 +20,7 @@ import os
 import numpy as np
 import torch
 
-LOG2PI = float(np.log(2 * np.pi))
+from .ppo_common import LOG2PI
 
 
 def _layers(p: torch.Tensor, sizes):

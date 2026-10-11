@@ -99,12 +99,20 @@ class PolicyDriver:
 
         paths = str(path).split("+")
         # sensors, the action interface and the world (geometry, grip) are part of what a policy
-        # learned: run it with the values it was trained with (first policy wins; older
-        # checkpoints: the legacy values, see policy_compat). Traffic settings (spawn_right,
-        # wreck_time, demand) stay those of the given sim.
-        tc = load_npz(paths[0])[2]
-        for k, legacy in LEGACY_INTERFACE.items():
-            setattr(sim.cfg, k, type(legacy)(tc.get(k, legacy)))
+        # learned: run it with the values it was trained with (older checkpoints: the legacy
+        # values, see policy_compat); all policies of one sim must share them. Traffic settings
+        # (spawn_right, wreck_time, demand) stay those of the given sim.
+        ifaces = []
+        for p in paths:
+            tc = load_npz(p)[2]
+            ifaces.append({k: type(legacy)(tc.get(k, legacy)) for k, legacy in LEGACY_INTERFACE.items()})
+        for p, iface in zip(paths[1:], ifaces[1:]):
+            if iface != ifaces[0]:
+                diff = {k: (ifaces[0][k], v) for k, v in iface.items() if v != ifaces[0][k]}
+                raise ValueError(f"policies with different interfaces cannot share one sim: {paths[0]} vs {p} "
+                                 f"differ in {diff}")
+        for k, v in ifaces[0].items():
+            setattr(sim.cfg, k, v)
         if sim.sig.shape[-1] != sim.cfg.n_signal:  # lamp count of the checkpoint (fresh sim: lamps are 0)
             sim.sig = np.zeros((*sim.sig.shape[:-1], sim.cfg.n_signal))
         plist, sizes, tcfg, scale = [], None, None, None

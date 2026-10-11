@@ -18,6 +18,7 @@ from smartcrossing.sim import (
     SimConfig,
     act_dim,
     obs_dim,
+    spawn_lats,
     offroad_point,
     ray_edge_dist,
 )
@@ -413,7 +414,7 @@ def test_spawn_capacity_at_high_demand(spawn_right):
 def test_spawn_falls_back_to_a_clear_spot():
     cfg = SimConfig(demand=0.0, spawn_right=False)  # full width: the other half has room
     sim = Sim(cfg, 1, seed=0)
-    lats = sim.spawn_lats()
+    lats = spawn_lats(sim.cfg)
     # standing car right in front of the u = 1 spot (right edge of arm 0): that side is blocked
     place(sim, 0, 0, lats[-1], -cfg.L + 2.5 + 5.0, np.pi / 2)
     sim._qbuf[0, 0, 0] = (1.0 - 1e-9, STRAIGHT, 0)
@@ -423,3 +424,19 @@ def test_spawn_falls_back_to_a_clear_spot():
     assert new.sum() == 1 and sim.queue[0, 0] == 0
     x = sim.x[0][new][0]
     assert x < lats[-1] - 5.0  # entered at the rightmost clear spot instead of waiting
+
+
+def test_arrival_fifo_growth_keeps_the_queue_order():
+    """A tiny initial FIFO that has to grow (several times) gives exactly the default run."""
+    cfg = SimConfig(n_slots=4, demand=1.5)  # few slots, high demand: long queues
+    runs = []
+    for cap in (64, 2):
+        sim = Sim(cfg, 3, seed=4, group_probs=[0.6, 0.4])
+        sim._qcap, sim._qbuf = cap, np.zeros((3, 4, cap, 3))
+        for _ in range(150):
+            sim.step(np.tile([0.5, 0.0, 0.0], (3, 4, 1)))
+        runs.append(sim)
+    a, b = runs
+    assert b._qcap >= 16 and a.queue.max() > 8
+    for name in ("queue", "man", "group", "arm", "uid", "x", "y"):
+        np.testing.assert_array_equal(getattr(a, name), getattr(b, name), err_msg=name)

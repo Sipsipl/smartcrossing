@@ -1,4 +1,5 @@
-"""PyTorch port of :class:`smartcrossing.sim.Sim` (feasibility study for the GPU port, Roadmap C).
+"""PyTorch port of :class:`smartcrossing.sim.Sim`: the simulator of the GPU rollouts
+(rollout_torch.py, ``ppo --rollout-device cuda``).
 
 Same physics, rewards, removal, arrivals and observations as sim.py, vectorised over
 (envs, slots) without data-dependent Python control flow, so it runs on cpu or cuda
@@ -16,7 +17,7 @@ Differences to sim.py (by design):
 - Not ported: ``Stats.travel`` per-vehicle lists (replaced by per-env sums
   ``travel_time`` / ``travel_free`` / exits count) and ``events`` (rendering only).
   The FIFO growth check costs one host sync per step (disabled in CUDA-graph mode, which
-  uses a fixed capacity of 256 per arm and only flags an overflow in ``fifo_overflow``).
+  uses a fixed capacity of at least 256 per arm and only flags an overflow in ``fifo_overflow``).
 - ``cuda_graph(fn)`` captures observe + policy + step into one CUDA graph: eager torch on the
   GPU is launch-bound (~1000 small kernels per step, ~55 ms on Windows regardless of B).
 """
@@ -44,20 +45,19 @@ from .sim import (
     RAY_ANGLES,
     RAY_RANGE,
     RIGHT,
-    SPAWN_BACK,
-    SPAWN_CURB_GAP,
     SPAWN_LAT_MARGIN,
-    SPAWN_LAT_STEP,
     SPAWN_MAX_PER_STEP,
-    SPAWN_RIGHT_MIN,
     SPEED_TAU,
     STRAIGHT,
     SimConfig,
     free_flow_time,
     nb_features,
-    rot,
+    spawn_lats,
+    spawn_points,
     wreck_steps,
 )
+
+GRAPH_FIFO_CAP = 256  # arrival FIFO capacity per arm in CUDA-graph mode (no growth possible)
 
 _COS4 = (1.0, 0.0, -1.0, 0.0)  # rint(cos(k * 90deg)), k = 0..3
 _SIN4 = (0.0, 1.0, 0.0, -1.0)
@@ -158,9 +158,10 @@ class TorchStats:
 
 class TorchSim:
     def __init__(self, cfg: SimConfig, n_envs: int, seed: int = 0, n_scenarios: int | None = None,
-                 device="cpu", dtype=torch.float64, rng: str = "torch"):
+                 device="cpu", dtype=torch.float64, rng: str = "torch", group_probs=None, fifo_cap: int = 64):
         """rng: "numpy" = sim.py's random streams (bit-identical draws, for parity tests),
-        "torch" = on-device generator (fast)."""
+        "torch" = on-device generator (fast). group_probs: as sim.Sim. fifo_cap: initial capacity
+        of the per-arm arrival FIFO (grows on demand, except in CUDA-graph mode)."""
         assert rng in ("numpy", "torch")
         self.cfg = cfg
         self.B = n_envs
@@ -171,6 +172,9 @@ class TorchSim:
         self.C = _Consts(self.device, dtype)
         self.scen = torch.arange(self.B, device=self.device) % self.S
         self._scen_np = np.arange(self.B) % self.S
+        self.group_probs = np.array([1.0]) if group_probs is None else np.asarray(group_probs, dtype=float)
+        self.fifo_cap = fifo_cap
+        self.fifo_sync = True  # FIFO growth check (one host sync per step); off in CUDA-graph mode
         self.reset(seed)
 
     # ------------------------------------------------------------------ helpers
@@ -213,20 +217,17 @@ class TorchSim:
         self.uid = self._i(B, N, fill=-1)
         self.group = self._i(B, N)
         self.queue = self._i(B, 4)
-        self.queue_u, self.queue_man, self.queue_grp = self._f(B, 4), self._i(B, 4, fill=1), self._i(B, 4)
-        self._qcap = getattr(self, "fifo_cap", 64)
-        self.fifo_sync = getattr(self, "fifo_sync", True)
+        self._qcap = self.fifo_cap
         self.fifo_overflow = torch.zeros((), dtype=torch.bool, device=self.device)
         tp = np.asarray(self.cfg.turn_probs, dtype=float)
         self._turn_cdf = self._t(np.cumsum(tp / tp.sum())[:-1])
-        gp = np.asarray(getattr(self, "group_probs", np.array([1.0])), dtype=float)
+        gp = self.group_probs
         self._group_cdf = self._t(np.cumsum(gp / gp.sum())[:-1])
         self._qhead = self._i(B, 4)
         self._qbuf = self._f(B, 4, self._qcap, 3)
         self.next_uid = self._i()
         self.t = 0.0
         self.stats = TorchStats(B, self.device, self.dtype)
-        self.group_probs = getattr(self, "group_probs", np.array([1.0]))
         self._prev_dist = self._f(B, N)
         self.car_reward = self._f(B, N)
         self.done_kind = self._i(B, N, dtype=torch.int8)
@@ -235,25 +236,14 @@ class TorchSim:
         self._arange_B = torch.arange(B, device=self.device)
         self._arange_N = torch.arange(N, device=self.device)
         self._eye = torch.eye(N, dtype=torch.bool, device=self.device)
-        lats = self.spawn_lats()
-        self._lats = self._t(lats)
-        self._spawn_pts = []  # per arm: (px, py, h, hn) exactly as sim.py computes them (numpy)
-        back = -cfg.L + SPAWN_BACK
-        for k in range(4):
-            c, s = rot(k)
-            h = np.pi / 2 + k * np.pi / 2
-            hn = float(np.arctan2(np.sin(h), np.cos(h)))
-            px, py = c * lats - s * back, s * lats + c * back
-            self._spawn_pts.append((self._t(px), self._t(py), float(h), hn))
+        self._lats = self._t(spawn_lats(cfg))
+        # per arm: (px, py, h, hn) exactly as sim.py computes them (numpy)
+        self._spawn_pts = [(self._t(px), self._t(py), float(h), float(hn)) for px, py, h, hn in spawn_points(cfg)]
 
     # ------------------------------------------------------------------ geometry
     @property
     def tgt(self):
         return (self.arm + self.man) % 4
-
-    def gate_xy(self):
-        c, s = rot_t(self.tgt, self.C)
-        return s * self.cfg.L, -c * self.cfg.L
 
     def dist_to_gate(self):
         return route_dist(self.cfg, self.arm, self.man, self.x, self.y, self.C)
@@ -489,13 +479,6 @@ class TorchSim:
         self.y = torch.where(mask, 1e4, self.y)
 
     # ------------------------------------------------------------------ spawning
-    def spawn_lats(self):
-        cfg = self.cfg
-        lo = SPAWN_RIGHT_MIN if cfg.spawn_right else -(cfg.W - SPAWN_CURB_GAP)
-        hi = cfg.W - SPAWN_CURB_GAP
-        m = max(int(round((hi - lo) / SPAWN_LAT_STEP)), 1)
-        return lo + (hi - lo) * np.arange(m + 1) / m
-
     def _spawn_clear(self, sx, sy, h, x, y, vx, vy, alive):
         """(B, M) whether candidate spawn points (sx, sy) (M,) keep the clearance to every alive car."""
         cfg = self.cfg
@@ -544,11 +527,7 @@ class TorchSim:
         if not self.fifo_sync:  # CUDA-graph mode: fixed capacity, overflow only flagged (check fifo_overflow)
             self.fifo_overflow |= need > self._qcap
         elif int(need) > self._qcap:  # grow the FIFO (keeps order); one host sync
-            j = (self._qhead[..., None] + torch.arange(self._qcap, device=self.device)) % self._qcap
-            old = torch.gather(self._qbuf, 2, j[..., None].expand(B, 4, self._qcap, 3))
-            self._qbuf = torch.cat([old, torch.zeros_like(old)], 2)
-            self._qhead = torch.zeros_like(self._qhead)
-            self._qcap *= 2
+            self._widen_fifo(2 * self._qcap)
         slot = ((self._qhead + self.queue) % self._qcap)[..., None, None].expand(B, 4, 1, 3)
         vals = torch.stack([u, man.to(self.dtype), grp.to(self.dtype)], -1)[:, :, None, :]
         cur = torch.gather(self._qbuf, 2, slot)
@@ -606,13 +585,10 @@ class TorchSim:
                 svx = torch.full_like(sxn, cfg.spawn_speed * chn)
                 svy = torch.full_like(syn, cfg.spawn_speed * shn)
                 clear = clear & self._spawn_clear(px, py, h, sxn, syn, svx, svy, ok[:, None])
-        head = torch.gather(self._qbuf, 2, self._qhead[..., None, None].expand(B, 4, 1, 3))[:, :, 0]
-        self.queue_u, self.queue_man, self.queue_grp = head[..., 0], head[..., 1].to(torch.int64), head[..., 2].to(torch.int64)
         self._prev_dist = torch.where(spawned, self.dist_to_gate(), self._prev_dist)
 
-    # ------------------------------------------------------------------ CUDA graphs
     def _widen_fifo(self, cap):
-        """Grow the arrival FIFO to capacity cap (keeps the queue order)."""
+        """Grow the arrival FIFO to capacity cap (keeps the queue order; the head moves to 0)."""
         if self._qcap >= cap:
             return
         B = self.B
@@ -622,20 +598,24 @@ class TorchSim:
         self._qhead = torch.zeros_like(self._qhead)
         self._qcap = cap
 
+    # ------------------------------------------------------------------ CUDA graphs
     def reset_inplace(self, seed: int, cfg: SimConfig | None = None):
         """New episode without reallocating: the state of a fresh ``TorchSim(cfg, seed=seed)`` (rng
-        "torch") is copied into the existing tensors, so a captured CUDA graph stays valid. cfg may
-        only differ in ``demand_range`` (must stay set / unset as before); the device generator is
-        not reseeded (its stream continues)."""
+        "torch"), incl. its generator state, is copied into the existing tensors (and generator),
+        so a captured CUDA graph stays valid and the episode is reproducible from the seed (same
+        trajectory as a fresh sim). cfg may only differ in ``demand_range`` (must stay set / unset
+        as before)."""
+        assert self.rng_mode == "torch"
         cfg = cfg or self.cfg
         assert (cfg.demand_range is None) == (self.cfg.demand_range is None)
-        fresh = TorchSim(cfg, self.B, seed, n_scenarios=self.S, device=self.device, dtype=self.dtype, rng="torch")
-        fresh._widen_fifo(self._qcap)
+        fresh = TorchSim(cfg, self.B, seed, n_scenarios=self.S, device=self.device, dtype=self.dtype, rng="torch",
+                         group_probs=self.group_probs, fifo_cap=self._qcap)
         for o, f in ((self, fresh), (self.stats, fresh.stats)):
             fv = vars(f)
             for n, v in vars(o).items():
                 if isinstance(v, torch.Tensor) and n in fv and fv[n].shape == v.shape:
                     v.copy_(fv[n])
+        self.gen.set_state(fresh.gen.get_state())
         self.cfg = cfg
         self.t = 0.0
 
@@ -655,11 +635,12 @@ class TorchSim:
     def cuda_graph(self, fn, generators=(), warmup=3):
         """Capture fn() (observe / policy / step on this sim; all tensors it uses must be
         long-lived) into a CUDA graph and return replay(). Requires rng="torch"; the FIFO gets a
-        fixed capacity (fifo_cap, default 64 -> 256 here; fifo_overflow flags an overflow)."""
+        fixed capacity (at least GRAPH_FIFO_CAP; fifo_overflow flags an overflow)."""
         assert self.device.type == "cuda" and self.rng_mode == "torch"
         if self.fifo_sync:
             self.fifo_sync = False
-            self._widen_fifo(256)  # once, before the addresses are fixed
+            self.fifo_cap = max(self.fifo_cap, GRAPH_FIFO_CAP)  # also after reset()
+            self._widen_fifo(self.fifo_cap)  # once, before the addresses are fixed
         st = torch.cuda.Stream()
         st.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(st):

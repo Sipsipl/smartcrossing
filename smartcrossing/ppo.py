@@ -4,10 +4,12 @@ shared driving policy, trained on its own (per-car) reward.
 Rollouts and the default update are pure numpy (hand-written tanh-MLP backward pass).
 `--update-device cpu|cuda` runs the update in torch instead (ppo_torch.py, optional `gpu`
 poetry group; same parameters, ~19x faster on the GPU for dense-traffic batches).
-`--rollout-device cuda` (stage 2) also runs the rollouts on the GPU (rollout_torch.py: one
+`--rollout-device cuda` also runs the rollouts on the GPU (rollout_torch.py: one
 TorchSim with `--rollout-envs` envs, CUDA graph, buffers + GAE on the device, batch handed to
 the torch update without a host round trip; traffic and action noise from torch generators).
-Evaluation (eval_job) always uses the numpy Sim (paired traffic).
+Evaluation (eval_job) always uses the numpy Sim (paired traffic) in the run's world.
+Run tracking: args.json (+ git commit / dirty flag; a resumed run writes args.<n>.json) and the
+checkpoints' extra carry the commit; scripts/runs_index.py lists the runs.
 
 - actor: tanh MLP obs -> mu (linear output), Gaussian in pre-squash space with a
   state-independent log-std; the car executes tanh(u). The deterministic policy
@@ -36,15 +38,16 @@ import multiprocessing as mp
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
 from .policy import default_in_scale, layer_sizes, n_params, save_npz
+from .ppo_common import LOG2PI, N_DONE, N_PRIV, PRIV_DEMAND_SCALE, PRIV_QUEUE_SCALE, git_info
 from .sim import DONE_CRASH, DONE_EXIT, DONE_OFFROAD, DONE_TIMEOUT, DONE_WRONG, Sim, SimConfig, act_dim, obs_dim
 
-N_PRIV = 4
-LOG2PI = np.log(2 * np.pi)
+BATCH_KEYS = ("obs", "priv", "u", "logp", "adv", "ret", "val")  # per car-step arrays of a rollout
 
 
 # ---------------------------------------------------------------- tanh MLP with backprop
@@ -127,15 +130,15 @@ def mlp_forward(p, sizes, x):
 
 # ---------------------------------------------------------------- rollout worker
 def privileged(sim: Sim) -> np.ndarray:
-    """(B, N, N_PRIV) extra critic inputs (not visible to the policy)."""
+    """(B, N, N_PRIV) extra critic inputs (not visible to the policy; ppo_common.PRIV_FEATURES)."""
     cfg = sim.cfg
     B, N = sim.alive.shape
     dem = np.full(B, cfg.demand) if sim.demand is None else sim.demand
     f = np.empty((B, N, N_PRIV))
     f[..., 0] = sim.age / cfg.max_age
-    f[..., 1] = (sim.queue.sum(1) / 10.0)[:, None]
+    f[..., 1] = (sim.queue.sum(1) / PRIV_QUEUE_SCALE)[:, None]
     f[..., 2] = (sim.alive.sum(1) / N)[:, None]
-    f[..., 3] = (dem * 5.0)[:, None]
+    f[..., 3] = (dem * PRIV_DEMAND_SCALE)[:, None]
     return f
 
 
@@ -175,7 +178,7 @@ class Worker:
         rew = np.zeros((T, B, N))
         done = np.zeros((T, B, N), bool)
         valid = np.zeros((T, B, N), bool)
-        kinds = np.zeros(6, np.int64)
+        kinds = np.zeros(N_DONE, np.int64)
         own_rew_sum = 0.0
         for t in range(T):
             obs = sim.observe()
@@ -203,7 +206,7 @@ class Worker:
             own_rew_sum += r.sum()
             rew[t] = r
             done[t] = al & (sim.done_kind > 0)
-            kinds += np.bincount(sim.done_kind[al].ravel(), minlength=6)
+            kinds += np.bincount(sim.done_kind[al].ravel(), minlength=N_DONE)
             self.steps_in_ep += 1
         # bootstrap values for cars still on the road
         obs = sim.observe()
@@ -309,30 +312,39 @@ def ppo_update(actor, logstd, critic, opt_a, opt_c, data, a, act_mask, in_scale,
     return out
 
 
+
+
 # ---------------------------------------------------------------- eval (subprocess)
 EVAL_DEMANDS = (0.05, 0.15)
+EVAL_ENVS, EVAL_SECONDS, EVAL_SEED = 8, 120.0, 1000  # cli bench settings
+RENDER_DEMAND, RENDER_SECONDS = 0.15, 60.0
 
 
-def eval_job(ckpt: str, out_path: str, it: int, demands, envs: int, seconds: float, render_dir: str | None):
-    """Bench metrics of the deterministic policy (cli bench settings); appends one JSON line."""
+def eval_job(ckpt: str, out_path: str, it: int, demands, envs: int, seconds: float, render_dir: str | None,
+             cfg_d: dict | None = None):
+    """Bench metrics of the deterministic policy (cli bench settings) in the run's world (cfg_d: the
+    training SimConfig; fixed demand per bench, rewards do not matter); appends one JSON line."""
     from .cli import run
     from .metrics import summarize
 
+    world = {**(cfg_d or {}), "demand_range": None}
     rec = {"iter": it, "ckpt": ckpt}
     for d in demands:
-        sim, _ = run(f"policy:{ckpt}", SimConfig(demand=d), envs, seconds, 1000)
+        sim, _ = run(f"policy:{ckpt}", SimConfig(**{**world, "demand": d}), envs, seconds, EVAL_SEED)
         s = summarize(sim, seconds)
         rec[f"d{d:g}"] = {k: round(s[k], 3) for k in ("throughput_per_min", "exit_ok_rate", "crash_cars_per_1000",
                                                       "crash_cars", "offroad_cars", "timeouts", "delay_mean_s", "queued_end")}
     with open(out_path, "a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(rec) + "\n")
     if render_dir:
+        render_cfg = json.dumps({**world, "demand": RENDER_DEMAND})
         subprocess.run([sys.executable, "-m", "smartcrossing.cli", "render", "--driver", f"policy:{ckpt}", "--demand",
-                        "0.15", "--seconds", "60", "--out", render_dir], capture_output=True)
+                        str(RENDER_DEMAND), "--cfg", render_cfg, "--seconds", str(RENDER_SECONDS), "--out", render_dir],
+                       capture_output=True)
 
 
-# ---------------------------------------------------------------- main
-def main(argv=None):
+# ---------------------------------------------------------------- arguments and state
+def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--name", required=True)
     p.add_argument("--iters", type=int, default=500)
@@ -383,15 +395,39 @@ def main(argv=None):
                         "implies the torch update on the same device; --workers is then unused)")
     p.add_argument("--rollout-envs", type=int, default=0, help="torch rollout: envs (0 = workers x envs)")
     p.add_argument("--rollout-dtype", choices=("float32", "float64"), default="float32", help="torch rollout dtype")
-    a = p.parse_args(argv)
+    p.add_argument("--runs-dir", default="runs", help="parent folder of the run folder")
+    return p.parse_args(argv)
 
-    out = Path("runs") / a.name
-    out.mkdir(parents=True, exist_ok=True)
-    base = dict(n_slots=24, signal_enabled=a.signal, r_time=0.02)
-    cfg = SimConfig(**base)
+
+@dataclass
+class TrainState:
+    """Everything the training loop updates or needs about the networks (see build_state)."""
+
+    cfg: SimConfig
+    in_scale: np.ndarray
+    act_mask: np.ndarray
+    a_sizes: list
+    c_sizes: list
+    rng: np.random.Generator
+    actor: MLP
+    critic: MLP
+    logstd: np.ndarray
+    opt_a: Adam
+    opt_c: Adam
+    ceiling: float
+    it0: int = 0
+    total_steps: int = 0
+
+    @property
+    def cfg_d(self) -> dict:
+        return dict(self.cfg.__dict__)
+
+
+def build_state(a) -> TrainState:
+    """World config, fresh networks and optimisers, then --init-policy / --init applied."""
+    cfg = SimConfig(n_slots=24, signal_enabled=a.signal, r_time=0.02)
     if a.cfg:
         cfg = SimConfig(**{**cfg.__dict__, **json.loads(a.cfg)})
-    cfg_d = dict(cfg.__dict__)
     in_scale = default_in_scale(cfg)
     if a.zero_inputs:
         in_scale[[int(i) for i in a.zero_inputs.split(",")]] = 0.0
@@ -406,25 +442,181 @@ def main(argv=None):
     actor = MLP(a_sizes, rng, out_scale=0.01)
     critic = MLP(c_sizes, rng, out_scale=1.0)
     actor.p[-A] = np.arctanh(a.acc_init)  # output bias: initial mean acceleration action
-    logstd = np.full(A, a.logstd_init)
-    opt_a, opt_c = Adam(len(actor.p), a.lr), Adam(len(critic.p), a.lr_critic)
-    ceiling, it0, total_steps = a.demand_start, 0, 0
+    st = TrainState(cfg, in_scale, act_mask, a_sizes, c_sizes, rng, actor, critic, np.full(A, a.logstd_init),
+                    Adam(len(actor.p), a.lr), Adam(len(critic.p), a.lr_critic), a.demand_start)
     if a.init_policy:
         from .policy_compat import transplant_actor
 
         actor.p = transplant_actor(a.init_policy, cfg, in_scale, a_sizes)
     if a.init:
         z = np.load(a.init)
-        actor.p, critic.p, logstd = z["actor"].copy(), z["critic"].copy(), z["logstd"].copy()
-        ceiling = float(z["ceiling"]) if "ceiling" in z.files else ceiling
-        it0 = int(z["iter"]) + 1 if "iter" in z.files else 0
-        total_steps = int(z["total_steps"]) if "total_steps" in z.files else 0
+        actor.p, critic.p, st.logstd = z["actor"].copy(), z["critic"].copy(), z["logstd"].copy()
+        st.ceiling = float(z["ceiling"]) if "ceiling" in z.files else st.ceiling
+        st.it0 = int(z["iter"]) + 1 if "iter" in z.files else 0
+        st.total_steps = int(z["total_steps"]) if "total_steps" in z.files else 0
         if a.reset_logstd:
-            logstd = np.full(A, a.logstd_init)
+            st.logstd = np.full(A, a.logstd_init)
         if a.set_ceiling:
-            ceiling = a.set_ceiling
-    (out / "args.json").write_text(json.dumps({**vars(a), "actor_sizes": a_sizes, "critic_sizes": c_sizes, "cfg": cfg_d}, indent=1), encoding="utf-8", newline="\n")
-    print(f"actor {a_sizes} ({n_params(a_sizes)} params), critic {c_sizes}", flush=True)
+            st.ceiling = a.set_ceiling
+    return st
+
+
+def write_args(out: Path, a, st: TrainState, git: dict) -> Path:
+    """args.json of the run (all arguments incl. init / init_policy, network sizes, world config,
+    git commit). A resumed run (--init) keeps an existing args.json and writes args.<n>.json."""
+    path = out / "args.json"
+    if a.init and path.exists():
+        n = 1
+        while (out / f"args.{n}.json").exists():
+            n += 1
+        path = out / f"args.{n}.json"
+    rec = {**vars(a), "actor_sizes": st.a_sizes, "critic_sizes": st.c_sizes, "cfg": st.cfg_d, "git": git}
+    path.write_text(json.dumps(rec, indent=1), encoding="utf-8", newline="\n")
+    return path
+
+
+# ---------------------------------------------------------------- rollout sources
+class WorkerRollouts:
+    """Numpy rollouts: persistent worker processes (spawn), each with its own vectorised Sim."""
+
+    def __init__(self, ctx, a, st: TrainState, ep_steps: int):
+        self.a_sizes, self.c_sizes = st.a_sizes, st.c_sizes
+        self.conns = []
+        for w in range(a.workers):
+            kw = dict(cfg_d=st.cfg_d, n_envs=a.envs, seed=a.seed * 1000 + w, horizon=a.horizon, episode_steps=ep_steps,
+                      gamma=a.gamma, lam=a.lam, in_scale=st.in_scale, act_mask=st.act_mask)
+            c1, c2 = ctx.Pipe()
+            ctx.Process(target=_worker_main, args=(c2, kw), daemon=True).start()
+            self.conns.append(c1)
+
+    def rollout(self, actor_p, logstd, critic_p, d_lo, d_hi):
+        """-> (per-worker results, batch {BATCH_KEYS: numpy arrays})."""
+        for c in self.conns:
+            c.send(("rollout", (actor_p, self.a_sizes, logstd, critic_p, self.c_sizes, d_lo, d_hi)))
+        res = [c.recv() for c in self.conns]
+        return res, {k: np.concatenate([r[k] for r in res]) for k in BATCH_KEYS}
+
+    def close(self):
+        for c in self.conns:
+            try:
+                c.send(("close", None))
+            except Exception:
+                pass
+
+
+class TorchRollouts:
+    """Rollouts of one big TorchSim on cpu / cuda (rollout_torch.py); the batch stays on the device."""
+
+    def __init__(self, a, st: TrainState, ep_steps: int):
+        from .rollout_torch import TorchRollout
+
+        self.ro = TorchRollout(st.cfg_d, a.rollout_envs or a.workers * a.envs, a.seed * 1000, a.horizon, ep_steps,
+                               a.gamma, a.lam, st.in_scale, st.act_mask, st.a_sizes, st.c_sizes,
+                               device=a.rollout_device, dtype=a.rollout_dtype)
+
+    def rollout(self, actor_p, logstd, critic_p, d_lo, d_hi):
+        """-> ([result], batch {BATCH_KEYS: device tensors})."""
+        self.ro.set_params(actor_p, logstd, critic_p)
+        r = self.ro.rollout(d_lo, d_hi)
+        return [r], {k: r[k] for k in BATCH_KEYS}
+
+    def close(self):
+        pass
+
+
+def explained_var(data) -> float:
+    """1 - Var(ret - val) / Var(ret) of the batch (numpy arrays or device tensors; population variance)."""
+    ret, val = data["ret"], data["val"]
+    if isinstance(ret, np.ndarray):
+        ev, var_ret = np.var(ret - val), np.var(ret)
+    else:
+        ev = float((ret - val).double().var(correction=0))
+        var_ret = float(ret.double().var(correction=0))
+    return round(float(1 - ev / (var_ret + 1e-8)), 3)
+
+
+# ---------------------------------------------------------------- training loop
+def train_loop(a, st: TrainState, out: Path, source, update, ctx, git: dict):
+    """PPO iterations it0 .. iters-1: rollout, update, curriculum, log line, checkpoints, evals."""
+    actor, critic, logstd, opt_a = st.actor, st.critic, st.logstd, st.opt_a
+    cfg_d = st.cfg_d
+    eval_proc = None
+    with open(out / "log.jsonl", "a", encoding="utf-8", newline="\n") as log:
+        try:
+            for it in range(st.it0, a.iters):
+                t0 = time.time()
+                res, data = source.rollout(actor.p, logstd, critic.p, a.demand_lo * st.ceiling, st.ceiling)
+                t1 = time.time()
+                kinds = sum(r["kinds"] for r in res)
+                car_steps = sum(r["car_steps"] for r in res)
+                st.total_steps += car_steps
+                warm = it - st.it0 < a.critic_warmup
+                if warm:  # critic warm-up: keep the actor (params, log-std, Adam state) unchanged
+                    keep = (actor.p.copy(), logstd.copy(), opt_a.m.copy(), opt_a.v.copy(), opt_a.t)
+                upd = update(actor, logstd, critic, opt_a, st.opt_c, data, a, st.act_mask, st.in_scale, st.rng)
+                if warm:
+                    actor.p[...], logstd[...], opt_a.m, opt_a.v, opt_a.t = keep
+                    upd["critic_warmup"] = True
+                fin = max(kinds[1:].sum(), 1)
+                tr = {
+                    "exit_ok": kinds[DONE_EXIT] / fin,
+                    "crash": kinds[DONE_CRASH] / fin,
+                    "offroad": kinds[DONE_OFFROAD] / fin,
+                    "timeout": kinds[DONE_TIMEOUT] / fin,
+                    "wrong": kinds[DONE_WRONG] / fin,
+                    "finished": int(kinds[1:].sum()),
+                }
+                raised = False
+                if tr["crash"] + tr["offroad"] < a.safe_bad and tr["exit_ok"] > a.safe_exit and st.ceiling < a.demand:
+                    st.ceiling = min(a.demand, st.ceiling * a.demand_step)
+                    raised = True
+                rec = {
+                    "iter": it,
+                    "ceiling": round(st.ceiling, 4),
+                    "raised": raised,
+                    "car_steps": car_steps,
+                    "total_steps": st.total_steps,
+                    "rew_per_car_step": round(sum(r["own_rew"] for r in res) / max(car_steps, 1), 5),
+                    "train": {k: round(v, 4) if isinstance(v, float) else v for k, v in tr.items()},
+                    "queued_per_env": round(float(np.mean([r["queued"] for r in res])), 2),
+                    "expl_var": explained_var(data),
+                    "logstd": [round(float(x), 3) for x in logstd],
+                    **upd,
+                    "t_roll": round(t1 - t0, 2),
+                    "t_upd": round(time.time() - t1, 2),
+                }
+                log.write(json.dumps(rec) + "\n")
+                log.flush()
+                print(json.dumps(rec), flush=True)
+                extra = dict(iter=it, ceiling=st.ceiling, logstd=logstd.tolist(), algo="ppo", **git)
+                save_npz(out / "current.npz", actor.p, st.a_sizes, cfg_d, st.in_scale, **extra)
+                np.savez(out / "state.npz", actor=actor.p, critic=critic.p, logstd=logstd, ceiling=st.ceiling, iter=it,
+                         total_steps=st.total_steps)
+                if a.eval_every and (it % a.eval_every == 0 or it == a.iters - 1):
+                    ck = out / f"ckpt_{it:04d}.npz"
+                    save_npz(ck, actor.p, st.a_sizes, cfg_d, st.in_scale, **extra)
+                    if it == a.iters - 1 and eval_proc is not None:
+                        eval_proc.join()  # always evaluate the final policy
+                    if eval_proc is None or not eval_proc.is_alive():
+                        rdir = str(out / f"render_{it:04d}") if a.render_every and it % a.render_every == 0 else None
+                        job = (str(ck), str(out / "eval.jsonl"), it, EVAL_DEMANDS, EVAL_ENVS, EVAL_SECONDS, rdir, cfg_d)
+                        eval_proc = ctx.Process(target=eval_job, args=job)
+                        eval_proc.start()
+        finally:
+            source.close()
+            if eval_proc is not None:
+                eval_proc.join(timeout=600)
+
+
+# ---------------------------------------------------------------- main
+def main(argv=None):
+    a = parse_args(argv)
+    out = Path(a.runs_dir) / a.name
+    out.mkdir(parents=True, exist_ok=True)
+    st = build_state(a)
+    git = git_info()
+    write_args(out, a, st, git)
+    print(f"actor {st.a_sizes} ({n_params(st.a_sizes)} params), critic {st.c_sizes}", flush=True)
 
     update = ppo_update
     if a.rollout_device != "numpy" and a.update_device == "numpy":
@@ -436,107 +628,9 @@ def main(argv=None):
 
     ctx = mp.get_context("spawn")
     os.environ["OMP_NUM_THREADS"] = "1"  # for the spawned workers
-    ep_steps = int(round(a.episode / cfg.dt))
-    conns, procs = [], []
-    gpu_ro = None
-    if a.rollout_device != "numpy":
-        from .rollout_torch import TorchRollout
-
-        gpu_ro = TorchRollout(cfg_d, a.rollout_envs or a.workers * a.envs, a.seed * 1000, a.horizon, ep_steps, a.gamma,
-                              a.lam, in_scale, act_mask, a_sizes, c_sizes, device=a.rollout_device, dtype=a.rollout_dtype)
-    for w in range(a.workers if gpu_ro is None else 0):
-        kw = dict(cfg_d=cfg_d, n_envs=a.envs, seed=a.seed * 1000 + w, horizon=a.horizon, episode_steps=ep_steps,
-                  gamma=a.gamma, lam=a.lam, in_scale=in_scale, act_mask=act_mask)
-        c1, c2 = ctx.Pipe()
-        pr = ctx.Process(target=_worker_main, args=(c2, kw), daemon=True)
-        pr.start()
-        conns.append(c1)
-        procs.append(pr)
-    eval_proc = None
-    log = open(out / "log.jsonl", "a", encoding="utf-8", newline="\n")
-    try:
-        for it in range(it0, a.iters):
-            t0 = time.time()
-            lo = a.demand_lo * ceiling
-            if gpu_ro is None:
-                for c in conns:
-                    c.send(("rollout", (actor.p, a_sizes, logstd, critic.p, c_sizes, lo, ceiling)))
-                res = [c.recv() for c in conns]
-                data = {k: np.concatenate([r[k] for r in res]) for k in ("obs", "priv", "u", "logp", "adv", "ret", "val")}
-            else:
-                gpu_ro.set_params(actor.p, logstd, critic.p)
-                res = [gpu_ro.rollout(lo, ceiling)]
-                data = {k: res[0][k] for k in ("obs", "priv", "u", "logp", "adv", "ret", "val")}
-            t1 = time.time()
-            kinds = sum(r["kinds"] for r in res)
-            car_steps = sum(r["car_steps"] for r in res)
-            total_steps += car_steps
-            warm = it - it0 < a.critic_warmup
-            if warm:  # critic warm-up: keep the actor (params, log-std, Adam state) unchanged
-                keep = (actor.p.copy(), logstd.copy(), opt_a.m.copy(), opt_a.v.copy(), opt_a.t)
-            upd = update(actor, logstd, critic, opt_a, opt_c, data, a, act_mask, in_scale, rng)
-            if warm:
-                actor.p[...], logstd[...], opt_a.m, opt_a.v, opt_a.t = keep
-                upd["critic_warmup"] = True
-            fin = max(kinds[1:].sum(), 1)
-            tr = {
-                "exit_ok": kinds[DONE_EXIT] / fin,
-                "crash": kinds[DONE_CRASH] / fin,
-                "offroad": kinds[DONE_OFFROAD] / fin,
-                "timeout": kinds[DONE_TIMEOUT] / fin,
-                "wrong": kinds[DONE_WRONG] / fin,
-                "finished": int(kinds[1:].sum()),
-            }
-            raised = False
-            if tr["crash"] + tr["offroad"] < a.safe_bad and tr["exit_ok"] > a.safe_exit and ceiling < a.demand:
-                ceiling = min(a.demand, ceiling * a.demand_step)
-                raised = True
-            if gpu_ro is None:
-                ev, var_ret = np.var(data["ret"] - data["val"]), np.var(data["ret"])
-            else:  # population variance of the device tensors, as np.var
-                ev = float((data["ret"] - data["val"]).double().var(correction=0))
-                var_ret = float(data["ret"].double().var(correction=0))
-            rec = {
-                "iter": it,
-                "ceiling": round(ceiling, 4),
-                "raised": raised,
-                "car_steps": car_steps,
-                "total_steps": total_steps,
-                "rew_per_car_step": round(sum(r["own_rew"] for r in res) / max(car_steps, 1), 5),
-                "train": {k: round(v, 4) if isinstance(v, float) else v for k, v in tr.items()},
-                "queued_per_env": round(float(np.mean([r["queued"] for r in res])), 2),
-                "expl_var": round(float(1 - ev / (var_ret + 1e-8)), 3),
-                "logstd": [round(float(x), 3) for x in logstd],
-                **upd,
-                "t_roll": round(t1 - t0, 2),
-                "t_upd": round(time.time() - t1, 2),
-            }
-            log.write(json.dumps(rec) + "\n")
-            log.flush()
-            print(json.dumps(rec), flush=True)
-            extra = dict(iter=it, ceiling=ceiling, logstd=logstd.tolist(), algo="ppo")
-            save_npz(out / "current.npz", actor.p, a_sizes, cfg_d, in_scale, **extra)
-            np.savez(out / "state.npz", actor=actor.p, critic=critic.p, logstd=logstd, ceiling=ceiling, iter=it,
-                     total_steps=total_steps)
-            if a.eval_every and (it % a.eval_every == 0 or it == a.iters - 1):
-                ck = out / f"ckpt_{it:04d}.npz"
-                save_npz(ck, actor.p, a_sizes, cfg_d, in_scale, **extra)
-                if it == a.iters - 1 and eval_proc is not None:
-                    eval_proc.join()  # always evaluate the final policy
-                if eval_proc is None or not eval_proc.is_alive():
-                    rdir = str(out / f"render_{it:04d}") if a.render_every and it % a.render_every == 0 else None
-                    eval_proc = ctx.Process(target=eval_job, args=(str(ck), str(out / "eval.jsonl"), it, EVAL_DEMANDS,
-                                                                   8, 120.0, rdir))
-                    eval_proc.start()
-    finally:
-        for c in conns:
-            try:
-                c.send(("close", None))
-            except Exception:
-                pass
-        log.close()
-        if eval_proc is not None:
-            eval_proc.join(timeout=600)
+    ep_steps = int(round(a.episode / st.cfg.dt))
+    source = WorkerRollouts(ctx, a, st, ep_steps) if a.rollout_device == "numpy" else TorchRollouts(a, st, ep_steps)
+    train_loop(a, st, out, source, update, ctx, git)
 
 
 if __name__ == "__main__":

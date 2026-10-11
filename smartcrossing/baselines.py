@@ -33,7 +33,7 @@ from .sim import DISC_OFFSETS, DISC_R, LEFT, RIGHT, STRAIGHT, Sim, lane_offsets,
 
 STEP = 0.5  # path resolution in metres
 MIN_GREEN = 3.0  # s, actuated light: earliest gap-out
-A_LAT = 4.0  # m/s^2 lateral acceleration bound on the turns
+A_LAT = 4.0  # m/s^2 lateral acceleration bound on the turns in worlds without a grip limit (a_lat_max = 0)
 A_DEC = 3.0  # m/s^2 comfortable deceleration when approaching a turn
 K_E, K_H = 0.05, 2 * np.sqrt(0.05)  # lateral / heading feedback gains (per m)
 # merging (lateral error > MERGE_E on the approach, e.g. a car spawned in the oncoming half of
@@ -88,7 +88,8 @@ class Path:
         k = np.concatenate([dh, [0.0]])
         # curvature at a point = mean of the adjacent segments (removes the half-step lag)
         self.k = 0.5 * (k + np.concatenate([[0.0], k[:-1]]))
-        vl = np.minimum(cfg.v_max, np.sqrt(A_LAT / np.maximum(np.abs(self.k), 1e-6)))
+        a_lat = cfg.a_lat_max if cfg.a_lat_max > 0 else A_LAT  # turn at the tyre grip limit
+        vl = np.minimum(cfg.v_max, np.sqrt(a_lat / np.maximum(np.abs(self.k), 1e-6)))
         for i in range(len(vl) - 2, -1, -1):
             vl[i] = min(vl[i], np.sqrt(vl[i + 1] ** 2 + 2 * A_DEC * STEP))
         self.vlim = vl

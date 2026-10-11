@@ -123,8 +123,7 @@ def push_queue(sim, k, u, man, grp=0):
 
 # ---------------------------------------------------------------- cases
 def trajectory_cases(seed, cfg, n_steps=160, every=4, acc_range=(-0.6, 1.0)):
-    sim = Sim(cfg, 1, seed=seed)
-    sim.group_probs = np.array([0.5, 0.3, 0.2])
+    sim = Sim(cfg, 1, seed=seed, group_probs=[0.5, 0.3, 0.2])
     rng = np.random.default_rng(seed + 100)
     N, A = cfg.n_slots, act_dim(cfg)
     steer = rng.normal(0, 0.25, N)
@@ -314,8 +313,7 @@ def parity(tmp_path_factory):
     obs = np.concatenate([c["expect"]["obs"] for c in cases[:12]])
     obs = np.concatenate([obs, np.random.default_rng(5).normal(size=(20, obs.shape[1]))])
     # driver with two groups, group 1 muted
-    dsim = Sim(dataclasses.replace(cfg, demand=0.6), 1, seed=3)
-    dsim.group_probs = np.array([0.5, 0.5])
+    dsim = Sim(dataclasses.replace(cfg, demand=0.6), 1, seed=3, group_probs=[0.5, 0.5])
     for _ in range(120):
         dsim.step(np.tile([0.4, 0.0, 0.5, -0.5][: act_dim(cfg)], (cfg.n_slots, 1))[None])
     assert len(set(dsim.group[0][dsim.alive[0]])) == 2

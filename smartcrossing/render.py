@@ -3,7 +3,7 @@
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from .sim import BRAKE_ACC, LEFT, RIGHT, STRAIGHT, Sim
+from .sim import BRAKE_ACC, CAR_LENGTH, CAR_WIDTH, LEFT, RIGHT, STRAIGHT, Sim, hazard_on
 
 MAN_COLOURS = {RIGHT: (66, 135, 245), STRAIGHT: (240, 240, 240), LEFT: (245, 166, 35)}
 GROUP_OUTLINE = [(20, 20, 20), (200, 30, 200), (30, 200, 120), (230, 60, 60)]
@@ -69,11 +69,11 @@ def draw_frame(sim: Sim, b: int = 0, size: int = 512, view: float | None = None,
         for pts in trails:
             if len(pts) > 1:
                 d.line([P(*p) for p in pts], fill=(120, 120, 128), width=1)
-    blink = int(round(sim.t / cfg.dt)) % 8 < 4  # hazard lights: 0.4 s on / 0.4 s off
+    blink = hazard_on(sim.t)
     for n in np.nonzero(sim.alive[b] | sim.wreck[b])[0]:
         x, y, th = sim.x[b, n], sim.y[b, n], sim.th[b, n]
         c, s = np.cos(th), np.sin(th)
-        hl, hw = 2.3, 0.9
+        hl, hw = CAR_LENGTH / 2, CAR_WIDTH / 2
         corners = [(hl, hw), (hl, -hw), (-hl, -hw), (-hl, hw)]
         poly = [P(x + c * a - s * bb, y + s * a + c * bb) for a, bb in corners]
         wreck = bool(sim.wreck[b, n])

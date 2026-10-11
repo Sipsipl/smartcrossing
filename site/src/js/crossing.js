@@ -28,8 +28,8 @@
   };
   /** Roof-lamp colour for n lamp channels (1: brightness; 2: the old red / blue mix). */
   SCX.lampCSS = (n, s0, s1) => (n === 1 ? SCX.lampRGB1(s0) : SCX.lampRGB(s0, s1));
-  /** Hazard lights of a wreck: on / off every 0.4 s of sim time. */
-  SCX.hazardOn = (t) => Math.floor(t / 0.4 + 1e-6) % 2 === 0;
+  /** Hazard lights of a wreck: on in the first half of every HAZARD_PERIOD of sim time (sim.hazard_on). */
+  SCX.hazardOn = (t) => Math.floor(t / (0.5 * SC.HAZARD_PERIOD) + 1e-6) % 2 === 0;
   function clamp1(v) { return Math.max(-1, Math.min(1, v || 0)); }
 
   /** Policy entry from SC_DATA.policies -> agent type for the widget. */
@@ -529,7 +529,7 @@
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(th);
-    roundRect(ctx, -2.3, -0.9, 4.6, 1.8, 0.45);
+    roundRect(ctx, -SC.CAR_LENGTH / 2, -SC.CAR_WIDTH / 2, SC.CAR_LENGTH, SC.CAR_WIDTH, 0.45);
     ctx.fillStyle = MAN_COLOURS[man];
     ctx.fill();
     if (wreck) {

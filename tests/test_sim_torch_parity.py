@@ -2,7 +2,8 @@
 
 Same seed (TorchSim(rng="numpy") replays sim.py's random draws), same actions: every
 step positions, done kinds, uids, rewards, queues and observations must agree
-(float64, cpu; and cuda if available). torch is not a declared dependency: skipped without it.
+(float64, cpu; and cuda if available, with a shorter run: eager cuda is launch-bound).
+torch comes from the optional `gpu` poetry group: skipped without it.
 """
 
 import numpy as np
@@ -14,7 +15,7 @@ from smartcrossing.sim import Sim, SimConfig, act_dim  # noqa: E402
 from smartcrossing.sim_torch import TorchSim  # noqa: E402
 
 TOL = 1e-9
-STEPS = 300
+RUN = {"cpu": (6, 300), "cuda": (6, 120)}  # (envs, steps); both contain exits, crashes, off-road and wrecks
 
 DEVICES = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
 
@@ -49,13 +50,14 @@ def test_torch_matches_numpy(device, cfg_kw):
     cfg_kw = dict(cfg_kw)
     S = cfg_kw.pop("n_scenarios", None)
     cfg = SimConfig(**cfg_kw)
-    B, N, A = 6, cfg.n_slots, act_dim(cfg)
+    (B, steps), N, A = RUN[device], cfg.n_slots, act_dim(cfg)
     ref = Sim(cfg, B, seed=7, n_scenarios=S)
     ts = TorchSim(cfg, B, seed=7, n_scenarios=S, device=device, dtype=torch.float64, rng="numpy")
     rng = np.random.default_rng(3)
     kinds = np.zeros(6, np.int64)
     worst = 0.0
-    for t in range(STEPS):
+    n_wreck_seen = 0
+    for t in range(steps):
         o_ref = ref.observe()
         o_t = ts.observe()
         worst = max(worst, _close(f"obs@{t}", o_t, o_ref))
@@ -66,8 +68,7 @@ def test_torch_matches_numpy(device, cfg_kw):
         assert np.array_equal(ts.alive.cpu().numpy(), ref.alive), f"alive@{t}"
         assert np.array_equal(ts.wreck.cpu().numpy(), ref.wreck), f"wreck@{t}"
         assert np.array_equal(ts.wreck_left.cpu().numpy(), ref.wreck_left), f"wreck_left@{t}"
-        n_wreck = getattr(ref, "_n_wreck_seen", 0) + int(ref.wreck.sum())
-        ref._n_wreck_seen = n_wreck
+        n_wreck_seen += int(ref.wreck.sum())
         assert np.array_equal(ts.done_kind.cpu().numpy(), ref.done_kind), f"done_kind@{t}"
         assert np.array_equal(ts.done_uid.cpu().numpy(), ref.done_uid), f"done_uid@{t}"
         assert np.array_equal(ts.uid.cpu().numpy(), ref.uid), f"uid@{t}"
@@ -84,8 +85,8 @@ def test_torch_matches_numpy(device, cfg_kw):
         assert np.array_equal(getattr(ts.stats, name).cpu().numpy(), getattr(ref.stats, name)), name
     # the run must actually contain traffic events
     assert kinds[1] > 0 and kinds[3] > 0 and kinds[4] > 0, kinds
-    assert (getattr(ref, "_n_wreck_seen", 0) > 0) == (cfg.wreck_time > 0)
-    print(f"[{device}] max abs deviation over {STEPS} steps: {worst:.3g}; done kinds {kinds.tolist()}")
+    assert (n_wreck_seen > 0) == (cfg.wreck_time > 0)
+    print(f"[{device}] max abs deviation over {steps} steps: {worst:.3g}; done kinds {kinds.tolist()}")
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs cuda")
@@ -102,7 +103,7 @@ def test_cuda_graph_matches_eager():
     replay = graphed.cuda_graph(lambda: graphed.step(act), warmup=3)
     for _ in range(3):  # the warm-up ran 3 steps (capture only records)
         eager.step(act)
-    for _ in range(150):
+    for _ in range(80):
         replay()
         eager.step(act)
     torch.cuda.synchronize()
@@ -110,3 +111,39 @@ def test_cuda_graph_matches_eager():
     assert torch.equal(eager.uid, graphed.uid)
     assert torch.allclose(eager.x, graphed.x, atol=1e-9) and torch.allclose(eager.y, graphed.y, atol=1e-9)
     assert int(graphed.stats.spawned.sum()) > 0 and not bool(graphed.fifo_overflow)
+
+
+def test_group_probs_and_fifo_growth_match_numpy():
+    """Constructor args group_probs / fifo_cap: the groups follow sim.py's draws, and a tiny FIFO
+    that must grow keeps the queue order (same spawns as sim.py)."""
+    cfg = SimConfig(n_slots=4, demand=1.5)
+    B, N, A = 3, cfg.n_slots, act_dim(cfg)
+    ref = Sim(cfg, B, seed=4, group_probs=[0.6, 0.4])
+    ts = TorchSim(cfg, B, seed=4, rng="numpy", group_probs=[0.6, 0.4], fifo_cap=2)
+    act = np.tile([0.5, 0.0, 0.0], (B, N, 1))
+    for _ in range(150):
+        ref.step(act)
+        ts.step(torch.as_tensor(act))
+    assert ts._qcap >= 16 and ref.queue.max() > 8 and len(set(ref.group[ref.alive])) == 2
+    for name in ("queue", "alive", "uid", "group", "man"):
+        assert np.array_equal(getattr(ts, name).numpy(), getattr(ref, name)), name
+
+
+@pytest.mark.parametrize("demand_range", [None, (0.2, 0.5)])
+def test_reset_inplace_is_reproducible(demand_range):
+    """reset_inplace(seed) continues exactly like a fresh TorchSim(seed) (incl. the generator)."""
+    cfg = SimConfig(n_slots=12, demand=0.4, demand_range=demand_range)
+    B, N, A = 4, cfg.n_slots, act_dim(cfg)
+    act = torch.zeros(B, N, A, dtype=torch.float64)
+    act[..., 0] = 0.3
+    reused = TorchSim(cfg, B, seed=1)
+    for _ in range(40):
+        reused.step(act)
+    reused.reset_inplace(5)
+    fresh = TorchSim(cfg, B, seed=5)
+    for _ in range(60):
+        reused.step(act)
+        fresh.step(act)
+    assert int(fresh.stats.spawned.sum()) > 0
+    for name in ("alive", "uid", "x", "y", "queue", "man"):
+        assert torch.equal(getattr(reused, name), getattr(fresh, name)), name

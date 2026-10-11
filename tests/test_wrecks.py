@@ -21,6 +21,7 @@ from smartcrossing.sim import (
     SimConfig,
     act_dim,
     obs_dim,
+    spawn_lats,
     wreck_steps,
 )
 
@@ -140,7 +141,7 @@ def test_wrecks_are_visible_with_hazard_lights_and_occupy_slots():
 def test_spawn_waits_for_a_wreck_at_the_entry():
     cfg = SimConfig(demand=0.0)
     sim = Sim(cfg, 1, seed=0)
-    lats = sim.spawn_lats()
+    lats = spawn_lats(sim.cfg)
     y0 = -cfg.L + 2.5 + 3.0
     for i, lat in enumerate((lats[0], lats[-1])):  # wrecks across the right half, right after the spawn line
         place(sim, i, lat, y0, np.pi / 2)
@@ -170,7 +171,7 @@ def test_brake_light_matches_threshold(acc_action, lit):
 
 def test_right_half_spawn_default():
     sim = Sim(SimConfig(demand=0.5), 2, seed=1)
-    assert sim.spawn_lats().min() >= 1.0
+    assert spawn_lats(sim.cfg).min() >= 1.0
     for _ in range(200):
         a = zeros(sim)
         a[..., 0] = 1.0

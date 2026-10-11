@@ -1,8 +1,8 @@
 """Rollout throughput: numpy Sim vs torch TorchSim (cpu / cuda, float32 / float64).
 
 One timed "step" = what a PPO rollout worker does per step: observe, actor forward
-(the trained 59-64-64-4 MLP, results/wide_s1ft2_ckpt2650.npz) + Gaussian sampling + tanh,
-critic forward (63-64-64-1) on obs + privileged features, Sim.step. numpy uses ppo.py's
+(a trained checkpoint, results/round1_x3.npz) + Gaussian sampling + tanh,
+critic forward (obs + privileged features -> 64-64-1), Sim.step. numpy uses ppo.py's
 code path (only occupied slots go through the MLPs); torch runs everything densely on
 the device (no host syncs besides the FIFO-growth check); "-graph" backends replay the whole
 step as one CUDA graph. Roads are filled by a warm-up
@@ -11,7 +11,7 @@ before timing; cuda is synchronised around the timed block.
   poetry run python scripts/bench_sim_torch.py                      # all backends, B = 64 .. 16384
   poetry run python scripts/bench_sim_torch.py --backends numpy --sizes 64,256 --out runs/bench.json
 
-torch is not a declared dependency (installed manually in the local venv).
+torch comes from the optional poetry group: poetry install --with gpu.
 """
 
 import argparse
@@ -29,10 +29,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from smartcrossing import ppo  # noqa: E402
+from smartcrossing.ppo_common import N_PRIV  # noqa: E402
 from smartcrossing.policy import load_in_scale, load_npz  # noqa: E402
 from smartcrossing.sim import Sim, SimConfig, act_dim, obs_dim  # noqa: E402
 
-CKPT = ROOT / "results" / "wide_s1ft2_ckpt2650.npz"
+CKPT = ROOT / "results" / "round1_x3.npz"
 LOGSTD = -1.0
 
 
@@ -44,7 +45,7 @@ def nets(cfg):
     actor_p, a_sizes, _ = load_npz(CKPT)
     in_scale = load_in_scale(CKPT)
     assert a_sizes[0] == obs_dim(cfg) and a_sizes[-1] == act_dim(cfg)
-    c_sizes = [obs_dim(cfg) + ppo.N_PRIV, 64, 64, 1]
+    c_sizes = [obs_dim(cfg) + N_PRIV, 64, 64, 1]
     critic = ppo.MLP(c_sizes, np.random.default_rng(0))
     return actor_p, a_sizes, critic.p, c_sizes, in_scale
 
@@ -77,6 +78,7 @@ def numpy_runner(cfg, B, seed):
 def torch_runner(cfg, B, seed, device, dtype, graph=False):
     import torch
 
+    from smartcrossing.rollout_torch import privileged_t
     from smartcrossing.sim_torch import TorchSim
 
     actor_p, a_sizes, critic_p, c_sizes, in_scale = nets(cfg)
@@ -110,13 +112,7 @@ def torch_runner(cfg, B, seed, device, dtype, graph=False):
             o = (obs * scale).reshape(B * N, -1)
             mu = mlp(A_l, o)
             u = mu + std * torch.randn(mu.shape, generator=gen, **kw)
-            dem = sim.demand if sim.demand is not None else torch.full((B,), cfg.demand, **kw)
-            pr = torch.stack([
-                sim.age / cfg.max_age,
-                (sim.queue.sum(1).to(dtype) / 10.0)[:, None].expand(B, N),
-                (sim.alive.sum(1).to(dtype) / N)[:, None].expand(B, N),
-                (dem * 5.0)[:, None].expand(B, N),
-            ], -1).reshape(B * N, -1)
+            pr = privileged_t(sim).reshape(B * N, -1)
             mlp(C_l, torch.cat([o, pr], 1))
             act = torch.where(sim.alive[..., None], torch.tanh(u).reshape(B, N, -1), 0.0)
             sim.step(act)

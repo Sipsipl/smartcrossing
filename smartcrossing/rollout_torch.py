@@ -1,5 +1,5 @@
-"""PPO rollouts on the GPU (Roadmap C, stage 2): ``TorchRollout`` is the torch counterpart of
-:class:`smartcrossing.ppo.Worker` for one big batch of envs (``TorchSim``).
+"""PPO rollouts on the GPU (``ppo --rollout-device cuda``): ``TorchRollout`` is the torch counterpart
+of :class:`smartcrossing.ppo.Worker` for one big batch of envs (``TorchSim``).
 
 Per step: observe, privileged critic features, actor forward + Gaussian noise + tanh squash,
 log-prob, critic forward, ``TorchSim.step``, per-car rewards / done flags, all written into
@@ -13,21 +13,17 @@ Semantics are those of ``Worker.rollout`` (same buffers, dtypes, GAE, episode re
 with sim.py's numpy streams (``rng="numpy"``) and the action noise with Worker's numpy
 generator (``noise="numpy"``): then the batch equals Worker's up to float rounding
 (tests/test_ppo_gpu_rollout.py). Differences in the fast mode: different random streams
-(same distributions); episode resets copy a fresh sim into the existing tensors and the
-device generator keeps running; the CUDA-graph capture runs ``warmup`` real steps once.
+(same distributions); episode resets copy a fresh sim (incl. its generator state) into the
+existing tensors; the CUDA-graph capture runs ``warmup`` real steps once.
 """
-
-import math
 
 import numpy as np
 import torch
 
+from .ppo_common import LOG2PI, N_DONE, N_PRIV, PRIV_DEMAND_SCALE, PRIV_QUEUE_SCALE
 from .ppo_torch import mlp_forward
 from .sim import SimConfig, act_dim, obs_dim
 from .sim_torch import TorchSim
-
-N_PRIV = 4  # = ppo.N_PRIV (not imported: ppo imports this module lazily)
-LOG2PI = math.log(2 * math.pi)
 
 
 def privileged_t(sim: TorchSim) -> torch.Tensor:
@@ -37,9 +33,9 @@ def privileged_t(sim: TorchSim) -> torch.Tensor:
     dem = torch.full((B,), cfg.demand, dtype=sim.dtype, device=sim.device) if sim.demand is None else sim.demand
     return torch.stack([
         sim.age / cfg.max_age,
-        (sim.queue.sum(1).to(sim.dtype) / 10.0)[:, None].expand(B, N),
+        (sim.queue.sum(1).to(sim.dtype) / PRIV_QUEUE_SCALE)[:, None].expand(B, N),
         (sim.alive.sum(1).to(sim.dtype) / N)[:, None].expand(B, N),
-        (dem * 5.0)[:, None].expand(B, N),
+        (dem * PRIV_DEMAND_SCALE)[:, None].expand(B, N),
     ], -1)
 
 
@@ -82,7 +78,7 @@ class TorchRollout:
         self.rew = torch.zeros(T, B, N, dtype=f, **kw)
         self.done = torch.zeros(T, B, N, dtype=torch.bool, **kw)
         self.valid = torch.zeros(T, B, N, dtype=torch.bool, **kw)
-        self.kinds = torch.zeros(6, dtype=torch.int64, **kw)
+        self.kinds = torch.zeros(N_DONE, dtype=torch.int64, **kw)
         self.own_rew = torch.zeros((), dtype=f, **kw)
         self.tidx = torch.zeros(1, dtype=torch.int64, **kw)
         self.noise_gen = None
@@ -145,7 +141,7 @@ class TorchRollout:
         self.own_rew += r.sum()
         self.rew.index_copy_(0, t, r[None])
         self.done.index_copy_(0, t, (al & (sim.done_kind > 0))[None])
-        oh = torch.nn.functional.one_hot(sim.done_kind.to(torch.int64), 6) * al[..., None]
+        oh = torch.nn.functional.one_hot(sim.done_kind.to(torch.int64), N_DONE) * al[..., None]
         self.kinds += oh.sum((0, 1))
         self.tidx += 1
 

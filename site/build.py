@@ -343,9 +343,13 @@ def run_bench(entries: list[tuple[str, str, object, dict, list]], force: bool, w
     """entries: (key, kind, payload, physics, demands) -> {key: {demand: result}}."""
     sim_src = hashlib.sha1((ROOT / "smartcrossing" / "sim.py").read_bytes()
                            + (ROOT / "smartcrossing" / "baselines.py").read_bytes()).hexdigest()[:12]
-    cache = {}
+    cache, n_stored = {}, 0
     if CACHE.exists() and not force:
         cache = json.loads(CACHE.read_text(encoding="utf-8"))
+        n_stored = len(cache)
+        cache = {k: v for k, v in cache.items() if k.endswith(f"|{sim_src}")}  # drop results of older sim versions
+    if len(cache) < n_stored:
+        CACHE.write_text(json.dumps(cache, indent=0, sort_keys=True), encoding="utf-8", newline="\n")
     jobs, keys = [], []
     for key, kind, payload, physics, demands in entries:
         for d in demands:

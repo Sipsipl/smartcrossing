@@ -28,9 +28,11 @@ import numpy as np
 
 RIGHT, STRAIGHT, LEFT = 1, 2, 3
 
-# Car shape: three discs along the heading axis approximate a 4.6 x 1.8 m box.
+# Car shape: three discs along the heading axis approximate a CAR_LENGTH x CAR_WIDTH box.
+CAR_LENGTH, CAR_WIDTH = 4.6, 1.8  # m (drawn size; render.py, site)
 DISC_OFFSETS = np.array([-1.4, 0.0, 1.4])
 DISC_R = 0.9
+HAZARD_PERIOD = 0.8  # s, hazard lights of a wreck (drawing only): on in the first half of each period
 
 SPAWN_LAT_MARGIN = 0.8  # lateral corridor (beyond car width) checked for closing traffic at spawn
 SPAWN_BACK = 2.5  # cars spawn this far inside the end of their entry arm
@@ -161,7 +163,9 @@ def js_constants() -> dict:
         "RIGHT": RIGHT, "STRAIGHT": STRAIGHT, "LEFT": LEFT,
         "DISC_OFFSETS": DISC_OFFSETS.tolist(), "DISC_R": DISC_R, "SPAWN_LAT_MARGIN": SPAWN_LAT_MARGIN,
         "SPAWN_BACK": SPAWN_BACK, "SPAWN_CURB_GAP": SPAWN_CURB_GAP, "SPAWN_RIGHT_MIN": SPAWN_RIGHT_MIN,
-        "SPAWN_LAT_STEP": SPAWN_LAT_STEP, "SPAWN_MAX_PER_STEP": SPAWN_MAX_PER_STEP, "SPEED_TAU": SPEED_TAU, "N_RAYS": N_RAYS, "RAY_ANGLES": RAY_ANGLES.tolist(), "RAY_RANGE": RAY_RANGE,
+        "SPAWN_LAT_STEP": SPAWN_LAT_STEP, "SPAWN_MAX_PER_STEP": SPAWN_MAX_PER_STEP, "SPEED_TAU": SPEED_TAU,
+        "CAR_LENGTH": CAR_LENGTH, "CAR_WIDTH": CAR_WIDTH, "HAZARD_PERIOD": HAZARD_PERIOD,
+        "N_RAYS": N_RAYS, "RAY_ANGLES": RAY_ANGLES.tolist(), "RAY_RANGE": RAY_RANGE,
         "K_NEIGHBOURS": K_NEIGHBOURS, "NEIGHBOUR_RANGE": NEIGHBOUR_RANGE, "POS_SCALE": POS_SCALE,
         "GOAL_SCALE": GOAL_SCALE, "NB_FEATURES": NB_FEATURES, "NB_FEATURES_LEGACY": NB_FEATURES_LEGACY,
         "BRAKE_ACC": BRAKE_ACC, "LANE_WIDTH": LANE_WIDTH,
@@ -297,6 +301,35 @@ def grip_kappa(cfg: SimConfig, v):
     return np.minimum(cfg.kappa_max, cfg.a_lat_max / np.maximum(np.asarray(v, dtype=float) ** 2, 1e-9))
 
 
+def hazard_on(t: float) -> bool:
+    """Whether the hazard lights of a wreck are lit at sim time t (drawing only)."""
+    return int(np.floor(t / (0.5 * HAZARD_PERIOD) + 1e-6)) % 2 == 0
+
+
+def spawn_lats(cfg: SimConfig) -> np.ndarray:
+    """Candidate lateral spawn offsets (right of travel): an even grid over the spawn
+    range (whole width, or the right half with spawn_right)."""
+    lo = SPAWN_RIGHT_MIN if cfg.spawn_right else -(cfg.W - SPAWN_CURB_GAP)
+    hi = cfg.W - SPAWN_CURB_GAP
+    m = max(int(round((hi - lo) / SPAWN_LAT_STEP)), 1)
+    return lo + (hi - lo) * np.arange(m + 1) / m
+
+
+def spawn_points(cfg: SimConfig) -> list:
+    """Per entry arm k: (px, py, h, hn): the candidate spawn points (spawn_lats(cfg) across the
+    road, SPAWN_BACK inside the arm end), the heading h = (k + 1) * 90 deg and h wrapped to (-pi, pi]."""
+    lats = spawn_lats(cfg)
+    back = -cfg.L + SPAWN_BACK
+    out = []
+    for k in range(4):
+        c, s = rot(k)
+        h = np.pi / 2 + k * np.pi / 2  # canonical heading (north) rotated by k*90deg
+        hn = np.arctan2(np.sin(h), np.cos(h))
+        # candidate spawn points (lat, -L + SPAWN_BACK) rotated by k*90deg
+        out.append((c * lats - s * back, s * lats + c * back, h, hn))
+    return out
+
+
 @dataclass
 class Stats:
     """Accumulated per-environment counters plus per-vehicle travel records."""
@@ -319,12 +352,16 @@ class Stats:
 
 
 class Sim:
-    def __init__(self, cfg: SimConfig, n_envs: int, seed: int = 0, n_scenarios: int | None = None):
+    def __init__(self, cfg: SimConfig, n_envs: int, seed: int = 0, n_scenarios: int | None = None,
+                 group_probs=None):
         """n_scenarios: number of distinct random traffic streams. Environment b uses
         stream b % n_scenarios, so several policies can be compared on identical
-        traffic (common random numbers). Defaults to one stream per environment."""
+        traffic (common random numbers). Defaults to one stream per environment.
+        group_probs: probabilities of the policy groups drawn per arrival (sim.group; mixed
+        populations); default one group."""
         self.cfg = cfg
         self.B = n_envs
+        self.group_probs = np.array([1.0]) if group_probs is None else np.asarray(group_probs, dtype=float)
         self.S = n_scenarios or n_envs
         self.scen = np.arange(self.B) % self.S
         self.reset(seed)
@@ -357,9 +394,6 @@ class Sim:
         self.uid = np.full((B, N), -1, dtype=np.int64)  # stable id per car (trajectory id for RL)
         self.group = np.zeros((B, N), dtype=np.int64)  # policy group (for mixed populations)
         self.queue = np.zeros((B, 4), dtype=np.int64)  # cars waiting to enter per arm
-        self.queue_u = np.zeros((B, 4))  # lateral draw u of the head of each queue (see _arrivals)
-        self.queue_man = np.ones((B, 4), dtype=np.int64)
-        self.queue_grp = np.zeros((B, 4), dtype=np.int64)
         # FIFO of queued cars' attributes (drawn at arrival time, so CRN holds even
         # when two policies release cars from the queue at different times)
         self._qcap = 64
@@ -369,7 +403,6 @@ class Sim:
         self.t = 0.0
         self.stats = Stats(B)
         self.events = []  # (b, kind, x, y) of the last step, for rendering
-        self.group_probs = getattr(self, "group_probs", np.array([1.0]))
         self._prev_dist = np.zeros((B, N))
         # per-step outputs for RL (valid after step()):
         self.car_reward = np.zeros((B, N))  # reward of the car that occupied the slot during the step
@@ -381,12 +414,6 @@ class Sim:
     @property
     def tgt(self):
         return (self.arm + self.man) % 4
-
-    def gate_xy(self):
-        """Centre of the target arm's exit gate for every slot."""
-        c, s = rot(self.tgt)
-        # arm 0 gate is (0, -L); rotate by tgt * 90deg
-        return s * self.cfg.L, -c * self.cfg.L
 
     def dist_to_gate(self):
         """Route-aware remaining distance of every slot (see route_dist)."""
@@ -624,15 +651,6 @@ class Sim:
         self.y[mask] = 1e4
 
     # ------------------------------------------------------------------ spawning
-    def spawn_lats(self):
-        """Candidate lateral spawn offsets (right of travel): an even grid over the spawn
-        range (whole width, or the right half with spawn_right)."""
-        cfg = self.cfg
-        lo = SPAWN_RIGHT_MIN if cfg.spawn_right else -(cfg.W - SPAWN_CURB_GAP)
-        hi = cfg.W - SPAWN_CURB_GAP
-        m = max(int(round((hi - lo) / SPAWN_LAT_STEP)), 1)
-        return lo + (hi - lo) * np.arange(m + 1) / m
-
     def _spawn_clear(self, sx, sy, h, x, y, vx, vy, alive):
         """(b, M) whether candidate spawn points (sx, sy) (M,) with heading h keep the spawn
         clearance (+ closing-speed headway) to every car (x, y, vx, vy, alive: (b, N))."""
@@ -668,11 +686,8 @@ class Sim:
         man = self.rng.choice([RIGHT, STRAIGHT, LEFT], size=(S, 4), p=np.asarray(cfg.turn_probs) / sum(cfg.turn_probs))
         grp = self.rng.choice(len(self.group_probs), size=(S, 4), p=self.group_probs)
         arrive, u, man, grp = arrive[self.scen], u[self.scen], man[self.scen], grp[self.scen]
-        if (self.queue + arrive).max() > self._qcap:  # grow the FIFO (keeps order)
-            new = np.zeros((self.B, 4, 2 * self._qcap, 3))
-            for j in range(self._qcap):
-                new[:, :, j] = np.take_along_axis(self._qbuf, ((self._qhead + j) % self._qcap)[..., None, None], 2)[:, :, 0]
-            self._qbuf, self._qhead, self._qcap = new, np.zeros_like(self._qhead), 2 * self._qcap
+        if (self.queue + arrive).max() > self._qcap:
+            self._widen_fifo(2 * self._qcap)
         bi, ki = np.nonzero(arrive)
         slot = (self._qhead[bi, ki] + self.queue[bi, ki]) % self._qcap
         self._qbuf[bi, ki, slot] = np.stack([u[bi, ki], man[bi, ki], grp[bi, ki]], -1)
@@ -682,14 +697,8 @@ class Sim:
         vx, vy = self.v * np.cos(self.th), self.v * np.sin(self.th)
         spawned = np.zeros(self.alive.shape, dtype=bool)
         occ = self.alive | self.wreck  # wrecks occupy their slot and block like a standing car
-        lats = self.spawn_lats()
-        back = -cfg.L + SPAWN_BACK
-        for k in range(4):
-            c, s = rot(k)
-            h = np.pi / 2 + k * np.pi / 2  # canonical heading (north) rotated by k*90deg
-            hn = np.arctan2(np.sin(h), np.cos(h))
-            # candidate spawn points (lat, -L + SPAWN_BACK) rotated by k*90deg
-            px, py = c * lats - s * back, s * lats + c * back
+        lats = spawn_lats(cfg)
+        for k, (px, py, h, hn) in enumerate(spawn_points(cfg)):
             mx, my, half = px.mean(), py.mean(), 0.5 * (lats[-1] - lats[0])
             for _ in range(SPAWN_MAX_PER_STEP):
                 b = np.nonzero((self.queue[:, k] > 0) & (~occ).any(1))[0]
@@ -736,7 +745,12 @@ class Sim:
                 self._qhead[b, k] = (head + 1) % self._qcap
                 self.stats.spawned[b] += 1
                 spawned[b, n] = True
-        head = np.take_along_axis(self._qbuf, self._qhead[..., None, None], 2)[:, :, 0]
-        self.queue_u, self.queue_man, self.queue_grp = head[..., 0], head[..., 1].astype(np.int64), head[..., 2].astype(np.int64)
         if spawned.any():
             self._prev_dist = np.where(spawned, self.dist_to_gate(), self._prev_dist)
+
+    def _widen_fifo(self, cap):
+        """Grow the arrival FIFO to capacity cap (keeps the queue order; the head moves to 0)."""
+        j = (self._qhead[..., None] + np.arange(self._qcap)) % self._qcap  # (B, 4, qcap) in queue order
+        new = np.zeros((self.B, 4, cap, 3))
+        new[:, :, : self._qcap] = np.take_along_axis(self._qbuf, j[..., None], 2)
+        self._qbuf, self._qhead, self._qcap = new, np.zeros_like(self._qhead), cap

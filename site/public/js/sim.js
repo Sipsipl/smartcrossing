@@ -21,7 +21,7 @@
   if (!C) throw new Error("SC_SIM_CONFIG missing: load js/sim-config.js before sim.js");
 
   const { RIGHT, STRAIGHT, LEFT, DISC_OFFSETS, DISC_R, SPAWN_LAT_MARGIN, SPAWN_BACK, SPAWN_CURB_GAP, SPAWN_RIGHT_MIN, SPAWN_LAT_STEP, SPAWN_MAX_PER_STEP } = C;
-  const { SPEED_TAU, N_RAYS, RAY_ANGLES, RAY_RANGE } = C;
+  const { SPEED_TAU, N_RAYS, RAY_ANGLES, RAY_RANGE, CAR_LENGTH, CAR_WIDTH, HAZARD_PERIOD } = C;
   const { K_NEIGHBOURS, NEIGHBOUR_RANGE, POS_SCALE, GOAL_SCALE, NB_FEATURES, NB_FEATURES_LEGACY, BRAKE_ACC, LANE_WIDTH, OBS_DIM, OBS_RAYS, ARM_U } = C;
   // why a slot was cleared in the last step (sim.doneKind): { none: 0, exit: 1, ... }
   const DONE = Object.fromEntries(C.DONE_NAMES.map((name, i) => [name, i]));
@@ -218,11 +218,6 @@
     }
 
     tgt(n) { return (this.arm[n] + this.man[n]) % 4; }
-
-    gateXY(n) {
-      const [c, s] = rot(this.tgt(n));
-      return [s * this.cfg.L, -c * this.cfg.L];
-    }
 
     distToGate(n) { return routeDist(this.cfg, this.arm[n], this.man[n], this.x[n], this.y[n]); }
 
@@ -671,7 +666,8 @@
 
   return {
     RIGHT, STRAIGHT, LEFT, DISC_R, K_NEIGHBOURS, NEIGHBOUR_RANGE, OBS_DIM, NB_FEATURES, NB_FEATURES_LEGACY, BRAKE_ACC,
-    POS_SCALE, GOAL_SCALE, RAY_RANGE, DONE, defaultConfig, obsDim, actDim, nbFeatures, wreckSteps, rot, cornerDist, rayEdgeDist, routeDist, freeFlowTime,
+    POS_SCALE, GOAL_SCALE, RAY_RANGE, CAR_LENGTH, CAR_WIDTH, HAZARD_PERIOD,
+    DONE, defaultConfig, obsDim, actDim, nbFeatures, wreckSteps, rot, cornerDist, rayEdgeDist, routeDist, freeFlowTime,
     gripKappa, laneOffsets, makeRng,
     Sim, loadPolicy, forward, act,
   };
