@@ -15,7 +15,7 @@
   /** Decode one recorded replay into per-car float arrays. */
   SCX.decodeReplay = function (r, q) {
     const F = r.lamps ? 5 : 3;
-    const tracks = r.tracks.map(([t0, man, end, kind, x0, y0, th0, width, data]) => {
+    const tracks = r.tracks.map(([t0, man, end, kind, x0, y0, th0, width, data, runs]) => {
       const d = b64(data, width), len = d.length / F;
       const x = new Float32Array(len), y = new Float32Array(len), th = new Float32Array(len);
       const l0 = r.lamps ? new Float32Array(len) : null, l1 = r.lamps ? new Float32Array(len) : null;
@@ -25,7 +25,9 @@
         x[i] = qx * q.pos; y[i] = qy * q.pos; th[i] = qt * q.th;
         if (l0) { l0[i] = d[i * F + 3] / q.lamp; l1[i] = d[i * F + 4] / q.lamp; }
       }
-      return { t0, man, end, kind, len, x, y, th, l0, l1 };
+      const brake = new Uint8Array(len); // brake lights on (ranges [start, end) of samples)
+      for (let j = 0; runs && j + 1 < runs.length; j += 2) brake.fill(1, runs[j], runs[j + 1]);
+      return { t0, man, end, kind, len, x, y, th, l0, l1, brake };
     });
     const qb = b64(r.queue, 1), queue = new Uint8Array(qb.buffer);
     const ends = (k) => tracks.filter((t) => t.kind === k && t.end >= 0).map((t) => t.end).sort((a, b) => a - b);
@@ -86,7 +88,7 @@
           if (tr.l0) { s0 += (tr.l0[i + 1] - s0) * a; s1 += (tr.l1[i + 1] - s1) * a; }
         }
         if (tr.l0) lamp = SCX.lampRGB(s0, s1);
-        SCX.drawCar(ctx, x, y, th, tr.man, null, lamp);
+        SCX.drawCar(ctx, x, y, th, tr.man, null, lamp, tr.brake[i] === 1);
       }
       for (const m of r.marks) {
         if (m.k > k) break;

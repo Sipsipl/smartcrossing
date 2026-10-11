@@ -330,7 +330,7 @@
         if (!sim.alive[n]) continue;
         ctx.globalAlpha = sel >= 0 && n !== sel && this.opts.dimOthers && overlay ? 0.7 : 1;
         const lamp = NS > 0 ? (cfg.signal_enabled ? SCX.lampRGB(ip.s0[n], ip.s1[n]) : "rgb(90,90,96)") : null;
-        SCX.drawCar(ctx, ip.x[n], ip.y[n], ip.th[n], sim.man[n], TYPE_COLOURS[sim.group[n] % TYPE_COLOURS.length], lamp);
+        SCX.drawCar(ctx, ip.x[n], ip.y[n], ip.th[n], sim.man[n], TYPE_COLOURS[sim.group[n] % TYPE_COLOURS.length], lamp, sim.acc[n] < SCX.BRAKE_ACC);
       }
       ctx.globalAlpha = 1;
       if (overlay) this._drawSensors(sel, false);
@@ -498,8 +498,10 @@
     ctx.stroke(); ctx.setLineDash([]);
   };
 
-  /** One car: body in the manoeuvre colour, frame in the brain colour, roof lamp (css colour or null). */
-  SCX.drawCar = function (ctx, x, y, th, man, frame, lamp) {
+  SCX.BRAKE_ACC = -0.5; // m/s^2: brake lights on below this actual acceleration (as site/build.py replays)
+  /** One car: body in the manoeuvre colour, frame in the brain colour, roof lamp (css colour or
+   *  null), two brake lights at the rear (lit while braking). */
+  SCX.drawCar = function (ctx, x, y, th, man, frame, lamp, brake) {
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(th);
@@ -509,6 +511,17 @@
     if (frame) { ctx.lineWidth = 0.32; ctx.strokeStyle = frame; ctx.stroke(); }
     ctx.fillStyle = "rgba(20,24,28,0.55)";
     ctx.fillRect(0.7, -0.62, 0.6, 1.24);
+    if (brake) {
+      ctx.fillStyle = "#ff1f1f";
+      ctx.shadowColor = "#ff2a2a"; ctx.shadowBlur = 6;
+      ctx.fillRect(-2.32, -0.78, 0.42, 0.46);
+      ctx.fillRect(-2.32, 0.32, 0.42, 0.46);
+      ctx.shadowBlur = 0;
+    } else {
+      ctx.fillStyle = "rgba(120,20,24,0.85)";
+      ctx.fillRect(-2.25, -0.7, 0.3, 0.36);
+      ctx.fillRect(-2.25, 0.34, 0.3, 0.36);
+    }
     if (lamp) {
       ctx.beginPath(); ctx.arc(-0.6, 0, 0.62, 0, 2 * Math.PI);
       ctx.fillStyle = lamp;

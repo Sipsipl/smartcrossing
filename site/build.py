@@ -330,7 +330,7 @@ def run_bench(entries: list[tuple[str, str, object, dict, list]], force: bool, w
         out.setdefault(key, {})
         for d in demands:
             ck = f"{key}|{json.dumps(physics, sort_keys=True)}|{d}|{BENCH_ENVS}x{BENCH_SECONDS}@{BENCH_SEED}|{sim_src}"
-            out[key][str(d)] = cache[ck]
+            out[key][f"{d:g}"] = cache[ck]  # as JS String(d): "1" for 1.0
     return out
 
 
@@ -339,6 +339,7 @@ REPLAY_DEMANDS = [0.05, 0.15, 0.3]
 REPLAY_SEED, REPLAY_WARMUP, REPLAY_SECONDS = 7, 15.0, 90.0
 GEOMETRY_KEYS = ("L", "W", "Rc", "a_lat_max", "v_reverse")  # the "world": same for all drivers compared
 Q_POS, Q_TH, Q_LAMP = 0.05, 0.01, 100.0  # quantisation: 5 cm, 0.01 rad, lamp in 1/100
+BRAKE_ACC = -0.5  # m/s^2: brake lights on below this actual acceleration (purely visual)
 
 
 def _b64(a: np.ndarray) -> str:
@@ -349,9 +350,10 @@ def _b64(a: np.ndarray) -> str:
 
 def _replay_job(job):
     """Drive one sim (1 env) and record every car as a compact track:
-    [t0, man, end_step, end_kind, qx0, qy0, qth0, width, b64] where b64 holds per sample
+    [t0, man, end_step, end_kind, qx0, qy0, qth0, width, b64, brake] where b64 holds per sample
     (dx, dy, dth[, lamp0, lamp1]) as int8 (width 1) or int16 (width 2), deltas of the
-    quantised values (exact reconstruction). Plus crash marks and the queue per arm."""
+    quantised values (exact reconstruction), and brake the sample ranges [start, end) with the
+    brake lights on (acceleration < BRAKE_ACC), flattened. Plus crash marks and the queue per arm."""
     from smartcrossing.baselines import LaneDriver
     from smartcrossing.policy import PolicyDriver
     from smartcrossing.sim import DONE_NAMES, Sim
@@ -381,7 +383,8 @@ def _replay_job(job):
             uid = int(sim.uid[0, slot])
             tr = tracks.get(uid)
             if tr is None:
-                tr = tracks[uid] = {"t0": k, "man": int(sim.man[0, slot]), "s": [], "end": (None, 0)}
+                tr = tracks[uid] = {"t0": k, "man": int(sim.man[0, slot]), "s": [], "b": [], "end": (None, 0)}
+            tr["b"].append(bool(sim.acc[0, slot] < BRAKE_ACC))
             tr["s"].append((sim.x[0, slot], sim.y[0, slot], sim.th[0, slot], *(sim.sig[0, slot, :2] if lamps else ())))
         queue.append(np.minimum(sim.queue[0], 255))
     out = []
@@ -398,8 +401,10 @@ def _replay_job(job):
             d[:, 3:] = np.round(np.clip(s[:, 3:], -1, 1) * Q_LAMP)
         width = 1 if np.abs(d).max() <= 127 else 2
         end_k, end_kind = tr["end"]
+        b = np.diff(np.concatenate([[0], np.asarray(tr["b"], dtype=np.int8), [0]]))
+        runs = np.stack([np.nonzero(b == 1)[0], np.nonzero(b == -1)[0]], 1).ravel().tolist()
         out.append([tr["t0"], tr["man"], end_k if end_k is not None else -1, end_kind,
-                    int(q[0, 0]), int(q[0, 1]), int(q[0, 2]), width, _b64(d.astype(np.int8 if width == 1 else "<i2"))])
+                    int(q[0, 0]), int(q[0, 1]), int(q[0, 2]), width, _b64(d.astype(np.int8 if width == 1 else "<i2")), runs])
     return {
         "demand": demand, "steps": n, "dt": cfg.dt, "lamps": lamps,
         "kinds": list(DONE_NAMES), "tracks": out, "marks": marks,

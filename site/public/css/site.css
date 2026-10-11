@@ -114,6 +114,7 @@ button { font: inherit; cursor: pointer; }
 .key { display: inline-flex; gap: 4px; align-items: center; }
 .carkey { width: 22px; height: 10px; border-radius: 3px; display: inline-block; border: 2px solid var(--muted); }
 .lamp { width: 11px; height: 11px; border-radius: 50%; display: inline-block; border: 1px solid rgba(0,0,0,0.35); vertical-align: -1px; }
+.brakekey { width: 14px; height: 7px; display: inline-block; vertical-align: 0; background: linear-gradient(90deg, #ff1f1f 0 30%, transparent 30% 70%, #ff1f1f 70%); box-shadow: 0 0 4px #ff2a2a; border-radius: 1px; }
 .xmark { font: 700 15px var(--font-num); line-height: 1; }
 .line-key { display: inline-block; width: 22px; height: 0; border-top: 3px solid; vertical-align: middle; }
 .line-key.dash { border-top-style: dashed; }
