@@ -20,7 +20,7 @@
   "use strict";
   if (!C) throw new Error("SC_SIM_CONFIG missing: load js/sim-config.js before sim.js");
 
-  const { RIGHT, STRAIGHT, LEFT, DISC_OFFSETS, DISC_R, SPAWN_LAT_MARGIN, SPAWN_BACK, SPAWN_CURB_GAP, SPAWN_RIGHT_MIN } = C;
+  const { RIGHT, STRAIGHT, LEFT, DISC_OFFSETS, DISC_R, SPAWN_LAT_MARGIN, SPAWN_BACK, SPAWN_CURB_GAP, SPAWN_RIGHT_MIN, SPAWN_LAT_STEP, SPAWN_MAX_PER_STEP } = C;
   const { SPEED_TAU, N_RAYS, RAY_ANGLES, RAY_RANGE } = C;
   const { K_NEIGHBOURS, NEIGHBOUR_RANGE, POS_SCALE, GOAL_SCALE, NB_FEATURES, LANE_WIDTH, OBS_DIM, OBS_RAYS, ARM_U } = C;
   // why a slot was cleared in the last step (sim.doneKind): { none: 0, exit: 1, ... }
@@ -204,7 +204,7 @@
         const [lo, hi] = this.cfg.demand_range;
         this.demand = lo + (hi - lo) * this.rng();
       }
-      this.queues = [[], [], [], []]; // FIFO of {lat, man, grp} per arm
+      this.queues = [[], [], [], []]; // FIFO of {u, man, grp} per arm (u: lateral draw)
       this.nextUid = 0;
       this.t = 0.0;
       this.events = [];
@@ -446,66 +446,98 @@
     }
 
     // ---------------------------------------------------------------- spawning
+    /** Candidate lateral spawn offsets (see sim.py spawn_lats). */
+    spawnLats() {
+      const cfg = this.cfg;
+      const lo = cfg.spawn_right ? SPAWN_RIGHT_MIN : -(cfg.W - SPAWN_CURB_GAP);
+      const hi = cfg.W - SPAWN_CURB_GAP;
+      const m = Math.max(Math.round((hi - lo) / SPAWN_LAT_STEP), 1);
+      const lats = new Float64Array(m + 1);
+      for (let i = 0; i <= m; i++) lats[i] = lo + ((hi - lo) * i) / m;
+      return lats;
+    }
+
+    /** Queue arrivals (u, manoeuvre, group drawn at arrival), then release queued cars at their
+     *  own spot or, if blocked, a uniformly chosen clear one, several per arm and step (sim.py _arrivals). */
     _arrivals() {
       const cfg = this.cfg, N = this.N, rng = this.rng;
       const demand = this.demand === null ? cfg.demand : this.demand;
       if (demand > 0) {
         for (let k = 0; k < 4; k++) {
           const arrive = rng() < demand * cfg.dt;
-          const latLo = cfg.spawn_right ? SPAWN_RIGHT_MIN : -(cfg.W - SPAWN_CURB_GAP);
-          const lat = latLo + (cfg.W - SPAWN_CURB_GAP - latLo) * rng();
+          const u = rng();
           const man = 1 + rng.choice(cfg.turn_probs);
           const grp = rng.choice(this.groupProbs);
           if (arrive) {
-            this.queues[k].push({ lat, man, grp });
+            this.queues[k].push({ u, man, grp });
             this.stats.arrived += 1;
           }
         }
       }
-      // velocities of existing cars, taken before any spawn of this step
+      // velocities of existing cars (spawned cars are added as they enter)
       const vx = new Float64Array(N), vy = new Float64Array(N);
       for (let n = 0; n < N; n++) {
         vx[n] = this.v[n] * Math.cos(this.th[n]);
         vy[n] = this.v[n] * Math.sin(this.th[n]);
       }
+      const lats = this.spawnLats(), M = lats.length;
+      const back = -cfg.L + SPAWN_BACK;
+      const clear = new Uint8Array(M);
       for (let k = 0; k < 4; k++) {
         const q = this.queues[k];
-        if (!q.length) continue;
         const [c, s] = rot(k);
-        const u = q[0].lat;
-        const sx = c * u - s * (-cfg.L + SPAWN_BACK);
-        const sy = s * u + c * (-cfg.L + SPAWN_BACK);
         const h = Math.PI / 2 + k * (Math.PI / 2);
+        const hn = Math.atan2(Math.sin(h), Math.cos(h));
         const ch = Math.cos(h), sh = Math.sin(h);
-        let clear = true, free = -1;
-        for (let j = 0; j < N; j++) {
-          if (!this.alive[j]) { if (free < 0) free = j; continue; }
-          const dx = this.x[j] - sx, dy = this.y[j] - sy;
-          const dist = Math.hypot(dx, dy);
-          const dd = Math.max(dist, 1e-6);
-          const rvx = cfg.spawn_speed * ch - vx[j], rvy = cfg.spawn_speed * sh - vy[j];
-          let closing = Math.max((rvx * dx + rvy * dy) / dd, 0.0);
-          const own = Math.max((cfg.spawn_speed * (ch * dx + sh * dy)) / dd, 0.0);
-          const latOff = Math.abs(-sh * dx + ch * dy);
-          if (!(latOff < 2 * DISC_R + SPAWN_LAT_MARGIN)) closing = own;
-          if (!(dist > cfg.spawn_clearance + cfg.spawn_headway * closing)) { clear = false; break; }
+        for (let r = 0; r < SPAWN_MAX_PER_STEP && q.length; r++) {
+          let free = -1;
+          for (let j = 0; j < N; j++) if (!this.alive[j]) { free = j; break; }
+          if (free < 0) break;
+          let cnt = 0;
+          for (let i = 0; i < M; i++) {
+            const sx = c * lats[i] - s * back, sy = s * lats[i] + c * back;
+            let ok = 1;
+            for (let j = 0; j < N; j++) {
+              if (!this.alive[j]) continue;
+              const dx = this.x[j] - sx, dy = this.y[j] - sy;
+              const dist = Math.hypot(dx, dy);
+              const dd = Math.max(dist, 1e-6);
+              const rvx = cfg.spawn_speed * ch - vx[j], rvy = cfg.spawn_speed * sh - vy[j];
+              let closing = Math.max((rvx * dx + rvy * dy) / dd, 0.0);
+              const own = Math.max((cfg.spawn_speed * (ch * dx + sh * dy)) / dd, 0.0);
+              const latOff = Math.abs(-sh * dx + ch * dy);
+              if (!(latOff < 2 * DISC_R + SPAWN_LAT_MARGIN)) closing = own;
+              if (!(dist > cfg.spawn_clearance + cfg.spawn_headway * closing)) { ok = 0; break; }
+            }
+            clear[i] = ok;
+            cnt += ok;
+          }
+          if (!cnt) break;
+          const head = q.shift();
+          // own spot (u across the range) if clear, else the clear spot of the same rank u
+          let i = Math.floor(head.u * (M - 1) + 0.5);
+          if (!clear[i]) {
+            const pick = Math.min(Math.floor(head.u * cnt), cnt - 1);
+            i = 0;
+            for (let seen = -1; i < M; i++) if (clear[i] && ++seen === pick) break;
+          }
+          const sx = c * lats[i] - s * back, sy = s * lats[i] + c * back;
+          const n = free;
+          this.alive[n] = 1;
+          this.x[n] = sx; this.y[n] = sy;
+          this.th[n] = hn;
+          this.v[n] = cfg.spawn_speed;
+          vx[n] = cfg.spawn_speed * Math.cos(hn); vy[n] = cfg.spawn_speed * Math.sin(hn);
+          this.kappa[n] = 0.0;
+          this.acc[n] = 0.0;
+          this.arm[n] = k;
+          this.man[n] = head.man;
+          this.group[n] = head.grp;
+          this.age[n] = 0.0;
+          this.uid[n] = this.nextUid++;
+          this.stats.spawned += 1;
+          this.prevDist[n] = routeDist(cfg, k, head.man, sx, sy);
         }
-        if (!clear || free < 0) continue;
-        const head = q.shift();
-        const n = free;
-        this.alive[n] = 1;
-        this.x[n] = sx; this.y[n] = sy;
-        this.th[n] = Math.atan2(sh, ch);
-        this.v[n] = cfg.spawn_speed;
-        this.kappa[n] = 0.0;
-        this.acc[n] = 0.0;
-        this.arm[n] = k;
-        this.man[n] = head.man;
-        this.group[n] = head.grp;
-        this.age[n] = 0.0;
-        this.uid[n] = this.nextUid++;
-        this.stats.spawned += 1;
-        this.prevDist[n] = routeDist(cfg, k, head.man, sx, sy);
       }
     }
 
@@ -519,7 +551,7 @@
       this.sig = f64(st.sig.flat()); if (this.sig.length !== this.N * S) throw new Error("sig shape");
       this.arm = Int32Array.from(st.arm); this.man = Int32Array.from(st.man);
       this.uid = Int32Array.from(st.uid); this.group = Int32Array.from(st.group);
-      this.queues = st.queues.map((q) => q.map(([lat, man, grp]) => ({ lat, man, grp })));
+      this.queues = st.queues.map((q) => q.map(([u, man, grp]) => ({ u, man, grp })));
       this.nextUid = st.next_uid; this.t = st.t;
       Object.assign(this.stats, st.stats || {});
     }
@@ -532,7 +564,7 @@
         alive: arr(this.alive).map((b) => !!b), x: arr(this.x), y: arr(this.y), th: arr(this.th),
         v: arr(this.v), kappa: arr(this.kappa), acc: arr(this.acc), age: arr(this.age), prev_dist: arr(this.prevDist), sig,
         arm: arr(this.arm), man: arr(this.man), uid: arr(this.uid), group: arr(this.group),
-        queues: this.queues.map((q) => q.map((e) => [e.lat, e.man, e.grp])),
+        queues: this.queues.map((q) => q.map((e) => [e.u, e.man, e.grp])),
         next_uid: this.nextUid, t: this.t,
         stats: { ...this.stats, travel: this.stats.travel.map((r) => r.slice()) },
       };

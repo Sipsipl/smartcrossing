@@ -6,7 +6,7 @@
 <title>Vergleich – Smart Crossing</title>
 <meta name="description" content="Gelernte Autos ohne Regeln im Vergleich mit Ampel und zentralem Verkehrsrechner.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/site.css?v=c8cb3a51">
+<link rel="stylesheet" href="css/site.css?v=35cd8753">
 </head>
 <body data-page="vergleich">
 <div class="wrap">
@@ -25,8 +25,7 @@
 <p>Alle drei bekommen genau dieselben Autos zur selben Zeit mit demselben Ziel. Einziger Unterschied: Bei Ampel und Verkehrsrechner tauchen die Autos
   immer in der rechten Straßenhälfte auf (ihrer Spur), die gelernten Autos irgendwo auf der ganzen Breite.</p>
 <div id="side"></div>
-<p class="muted small">Farbe = wohin das Auto will: <b>blau</b> rechts, <b>weiß</b> geradeaus, <b>orange</b> links. „+3“ am Rand: so viele Autos warten noch auf die Einfahrt.
-  Unfälle zählen hier auch Autos, die von der Straße abgekommen sind.</p>
+<p class="muted small">Farbe = Ziel (<b>blau</b> rechts, <b>weiß</b> geradeaus, <b>orange</b> links). „+3“ am Rand: so viele Autos warten noch auf die Einfahrt.</p>
 
 <h2>Durchsatz: wie viele kommen pro Minute durch?</h2>
 <div id="c-thr"></div>
@@ -34,18 +33,16 @@
 <div class="tablewrap card" style="padding:4px 6px"><table class="data" id="t-thr"></table></div>
 
 <h2>Wie viele kommen heil an?</h2>
+<p>Je Feld: Anteil der Autos, die heil ans Ziel kommen · Unfälle pro 1000 Autos, die die Kreuzung verlassen haben.
+  Als Unfall zählt hier (und oben) auch, wer von der Straße abkommt.</p>
 <div class="tablewrap card" style="padding:4px 6px"><table class="data" id="t-ok"></table></div>
-
-<h2>Wie viele verunglücken?</h2>
-<p>Unfälle und Abkommen von der Straße, gezählt pro 1000 Autos, die die Kreuzung verlassen haben.</p>
-<div class="tablewrap card" style="padding:4px 6px"><table class="data" id="t-bad"></table></div>
 <p class="muted small" id="bench-setup"></p>
 
 <h2>Ehrlich gesagt</h2>
 <div class="note warn">
   <p>Beim <b>Durchsatz</b> schlagen die gelernten Autos die Ampel ab mittlerem Verkehr: Bei viel Verkehr kommen pro Minute
-    deutlich mehr durch, und kaum jemand wartet. Aber: Bei mittlerem Verkehr verunglückt noch etwa <b>jedes sechste Auto</b> (rund 17 %),
-    bei wenig Verkehr etwa 5 %. Ampel und Verkehrsrechner schaffen das ohne einen einzigen Unfall – und der Verkehrsrechner ist auch beim Durchsatz weit vorn.</p>
+    deutlich mehr durch, und kaum jemand wartet. Aber: Bei mittlerem Verkehr verunglücken noch <b id="h-mid">viele</b> der Autos,
+    bei wenig Verkehr <span id="h-low">weniger</span> (siehe Tabelle). Ampel und Verkehrsrechner schaffen das ohne einen einzigen Unfall – und der Verkehrsrechner ist auch beim Durchsatz weit vorn.</p>
   <p style="margin:0">Fast alle Unfälle sind Zusammenstöße mit anderen Autos; ein Auto allein kommt immer an. Die Autos bremsen inzwischen öfter
     (die Reifen zwingen sie in Kurven dazu), lassen andere aber noch zu selten vor. Das ist der Stand eines Hobbyprojekts, kein Endergebnis.</p>
 </div>
@@ -53,24 +50,25 @@
 <h2>Was ist von selbst entstanden?</h2>
 <ul>
   <li><b>Rechtsverkehr – ja.</b> Niemand hat den Autos eine Seite vorgegeben, und sie starten an zufälliger Stelle der Straße.
-    Trotzdem fahren auf der breiten Kreuzung alle Autos rechts – in beiden Trainingsläufen mit verschiedenem Zufallsstart.
+    Trotzdem fahren auf der breiten Kreuzung fast alle (82–96 %) rechts – in beiden Trainingsläufen mit verschiedenem Zufallsstart.
     (Auf der alten, schmalen Kreuzung fuhr ein Lauf links, der andere rechts. Mit nur zwei Läufen kann das noch Zufall sein.)</li>
   <li><b>Fahrspuren – nein.</b> Die Autos nutzen die rechte Hälfte wie eine einzige breite Spur. Sie fahren dabei leicht in Schlangenlinien –
-    das kostet sie nichts, also lassen sie es nicht.</li>
-  <li><b>Eine Lampensprache – nein (bisher).</b> Die Lampe eines Autos verrät zwar etwas darüber, wohin es abbiegt.
-    Aber die anderen Autos achten nicht darauf: Schaltet man alle Lampen ab, fahren sie genauso gut.</li>
+    das kostet sie kaum etwas (ein kleiner Umweg), also lassen sie es nicht.</li>
+  <li><b>Eine Lampensprache – nein (bisher).</b> Die Lampe eines Autos verrät zwar etwas darüber, wohin es abbiegt
+    (gemessen auf der schmalen und der breiten Kreuzung). Aber die anderen Autos achten kaum darauf: Schaltet man alle Lampen ab, fahren sie genauso gut.
+    Vertauscht man die Lampen zwischen den Autos, gibt es etwas mehr Unfälle (etwa 10–18 pro 1000 Autos) – ein erster schwacher Hinweis, keine Sprache.</li>
   <li><b>Rückwärtsgang – kaum.</b> Die Autos dürften zurücksetzen, tun es aber so gut wie nie.</li>
   <li><b>Gemeinsinn hilft (noch) nicht.</b> Wenn ein Auto auch Punkte für das Wohl der anderen bekommt, fährt es nicht anders (getestet auf der schmalen Kreuzung).</li>
 </ul>
 <footer>Smart Crossing – ein Hobbyprojekt. Alles läuft direkt in deinem Browser, es werden keine Daten gesammelt. Stand: 2026-10-11. <a href="https://github.com/Sipsipl/smartcrossing">Code auf GitHub</a></footer>
 </div>
-<script src="data/site-data.js?v=c8cb3a51"></script>
-<script src="js/sim-config.js?v=c8cb3a51"></script>
-<script src="js/sim.js?v=c8cb3a51"></script>
-<script src="js/crossing.js?v=c8cb3a51"></script>
-<script src="js/charts.js?v=c8cb3a51"></script>
-<script src="data/replays.js?v=c8cb3a51"></script>
-<script src="js/replay.js?v=c8cb3a51"></script>
-<script src="js/pages.js?v=c8cb3a51"></script>
+<script src="data/site-data.js?v=35cd8753"></script>
+<script src="js/sim-config.js?v=35cd8753"></script>
+<script src="js/sim.js?v=35cd8753"></script>
+<script src="js/crossing.js?v=35cd8753"></script>
+<script src="js/charts.js?v=35cd8753"></script>
+<script src="data/replays.js?v=35cd8753"></script>
+<script src="js/replay.js?v=35cd8753"></script>
+<script src="js/pages.js?v=35cd8753"></script>
 </body>
 </html>

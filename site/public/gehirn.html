@@ -6,14 +6,14 @@
 <title>Das Gehirn – Smart Crossing</title>
 <meta name="description" content="Das neuronale Netz eines selbstfahrenden Autos, live beim Denken.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/site.css?v=c8cb3a51">
+<link rel="stylesheet" href="css/site.css?v=35cd8753">
 </head>
 <body data-page="gehirn">
 <div class="wrap">
 <header class="top"><a class="brand" href="index.html"><svg viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="5" fill="#3b5640"/><path d="M9 0h6v24H9zM0 9h24v6H0z" fill="#46484d"/><rect x="5" y="10.2" width="6" height="3.6" rx="1" fill="#f5a623"/><rect x="10.2" y="14" width="3.6" height="6" rx="1" fill="#4287f5"/></svg>Smart Crossing</a><nav class="nav" aria-label="Seiten"><a href="index.html">Start</a><a href="sehen.html">Was sieht ein Auto?</a><a href="tun.html">Was kann es tun?</a><a href="gehirn.html" aria-current="page">Das Gehirn</a><a href="lernen.html">Wie lernen sie?</a><a href="vergleich.html">Vergleich</a></nav></header>
 <h1>Das Gehirn</h1>
 <p class="lead">Jedes Auto wird von einem kleinen neuronalen Netz gesteuert: <span id="brain-sizes">48 Eingänge → 32 → 32 → 4 Ausgänge</span>.
-Links kommen die Sensorwerte rein, rechts kommen Gas, Lenkung und Lampe raus. Dazwischen: zwei Schichten mit <span id="brain-hidden">je 32</span> „Neuronen“.</p>
+Links kommen die Sensorwerte rein, rechts kommen Gas, Lenkung und Lampe raus. Dazwischen: zwei Schichten „Neuronen“.</p>
 
 <div class="sim-layout wide-panel">
   <section id="stage" aria-label="Live-Simulation"></section>
@@ -34,11 +34,11 @@ Links kommen die Sensorwerte rein, rechts kommen Gas, Lenkung und Lampe raus. Da
 <h2>Was passiert da?</h2>
 <ul class="plain">
   <li>Jedes Neuron rechnet dasselbe: Es nimmt die Werte von links, multipliziert jeden mit einem <b>Gewicht</b>, zählt alles zusammen und
-    drückt das Ergebnis auf einen Wert zwischen −1 und +1. Blau heißt „stark positiv“, orange „stark negativ“, grau „ungefähr null“.</li>
+    drückt das Ergebnis auf einen Wert zwischen −1 und +1 (blau positiv, orange negativ).</li>
   <li>Insgesamt hat das Netz <b id="brain-params">2 788</b> Gewichte. <b>Das ist alles, was das Auto „weiß“.</b> Am Anfang sind es Zufallszahlen;
     das Training dreht so lange an ihnen, bis das Auto vernünftig fährt.</li>
-  <li>Damit das Bild nicht zum Wollknäuel wird, zeigen wir pro Neuron nur seine stärksten Verbindungen. In Wahrheit ist jedes Neuron mit jedem der vorigen Schicht verbunden.</li>
-  <li><b>Alle Autos teilen dasselbe Gehirn.</b> Sie unterscheiden sich nur darin, was sie gerade sehen. Tippe verschiedene Autos an –
+  <li>Gezeichnet sind nur die stärksten Verbindungen – in Wahrheit hängt jedes Neuron an allen der vorigen Schicht.</li>
+  <li><b>Alle Autos eines Trainingslaufs teilen dasselbe Gehirn.</b> Sie unterscheiden sich nur darin, was sie gerade sehen. Tippe verschiedene Autos an –
     gleiche Verbindungen, aber ganz andere Muster.</li>
   <li>Niemand hat dem Netz Regeln einprogrammiert. Welche Neuronen „Achtung, Bordstein!“ oder „da kommt einer von links“ bedeuten, hat sich beim Training von selbst ergeben –
     und lässt sich oft gar nicht so einfach in Worte fassen.</li>
@@ -46,11 +46,11 @@ Links kommen die Sensorwerte rein, rechts kommen Gas, Lenkung und Lampe raus. Da
 <p><a href="lernen.html">Weiter: Wie lernen die Autos? →</a></p>
 <footer>Smart Crossing – ein Hobbyprojekt. Alles läuft direkt in deinem Browser, es werden keine Daten gesammelt. Stand: 2026-10-11. <a href="https://github.com/Sipsipl/smartcrossing">Code auf GitHub</a></footer>
 </div>
-<script src="data/site-data.js?v=c8cb3a51"></script>
-<script src="js/sim-config.js?v=c8cb3a51"></script>
-<script src="js/sim.js?v=c8cb3a51"></script>
-<script src="js/crossing.js?v=c8cb3a51"></script>
-<script src="js/brain.js?v=c8cb3a51"></script>
-<script src="js/pages.js?v=c8cb3a51"></script>
+<script src="data/site-data.js?v=35cd8753"></script>
+<script src="js/sim-config.js?v=35cd8753"></script>
+<script src="js/sim.js?v=35cd8753"></script>
+<script src="js/crossing.js?v=35cd8753"></script>
+<script src="js/brain.js?v=35cd8753"></script>
+<script src="js/pages.js?v=35cd8753"></script>
 </body>
 </html>

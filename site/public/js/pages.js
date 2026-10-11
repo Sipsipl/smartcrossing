@@ -56,7 +56,7 @@
         <button class="btn primary" data-act="play" type="button">Pause</button>
         <div class="seg" role="radiogroup" aria-label="Tempo"></div>
         <button class="btn" data-act="reset" type="button">Neu starten</button>
-        <label class="toggle"><input type="checkbox" data-act="trails"> Spuren</label>
+        <label class="toggle"><input type="checkbox" data-act="trails"> Fahrtwege</label>
         ${opts.follow ? `<label class="toggle"><input type="checkbox" data-act="follow"> Kamera folgt</label>` : ""}
         <span class="clock" data-act="clock"></span>
       </div>`;
@@ -133,7 +133,7 @@
         <div class="tname" title="${t.id}">${t.name}</div>
         <div class="row2"><input type="range" min="0" max="100" step="1" value="${t.share}" aria-label="Anteil ${t.name}"><output></output>
         <label class="toggle"><input type="checkbox"> stumm</label></div>
-        <div class="meta">0 angekommen · 0 verunglückt</div>
+        <div class="meta count" hidden>0 angekommen · 0 verunglückt</div>
         ${physKey(t) !== physKey(types[0]) ? `<div class="meta">trainiert mit anderer Fahrphysik; hier fährt es mit der Physik von „${types[0].name}“</div>` : ""}`;
       const rng = row.querySelector("input[type=range]"), cb = row.querySelector("input[type=checkbox]");
       rng.addEventListener("input", () => { t.share = +rng.value; showShares(); cx.applyControls(); });
@@ -147,10 +147,13 @@
       });
     }
     showShares();
+    // per-brain counts only when more than one brain is driving
     cx.opts.onRefresh = () => {
+      const several = types.filter((t) => t.share > 0).length > 1;
       box.querySelectorAll(".type").forEach((row, i) => {
-        const p = cx.perType[i];
-        if (p) row.querySelector(".meta").textContent = `${p.exits} angekommen · ${p.bad} verunglückt`;
+        const p = cx.perType[i], m = row.querySelector(".meta.count");
+        m.hidden = !several;
+        if (p && several) m.textContent = `${p.exits} angekommen · ${p.bad} verunglückt`;
       });
     };
     // honest status line
@@ -160,7 +163,8 @@
       $("status").innerHTML = `Bei mittlerem Verkehr (${num(r15.demand_per_min, 0)} Autos pro Minute) schaffen es die besten gelernten Autos
         zu <b>${pct(r15.exit_ok_rate)}</b> heil ans Ziel – <b>${num(r15.throughput_per_min)}</b> Autos pro Minute.
         Eine Ampel schafft ${num(l15.throughput_per_min)} pro Minute, ein zentraler Verkehrsrechner ${num(v15.throughput_per_min)} – beide ohne einen einzigen Unfall.
-        Die Autos lernen also noch. <a href="vergleich.html">Zum Vergleich →</a>`;
+        Die Autos lernen also noch. Rechtsverkehr entstand von selbst, Spuren und eine Lampensprache nicht.
+        <a href="vergleich.html">Zum Vergleich →</a>`;
     }
   }
 
@@ -365,7 +369,6 @@
     if (p) {
       const s = p.policy.sizes, params = s.slice(1).reduce((a, n, i) => a + s[i] * n + n, 0);
       $("brain-sizes").textContent = `${s[0]} Eingänge → ${s[1]} → ${s[2]} → ${s[3]} Ausgänge`;
-      $("brain-hidden").textContent = s[1] === s[2] ? `je ${s[1]}` : `${s[1]} und ${s[2]}`;
       $("brain-params").textContent = params.toLocaleString("de-DE");
     }
     window.__sc = cx;
@@ -582,8 +585,11 @@
     const table = (fmt) => head + groups.map((g) => `<tbody>${groups.length > 1 ? `<tr class="grp"><th colspan="${dem.length + 1}">${WORLD_NAMES[g.w]}</th></tr>` : ""}`
       + g.rows.map((r) => `<tr><td>${r.name}</td>${dem.map((d) => `<td>${r.b && r.b[d] ? fmt(r.b[d]) : "–"}</td>`).join("")}</tr>`).join("") + "</tbody>").join("");
     $("t-thr").innerHTML = table((x) => num(x.throughput_per_min));
-    $("t-ok").innerHTML = table((x) => pct(x.exit_ok_rate));
-    if ($("t-bad")) $("t-bad").innerHTML = table((x) => num(x.crash_cars_per_1000, 0));
+    $("t-ok").innerHTML = table((x) => `${pct(x.exit_ok_rate)} <span class="muted">· ${num(x.crash_cars_per_1000, 0)}</span>`);
+    // "Ehrlich gesagt": numbers from the bench data, not hard-coded
+    const mb = MAIN_ID && pol(MAIN_ID).bench, badPct = (d) => mb && mb[d] ? pct(mb[d].crash_cars_per_1000 / 1000) : null;
+    if (badPct("0.15")) $("h-mid").textContent = `rund ${badPct("0.15")}`;
+    if (badPct("0.05")) $("h-low").textContent = `rund ${badPct("0.05")}`;
     if ($("c-thr-note")) $("c-thr-note").textContent = groups.length > 1 ? `Diagramm: ${WORLD_NAMES[mainWorld].replace(/ \(.*/, "")}. In den Tabellen steht jedes Gehirn neben Ampel und Verkehrsrechner auf der Kreuzung, auf der es trainiert wurde.` : "";
     const draw = () => SCX.lineChart($("c-thr"), {
       series: [
