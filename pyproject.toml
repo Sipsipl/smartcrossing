@@ -14,6 +14,19 @@ pillow = "^11.0.0"
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.5"
 
+# GPU training (optional, not installed by a plain `poetry install`, so CI stays CPU-only):
+#   poetry install --with gpu
+[tool.poetry.group.gpu]
+optional = true
+
+[tool.poetry.group.gpu.dependencies]
+torch = {version = "2.6.0+cu118", source = "pytorch-cu118", markers = "sys_platform == 'win32' or sys_platform == 'linux'"}
+
+[[tool.poetry.source]]
+name = "pytorch-cu118"
+url = "https://download.pytorch.org/whl/cu118"
+priority = "explicit"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

@@ -171,7 +171,7 @@ def export_json(npz_path, json_path=None) -> dict:
         "cfg": cfg,
     }
     if json_path:
-        Path(json_path).write_text(json.dumps(d))
+        Path(json_path).write_text(json.dumps(d), encoding="utf-8", newline="\n")
     return d
 
 

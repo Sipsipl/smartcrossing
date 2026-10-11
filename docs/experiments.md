@@ -588,3 +588,67 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
   vs 27.5 /min @0.15). A first variant (always uniform among the clear spots, no own spot) was
   worse at 0.15 (207). A fine-tune on the new spawn logic would likely recover it (not done: owner).
 - Site: demand slider 0 ... 1.0 /s/arm (240 cars/min); bench demands extended by 0.5 and 1.0.
+
+## Roadmap C feasibility: torch/CUDA sim (2026-10-11, local RTX 3070 Ti)
+- **Why**: decide with numbers whether a GPU port pays off before porting PPO.
+- **Profile** (`ppo.py`, 4 workers x 24 envs, 8 iterations): sparse traffic rollout 0.3 s vs update
+  0.95 s per iteration; dense traffic rollout 0.65 s vs update 3.6 s (numpy update single-threaded,
+  ~45 us/sample). Inside a worker rollout: sim.step 54 %, observe 21 %, actor+critic forward 17 %.
+- **Port**: `smartcrossing/sim_torch.py` (`TorchSim`, full `Sim` incl. arrivals/collisions/rewards/
+  observe, optional CUDA-graph capture). Not ported: per-car `Stats.travel` lists, `events`; graph
+  mode caps the arm queue at 256 (flag on overflow). `rng="torch"` gives different traffic streams
+  (same distributions); paired-traffic comparisons need `rng="numpy"` (slow).
+- **Parity** (`tests/test_sim_torch_parity.py`, skipped without torch): 2 configs x 300 steps, cpu +
+  cuda float64: discrete state and stats identical, floats within 1.4e-14; graph replay == eager.
+- **Throughput** (`scripts/bench_sim_torch.py`, env-steps/s incl. policy forward, one process;
+  numpy: 8.7k at B=64, flat in B, ~35k with 4 workers):
+
+  | B | cuda f32 graph | cuda f64 graph |
+  |---|---|---|
+  | 64 | 20.5k | 16.7k |
+  | 1024 | 130k | 62k |
+  | 4096 | 168k | 72k |
+  | 16384 | 184k | 74k |
+
+  Eager CUDA is launch-bound (~55 ms/step); torch on CPU is 3-5x slower than numpy.
+- **Conclusion**: worth it, but the PPO update dominates (~85 % of wall time in dense traffic): port
+  `ppo_update` to torch/GPU first, then roll out with `TorchSim` (graph, f32, B ~ 1024-4096, short
+  horizon 64-128, buffers/GAE on GPU). Expected ~5x end-to-end. torch not yet in pyproject (CI CPU only).
+
+## Roadmap C stage 1: PPO update in torch (2026-10-11)
+- `smartcrossing/ppo_torch.py`, `ppo.py --update-device {numpy,cpu,cuda} --update-dtype`; default
+  numpy unchanged. torch declared as optional poetry group `gpu` (cu118 source); CI does not install it.
+- Parity (`tests/test_ppo_torch.py`): float64 params/log-std/Adam state within 1e-12 (cpu, cuda);
+  80k-sample batch, 4 epochs: max deviation 1.1e-16 (f64), 1.5e-7 (f32).
+- Update time (80k samples, 4 epochs x 8 minibatches): numpy 2.98 s, cuda f32 0.16 s (19x),
+  cuda f64 0.23 s, torch cpu f32 0.62 s.
+- Smoke runs (demand 0.3, 4 workers x 24 envs, ~110k car-steps/iter; runs/smoke_ppo_{torch,numpy}):
+  per iteration cuda 1.10 s (rollout 0.89 / update 0.21) vs numpy 5.41 s (0.76 / 4.65): ~5x.
+  Curves identical up to iter 6, then same trend (f32 rounding). The rollout is now the bottleneck
+  -> stage 2: TorchSim rollouts on the GPU (CUDA graph, f32, 1024-4096 envs, GAE/buffers on GPU).
+
+## Roadmap C stage 2: rollouts on the GPU (2026-10-11)
+- `smartcrossing/rollout_torch.py` (`TorchRollout`: one TorchSim, CUDA-graph step, buffers/GAE on the
+  GPU, batch handed to TorchPPO as device tensors); `ppo.py --rollout-device cuda --rollout-envs B
+  --rollout-dtype`; eval stays on the numpy path (paired traffic); log/checkpoint format unchanged.
+- Parity (`tests/test_ppo_gpu_rollout.py`): float64 with numpy traffic + injected noise, 3 rollouts incl.
+  an episode reset: obs, actions, log-probs, values, advantages, returns, rewards identical (0.0) on cpu
+  and cuda.
+- Timing (demand 0.3, early training; runs/bench_ppo_gpu.jsonl):
+
+  | config | car-steps/iter | s/iter | car-steps/s | GPU mem |
+  |---|---|---|---|---|
+  | numpy rollout + numpy update | 65k | 3.58 | 18k | - |
+  | numpy rollout + cuda update | 65k | 0.79 | 82k | small |
+  | GPU B1024 T32 | 158k | 0.46 | 343k | 1.0 GB |
+  | GPU B2048 T32 | 312k | 0.62 | 502k | 2.1 GB |
+  | GPU B2048 T64 | 661k | 1.19 | 557k | 4.1 GB |
+  | GPU B4096 T32 | 617k | 1.70 | 364k | 4.4 GB |
+
+  ~28x more car-steps/s than the old path. Bigger batches mean fewer updates per car-step, so
+  car-steps/s is not learning speed; the first real round has to show the sample efficiency.
+- Smoke run from scratch (runs/smoke_ppo_gpu, B1024 T32, 150 it, 65M car-steps in 88 s): like the numpy
+  smoke run it settles into "stand and wait" early (few finished cars, crash shares of the few finished
+  ones noisy); no qualitative check beyond that. A warm-start check was not possible locally (the
+  committed checkpoints hold only the actor; full state.npz files were in the cloud runs/).
+- Limits: torch RNG streams differ from numpy (same distributions); graph-mode arm queue capped at 256.

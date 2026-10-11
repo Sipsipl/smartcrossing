@@ -291,8 +291,8 @@ def parity(tmp_path_factory):
             },
         ],
     }
-    (tmp / "cases.json").write_text(json.dumps(payload))
-    (tmp / "sim-config.js").write_text(site_build().sim_config_js())
+    (tmp / "cases.json").write_text(json.dumps(payload), encoding="utf-8", newline="\n")
+    (tmp / "sim-config.js").write_text(site_build().sim_config_js(), encoding="utf-8", newline="\n")
     res = subprocess.run([NODE, str(RUNNER), str(tmp / "cases.json"), str(tmp / "sim-config.js")],
                          capture_output=True, text=True, timeout=120)
     assert res.returncode == 0, res.stderr

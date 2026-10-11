@@ -135,14 +135,14 @@ def main(argv=None):
         W1 = theta[: sizes[0] * sizes[1]].reshape(sizes[0], sizes[1])
         theta[: sizes[0] * sizes[1]] = (W1 * (old / new)[:, None]).ravel()
     opt = Adam(D, a.lr)
-    (out / "args.json").write_text(json.dumps({**vars(a), "sizes": sizes, "cfg": cfg_d}, indent=1))
+    (out / "args.json").write_text(json.dumps({**vars(a), "sizes": sizes, "cfg": cfg_d}, indent=1), encoding="utf-8", newline="\n")
     print(f"params {D}, sizes {sizes}", flush=True)
 
     ceiling = a.demand_start
     best_eval = -np.inf
     half = a.pop // 2
-    pool = mp.get_context("fork").Pool(a.workers, initializer=_init_worker)
-    log = open(out / "log.jsonl", "a")
+    pool = mp.get_context("fork" if "fork" in mp.get_all_start_methods() else "spawn").Pool(a.workers, initializer=_init_worker)
+    log = open(out / "log.jsonl", "a", encoding="utf-8", newline="\n")
     try:
         for gen in range(a.gens):
             t0 = time.time()

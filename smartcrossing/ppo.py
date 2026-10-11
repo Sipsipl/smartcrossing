@@ -1,8 +1,13 @@
 """PPO with parameter sharing: every car of B parallel environments is a sample of one
 shared driving policy, trained on its own (per-car) reward.
 
-Pure numpy (no torch: the CPU wheel index is not reachable from this machine and the
-networks are tiny, so a hand-written tanh-MLP backward pass is enough).
+Rollouts and the default update are pure numpy (hand-written tanh-MLP backward pass).
+`--update-device cpu|cuda` runs the update in torch instead (ppo_torch.py, optional `gpu`
+poetry group; same parameters, ~19x faster on the GPU for dense-traffic batches).
+`--rollout-device cuda` (stage 2) also runs the rollouts on the GPU (rollout_torch.py: one
+TorchSim with `--rollout-envs` envs, CUDA graph, buffers + GAE on the device, batch handed to
+the torch update without a host round trip; traffic and action noise from torch generators).
+Evaluation (eval_job) always uses the numpy Sim (paired traffic).
 
 - actor: tanh MLP obs -> mu (linear output), Gaussian in pre-squash space with a
   state-independent log-std; the car executes tanh(u). The deterministic policy
@@ -319,7 +324,7 @@ def eval_job(ckpt: str, out_path: str, it: int, demands, envs: int, seconds: flo
         s = summarize(sim, seconds)
         rec[f"d{d:g}"] = {k: round(s[k], 3) for k in ("throughput_per_min", "exit_ok_rate", "crash_cars_per_1000",
                                                       "crash_cars", "offroad_cars", "timeouts", "delay_mean_s", "queued_end")}
-    with open(out_path, "a") as f:
+    with open(out_path, "a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(rec) + "\n")
     if render_dir:
         subprocess.run([sys.executable, "-m", "smartcrossing.cli", "render", "--driver", f"policy:{ckpt}", "--demand",
@@ -367,6 +372,14 @@ def main(argv=None):
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--zero-inputs", default="", help="comma-separated obs indices whose in_scale is set to 0 "
                    "(input ablation, e.g. 5,6,7 = manoeuvre one-hot; stored in the checkpoint)")
+    p.add_argument("--update-device", choices=("numpy", "cpu", "cuda"), default="numpy",
+                   help="PPO update: numpy (default) or torch on cpu/cuda (ppo_torch.py; rollouts stay numpy)")
+    p.add_argument("--update-dtype", choices=("float32", "float64"), default="float32", help="torch update dtype")
+    p.add_argument("--rollout-device", choices=("numpy", "cpu", "cuda"), default="numpy",
+                   help="rollouts: numpy worker processes (default) or one TorchSim on cpu/cuda (rollout_torch.py; "
+                        "implies the torch update on the same device; --workers is then unused)")
+    p.add_argument("--rollout-envs", type=int, default=0, help="torch rollout: envs (0 = workers x envs)")
+    p.add_argument("--rollout-dtype", choices=("float32", "float64"), default="float32", help="torch rollout dtype")
     a = p.parse_args(argv)
 
     out = Path("runs") / a.name
@@ -403,14 +416,28 @@ def main(argv=None):
             logstd = np.full(A, a.logstd_init)
         if a.set_ceiling:
             ceiling = a.set_ceiling
-    (out / "args.json").write_text(json.dumps({**vars(a), "actor_sizes": a_sizes, "critic_sizes": c_sizes, "cfg": cfg_d}, indent=1))
+    (out / "args.json").write_text(json.dumps({**vars(a), "actor_sizes": a_sizes, "critic_sizes": c_sizes, "cfg": cfg_d}, indent=1), encoding="utf-8", newline="\n")
     print(f"actor {a_sizes} ({n_params(a_sizes)} params), critic {c_sizes}", flush=True)
+
+    update = ppo_update
+    if a.rollout_device != "numpy" and a.update_device == "numpy":
+        a.update_device = a.rollout_device  # the batch stays on the rollout device
+    if a.update_device != "numpy":
+        from .ppo_torch import TorchPPO
+
+        update = TorchPPO(a.update_device, a.update_dtype).update
 
     ctx = mp.get_context("spawn")
     os.environ["OMP_NUM_THREADS"] = "1"  # for the spawned workers
     ep_steps = int(round(a.episode / cfg.dt))
     conns, procs = [], []
-    for w in range(a.workers):
+    gpu_ro = None
+    if a.rollout_device != "numpy":
+        from .rollout_torch import TorchRollout
+
+        gpu_ro = TorchRollout(cfg_d, a.rollout_envs or a.workers * a.envs, a.seed * 1000, a.horizon, ep_steps, a.gamma,
+                              a.lam, in_scale, act_mask, a_sizes, c_sizes, device=a.rollout_device, dtype=a.rollout_dtype)
+    for w in range(a.workers if gpu_ro is None else 0):
         kw = dict(cfg_d=cfg_d, n_envs=a.envs, seed=a.seed * 1000 + w, horizon=a.horizon, episode_steps=ep_steps,
                   gamma=a.gamma, lam=a.lam, in_scale=in_scale, act_mask=act_mask)
         c1, c2 = ctx.Pipe()
@@ -419,20 +446,25 @@ def main(argv=None):
         conns.append(c1)
         procs.append(pr)
     eval_proc = None
-    log = open(out / "log.jsonl", "a")
+    log = open(out / "log.jsonl", "a", encoding="utf-8", newline="\n")
     try:
         for it in range(it0, a.iters):
             t0 = time.time()
             lo = a.demand_lo * ceiling
-            for c in conns:
-                c.send(("rollout", (actor.p, a_sizes, logstd, critic.p, c_sizes, lo, ceiling)))
-            res = [c.recv() for c in conns]
+            if gpu_ro is None:
+                for c in conns:
+                    c.send(("rollout", (actor.p, a_sizes, logstd, critic.p, c_sizes, lo, ceiling)))
+                res = [c.recv() for c in conns]
+                data = {k: np.concatenate([r[k] for r in res]) for k in ("obs", "priv", "u", "logp", "adv", "ret", "val")}
+            else:
+                gpu_ro.set_params(actor.p, logstd, critic.p)
+                res = [gpu_ro.rollout(lo, ceiling)]
+                data = {k: res[0][k] for k in ("obs", "priv", "u", "logp", "adv", "ret", "val")}
             t1 = time.time()
-            data = {k: np.concatenate([r[k] for r in res]) for k in ("obs", "priv", "u", "logp", "adv", "ret", "val")}
             kinds = sum(r["kinds"] for r in res)
             car_steps = sum(r["car_steps"] for r in res)
             total_steps += car_steps
-            upd = ppo_update(actor, logstd, critic, opt_a, opt_c, data, a, act_mask, in_scale, rng)
+            upd = update(actor, logstd, critic, opt_a, opt_c, data, a, act_mask, in_scale, rng)
             fin = max(kinds[1:].sum(), 1)
             tr = {
                 "exit_ok": kinds[DONE_EXIT] / fin,
@@ -446,7 +478,11 @@ def main(argv=None):
             if tr["crash"] + tr["offroad"] < a.safe_bad and tr["exit_ok"] > a.safe_exit and ceiling < a.demand:
                 ceiling = min(a.demand, ceiling * a.demand_step)
                 raised = True
-            ev = data["ret"] - data["val"]
+            if gpu_ro is None:
+                ev, var_ret = np.var(data["ret"] - data["val"]), np.var(data["ret"])
+            else:  # population variance of the device tensors, as np.var
+                ev = float((data["ret"] - data["val"]).double().var(correction=0))
+                var_ret = float(data["ret"].double().var(correction=0))
             rec = {
                 "iter": it,
                 "ceiling": round(ceiling, 4),
@@ -456,7 +492,7 @@ def main(argv=None):
                 "rew_per_car_step": round(sum(r["own_rew"] for r in res) / max(car_steps, 1), 5),
                 "train": {k: round(v, 4) if isinstance(v, float) else v for k, v in tr.items()},
                 "queued_per_env": round(float(np.mean([r["queued"] for r in res])), 2),
-                "expl_var": round(float(1 - np.var(ev) / (np.var(data["ret"]) + 1e-8)), 3),
+                "expl_var": round(float(1 - ev / (var_ret + 1e-8)), 3),
                 "logstd": [round(float(x), 3) for x in logstd],
                 **upd,
                 "t_roll": round(t1 - t0, 2),
