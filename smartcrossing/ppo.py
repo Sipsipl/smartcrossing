@@ -1,8 +1,9 @@
 """PPO with parameter sharing: every car of B parallel environments is a sample of one
 shared driving policy, trained on its own (per-car) reward.
 
-Pure numpy (no torch: the CPU wheel index is not reachable from this machine and the
-networks are tiny, so a hand-written tanh-MLP backward pass is enough).
+Rollouts and the default update are pure numpy (hand-written tanh-MLP backward pass).
+`--update-device cpu|cuda` runs the update in torch instead (ppo_torch.py, optional `gpu`
+poetry group; same parameters, ~19x faster on the GPU for dense-traffic batches).
 
 - actor: tanh MLP obs -> mu (linear output), Gaussian in pre-squash space with a
   state-independent log-std; the car executes tanh(u). The deterministic policy
@@ -367,6 +368,9 @@ def main(argv=None):
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--zero-inputs", default="", help="comma-separated obs indices whose in_scale is set to 0 "
                    "(input ablation, e.g. 5,6,7 = manoeuvre one-hot; stored in the checkpoint)")
+    p.add_argument("--update-device", choices=("numpy", "cpu", "cuda"), default="numpy",
+                   help="PPO update: numpy (default) or torch on cpu/cuda (ppo_torch.py; rollouts stay numpy)")
+    p.add_argument("--update-dtype", choices=("float32", "float64"), default="float32", help="torch update dtype")
     a = p.parse_args(argv)
 
     out = Path("runs") / a.name
@@ -406,6 +410,12 @@ def main(argv=None):
     (out / "args.json").write_text(json.dumps({**vars(a), "actor_sizes": a_sizes, "critic_sizes": c_sizes, "cfg": cfg_d}, indent=1), encoding="utf-8", newline="\n")
     print(f"actor {a_sizes} ({n_params(a_sizes)} params), critic {c_sizes}", flush=True)
 
+    update = ppo_update
+    if a.update_device != "numpy":
+        from .ppo_torch import TorchPPO
+
+        update = TorchPPO(a.update_device, a.update_dtype).update
+
     ctx = mp.get_context("spawn")
     os.environ["OMP_NUM_THREADS"] = "1"  # for the spawned workers
     ep_steps = int(round(a.episode / cfg.dt))
@@ -432,7 +442,7 @@ def main(argv=None):
             kinds = sum(r["kinds"] for r in res)
             car_steps = sum(r["car_steps"] for r in res)
             total_steps += car_steps
-            upd = ppo_update(actor, logstd, critic, opt_a, opt_c, data, a, act_mask, in_scale, rng)
+            upd = update(actor, logstd, critic, opt_a, opt_c, data, a, act_mask, in_scale, rng)
             fin = max(kinds[1:].sum(), 1)
             tr = {
                 "exit_ok": kinds[DONE_EXIT] / fin,

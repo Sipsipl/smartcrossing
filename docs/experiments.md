@@ -614,3 +614,15 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
 - **Conclusion**: worth it, but the PPO update dominates (~85 % of wall time in dense traffic): port
   `ppo_update` to torch/GPU first, then roll out with `TorchSim` (graph, f32, B ~ 1024-4096, short
   horizon 64-128, buffers/GAE on GPU). Expected ~5x end-to-end. torch not yet in pyproject (CI CPU only).
+
+## Roadmap C stage 1: PPO update in torch (2026-10-11)
+- `smartcrossing/ppo_torch.py`, `ppo.py --update-device {numpy,cpu,cuda} --update-dtype`; default
+  numpy unchanged. torch declared as optional poetry group `gpu` (cu118 source); CI does not install it.
+- Parity (`tests/test_ppo_torch.py`): float64 params/log-std/Adam state within 1e-12 (cpu, cuda);
+  80k-sample batch, 4 epochs: max deviation 1.1e-16 (f64), 1.5e-7 (f32).
+- Update time (80k samples, 4 epochs x 8 minibatches): numpy 2.98 s, cuda f32 0.16 s (19x),
+  cuda f64 0.23 s, torch cpu f32 0.62 s.
+- Smoke runs (demand 0.3, 4 workers x 24 envs, ~110k car-steps/iter; runs/smoke_ppo_{torch,numpy}):
+  per iteration cuda 1.10 s (rollout 0.89 / update 0.21) vs numpy 5.41 s (0.76 / 4.65): ~5x.
+  Curves identical up to iter 6, then same trend (f32 rounding). The rollout is now the bottleneck
+  -> stage 2: TorchSim rollouts on the GPU (CUDA graph, f32, 1024-4096 envs, GAE/buffers on GPU).
