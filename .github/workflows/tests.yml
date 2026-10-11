@@ -1,0 +1,24 @@
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4  # sim.js parity test runs the JS simulation in node
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: |
+          pip install poetry
+          poetry install --no-interaction
+      - name: Run tests
+        run: poetry run pytest -q
