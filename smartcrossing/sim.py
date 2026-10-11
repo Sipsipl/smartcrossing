@@ -498,7 +498,7 @@ class Sim:
         kap = self.kappa + np.clip(a[..., 1] * cfg.kappa_max - self.kappa, -dk, dk)
         kg = grip_kappa(cfg, v)  # tyre grip at the new speed (after the steering-rate limit)
         self.kappa = np.where(alive, np.clip(kap, -kg, kg), 0.0)
-        self.sig = np.where(alive[..., None], a[..., 2:], 0.0)
+        self.sig = np.where(alive[..., None], a[..., 2 : 2 + cfg.n_signal], 0.0)
         th = self.th + v * self.kappa * cfg.dt
         self.acc = np.where(alive, (v - self.v) / cfg.dt, 0.0)
         self.x = np.where(alive, self.x + v * np.cos(th) * cfg.dt, self.x)
@@ -593,7 +593,7 @@ class Sim:
         b, i, j = b[hit], i[hit], j[hit]
         vx, vy = self.v * np.cos(self.th), self.v * np.sin(self.th)
         np.maximum.at(vrel, (b, i), np.hypot(vx[b, i] - vx[b, j], vy[b, i] - vy[b, j]))
-        hit_wreck[b, i] |= self.wreck[b, j]
+        np.logical_or.at(hit_wreck, (b, i), self.wreck[b, j])  # (several partners per car)
         return col, vrel, hit_wreck
 
     def _make_wreck(self, mask):

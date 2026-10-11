@@ -28,6 +28,7 @@ import torch
 
 from .sim import (
     ARM_U,
+    BRAKE_ACC,
     DISC_OFFSETS,
     DISC_R,
     DONE_CRASH,
@@ -38,7 +39,6 @@ from .sim import (
     GOAL_SCALE,
     K_NEIGHBOURS,
     LEFT,
-    NB_FEATURES,
     NEIGHBOUR_RANGE,
     POS_SCALE,
     RAY_ANGLES,
@@ -54,7 +54,9 @@ from .sim import (
     STRAIGHT,
     SimConfig,
     free_flow_time,
+    nb_features,
     rot,
+    wreck_steps,
 )
 
 _COS4 = (1.0, 0.0, -1.0, 0.0)  # rint(cos(k * 90deg)), k = 0..3
@@ -145,7 +147,7 @@ def grip_kappa(cfg: SimConfig, v):
 class TorchStats:
     """Per-environment counters (as sim.Stats, but tensors; travel as per-env sums)."""
 
-    NAMES = ("arrived", "spawned", "exits", "wrong_exits", "crashes", "offroad", "timeouts")
+    NAMES = ("arrived", "spawned", "exits", "wrong_exits", "crashes", "wreck_hits", "offroad", "timeouts")
 
     def __init__(self, B, device, dtype):
         for name in self.NAMES:
@@ -201,6 +203,8 @@ class TorchSim:
             self._stream_demand = sd
             self.demand = sd[self.scen]
         self.alive = self._i(B, N, dtype=torch.bool)
+        self.wreck = self._i(B, N, dtype=torch.bool)  # crashed cars standing as obstacles (sim.py)
+        self.wreck_left = self._i(B, N)  # steps until the wreck is removed
         self.x, self.y, self.th, self.v = self._f(B, N), self._f(B, N), self._f(B, N), self._f(B, N)
         self.kappa, self.acc = self._f(B, N), self._f(B, N)
         self.sig = self._f(B, N, cfg.n_signal)
@@ -292,7 +296,7 @@ class TorchSim:
         ddx = x[:, None, :] - x[:, :, None]  # (B, N_i, N_j) = x_j - x_i
         ddy = y[:, None, :] - y[:, :, None]
         d = torch.hypot(ddx, ddy)
-        valid = self.alive[:, None, :] & (d < cfg.neighbour_vis) & ~self._eye
+        valid = (self.alive | self.wreck)[:, None, :] & (d < cfg.neighbour_vis) & ~self._eye
         d = torch.where(valid, d, math.inf)
         K = min(K_NEIGHBOURS, N)
         idx = torch.topk(d, K, dim=-1, largest=False, sorted=True).indices  # (B, N, K)
@@ -312,9 +316,12 @@ class TorchSim:
             g(self.v) / cfg.v_max,
             torch.ones_like(nx),
             g(self.kappa) / cfg.kappa_max,
-            g(self.acc) / cfg.brake_max,
         ]
-        assert len(feats) == NB_FEATURES
+        if cfg.brake_light:  # brake light + hazard lights
+            feats += [(g(self.acc) < BRAKE_ACC).to(self.dtype), g(self.wreck.to(self.dtype))]
+        else:  # legacy interface: acceleration
+            feats += [g(self.acc) / cfg.brake_max]
+        assert len(feats) == nb_features(cfg)
         f = torch.stack(feats, -1)
         ns = cfg.n_signal
         if ns:
@@ -360,7 +367,7 @@ class TorchSim:
         kap = self.kappa + torch.clamp(a[..., 1] * cfg.kappa_max - self.kappa, -dk, dk)
         kg = grip_kappa(cfg, v)
         self.kappa = torch.where(alive, torch.minimum(torch.maximum(kap, -kg), kg), 0.0)
-        self.sig = torch.where(alive[..., None], a[..., 2:], 0.0)
+        self.sig = torch.where(alive[..., None], a[..., 2 : 2 + cfg.n_signal], 0.0)
         th = self.th + v * self.kappa * cfg.dt
         self.acc = torch.where(alive, (v - self.v) / cfg.dt, 0.0)
         self.x = torch.where(alive, self.x + v * torch.cos(th) * cfg.dt, self.x)
@@ -372,6 +379,10 @@ class TorchSim:
         self.t += cfg.dt
         done_kind = torch.zeros(alive.shape, dtype=torch.int8, device=self.device)
         self.done_uid = torch.where(alive, self.uid, -1)
+        ws = wreck_steps(cfg)
+        if ws > 0:  # wrecks whose time is up disappear (before the collision check)
+            self.wreck_left = self.wreck_left - self.wreck.to(torch.int64)
+            self._remove(self.wreck & (self.wreck_left <= 0))
 
         cr = (-cfg.r_time * cfg.dt) * fa
         dist = self.dist_to_gate()
@@ -396,14 +407,19 @@ class TorchSim:
         # off-road: any disc overlapping the complement of the road
         ox, oy = self._discs()
         off = (corner_dist(ox, oy, cfg.W, cfg.Rc) < cfg.Rc + DISC_R).any(-1) & alive
-        col, vrel = self._collisions(ox, oy, alive)
+        col, vrel, hit_wreck = self._collisions(ox, oy, alive)
         crash = col & ~off
         cr = cr + off.to(self.dtype) * (cfg.r_offroad - cfg.r_offroad_speed * self.v) + crash.to(self.dtype) * (cfg.r_crash - cfg.r_crash_speed * vrel)
         done_kind = torch.where(off, DONE_OFFROAD, done_kind).to(torch.int8)
         done_kind = torch.where(crash, DONE_CRASH, done_kind).to(torch.int8)
         self.stats.offroad += off.sum(1)
         self.stats.crashes += crash.sum(1)
-        self._remove(off | crash)
+        self.stats.wreck_hits += (crash & hit_wreck).sum(1)
+        if ws > 0:  # crashed cars stay as wrecks, off-road cars vanish
+            self._remove(off)
+            self._make_wreck(crash, ws)
+        else:
+            self._remove(off | crash)
 
         timeout = self.alive & (self.age > cfg.max_age)
         cr = cr + cfg.r_timeout * timeout.to(self.dtype)
@@ -432,7 +448,7 @@ class TorchSim:
         """Dense (B, N, N) pair check; same result as sim.Sim._collisions."""
         dcx = self.x[:, :, None] - self.x[:, None, :]
         dcy = self.y[:, :, None] - self.y[:, None, :]
-        near = (dcx**2 + dcy**2 < (2 * DISC_OFFSETS[-1] + 2 * DISC_R) ** 2) & alive[:, :, None] & alive[:, None, :]
+        near = (dcx**2 + dcy**2 < (2 * DISC_OFFSETS[-1] + 2 * DISC_R) ** 2) & alive[:, :, None] & (alive | self.wreck)[:, None, :]
         near = near & ~self._eye
         r2 = (2 * DISC_R) ** 2
         hit = torch.zeros_like(near)
@@ -447,10 +463,23 @@ class TorchSim:
         vx, vy = self.v * torch.cos(self.th), self.v * torch.sin(self.th)
         dv = torch.hypot(vx[:, :, None] - vx[:, None, :], vy[:, :, None] - vy[:, None, :])
         vrel = torch.where(hit, dv, 0.0).amax(-1)
-        return col, vrel
+        hit_wreck = (hit & self.wreck[:, None, :]).any(-1)
+        return col, vrel, hit_wreck
+
+    def _make_wreck(self, mask, ws):
+        """As sim.Sim._make_wreck."""
+        self.alive = self.alive & ~mask
+        self.wreck = self.wreck | mask
+        self.wreck_left = torch.where(mask, ws, self.wreck_left)
+        self.v = torch.where(mask, 0.0, self.v)
+        self.acc = torch.where(mask, 0.0, self.acc)
+        self.kappa = torch.where(mask, 0.0, self.kappa)
+        self.sig = torch.where(mask[..., None], 0.0, self.sig)
 
     def _remove(self, mask):
         self.alive = self.alive & ~mask
+        self.wreck = self.wreck & ~mask
+        self.wreck_left = torch.where(mask, 0, self.wreck_left)
         self.v = torch.where(mask, 0.0, self.v)
         self.acc = torch.where(mask, 0.0, self.acc)
         self.sig = torch.where(mask[..., None], 0.0, self.sig)
@@ -528,6 +557,7 @@ class TorchSim:
         self.stats.arrived += arrive.sum(1)
         vx, vy = self.v * torch.cos(self.th), self.v * torch.sin(self.th)
         spawned = torch.zeros_like(self.alive)
+        occ = self.alive | self.wreck  # wrecks occupy their slot and block like a standing car
         M = len(self._lats)
         arB, arN = self._arange_B, self._arange_N
         for k in range(4):
@@ -535,9 +565,9 @@ class TorchSim:
             chn, shn = float(np.cos(hn)), float(np.sin(hn))
             # cars do not move during the arrivals: check the clearance to all cars once per arm,
             # then only against the car spawned in the previous pass (same result as rechecking all)
-            clear = self._spawn_clear(px, py, h, self.x, self.y, vx, vy, self.alive)
+            clear = self._spawn_clear(px, py, h, self.x, self.y, vx, vy, occ)
             for p in range(SPAWN_MAX_PER_STEP):
-                cand = (self.queue[:, k] > 0) & (~self.alive).any(1)
+                cand = (self.queue[:, k] > 0) & (~occ).any(1)
                 cnt = clear.sum(1)
                 ok = cand & (cnt > 0)
                 head = self._qhead[:, k]
@@ -547,9 +577,10 @@ class TorchSim:
                 pick = torch.minimum(torch.floor(qu * cnt).to(torch.int64), cnt - 1)
                 jalt = torch.argmax((torch.cumsum(clear, 1) > pick[:, None]).to(torch.int8), 1)
                 j = torch.where(clear[arB, j0], j0, jalt)
-                n = torch.argmax((~self.alive).to(torch.int8), 1)  # first free slot
+                n = torch.argmax((~occ).to(torch.int8), 1)  # first free slot
                 sel = ok[:, None] & (arN[None, :] == n[:, None])
                 self.alive = self.alive | sel
+                occ = occ | sel
                 self.x = torch.where(sel, px[j][:, None], self.x)
                 self.y = torch.where(sel, py[j][:, None], self.y)
                 self.th = torch.where(sel, hn, self.th)

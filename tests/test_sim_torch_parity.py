@@ -36,8 +36,15 @@ def _close(name, t, ref, mask=None, tol=TOL):
 
 
 @pytest.mark.parametrize("device", DEVICES)
-@pytest.mark.parametrize("cfg_kw", [dict(n_slots=24, r_time=0.02, demand_range=(0.2, 0.5)),
-                                    dict(n_slots=12, demand=0.4, v_reverse=0.0, max_age=12.0, n_scenarios=3)])
+@pytest.mark.parametrize("cfg_kw", [
+    # current defaults: wrecks, brake light + hazard, one lamp, right-half spawning
+    dict(n_slots=24, r_time=0.02, demand_range=(0.2, 0.5)),
+    # short wrecks (many appear and vanish), signal noise off
+    dict(n_slots=16, demand=0.5, wreck_time=1.0, n_scenarios=2),
+    # the legacy interface / world of the old checkpoints
+    dict(n_slots=12, demand=0.4, v_reverse=0.0, max_age=12.0, n_scenarios=3, n_signal=2, brake_light=False,
+         spawn_right=False, wreck_time=0.0),
+])
 def test_torch_matches_numpy(device, cfg_kw):
     cfg_kw = dict(cfg_kw)
     S = cfg_kw.pop("n_scenarios", None)
@@ -55,8 +62,12 @@ def test_torch_matches_numpy(device, cfg_kw):
         act = _actions(rng, B, N, A)
         r_ref = ref.step(act)
         r_t = ts.step(torch.as_tensor(act, device=device))
-        al = ref.alive
-        assert np.array_equal(ts.alive.cpu().numpy(), al), f"alive@{t}"
+        al = ref.alive | ref.wreck
+        assert np.array_equal(ts.alive.cpu().numpy(), ref.alive), f"alive@{t}"
+        assert np.array_equal(ts.wreck.cpu().numpy(), ref.wreck), f"wreck@{t}"
+        assert np.array_equal(ts.wreck_left.cpu().numpy(), ref.wreck_left), f"wreck_left@{t}"
+        n_wreck = getattr(ref, "_n_wreck_seen", 0) + int(ref.wreck.sum())
+        ref._n_wreck_seen = n_wreck
         assert np.array_equal(ts.done_kind.cpu().numpy(), ref.done_kind), f"done_kind@{t}"
         assert np.array_equal(ts.done_uid.cpu().numpy(), ref.done_uid), f"done_uid@{t}"
         assert np.array_equal(ts.uid.cpu().numpy(), ref.uid), f"uid@{t}"
@@ -69,10 +80,11 @@ def test_torch_matches_numpy(device, cfg_kw):
         worst = max(worst, _close(f"reward@{t}", r_t, r_ref))
         worst = max(worst, _close(f"prev_dist@{t}", ts._prev_dist, ref._prev_dist, al))
         kinds += np.bincount(ref.done_kind.ravel(), minlength=6)
-    for name in ("arrived", "spawned", "exits", "wrong_exits", "crashes", "offroad", "timeouts"):
+    for name in ("arrived", "spawned", "exits", "wrong_exits", "crashes", "wreck_hits", "offroad", "timeouts"):
         assert np.array_equal(getattr(ts.stats, name).cpu().numpy(), getattr(ref.stats, name)), name
     # the run must actually contain traffic events
     assert kinds[1] > 0 and kinds[3] > 0 and kinds[4] > 0, kinds
+    assert (getattr(ref, "_n_wreck_seen", 0) > 0) == (cfg.wreck_time > 0)
     print(f"[{device}] max abs deviation over {STEPS} steps: {worst:.3g}; done kinds {kinds.tolist()}")
 
 

@@ -10,7 +10,7 @@ const SC = require(path.join(__dirname, "..", "site", "src", "js", "sim.js"));
 const input = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const exported = {};
 for (const k of ["RIGHT", "STRAIGHT", "LEFT", "DISC_R", "K_NEIGHBOURS", "NEIGHBOUR_RANGE", "OBS_DIM", "NB_FEATURES",
-  "POS_SCALE", "GOAL_SCALE", "RAY_RANGE", "DONE"]) exported[k] = SC[k];
+  "NB_FEATURES_LEGACY", "BRAKE_ACC", "POS_SCALE", "GOAL_SCALE", "RAY_RANGE", "DONE"]) exported[k] = SC[k];
 const out = { defaults: SC.defaultConfig(), config: globalThis.SC_SIM_CONFIG, exported, cases: [], policies: [] };
 
 for (const c of input.cases) {
