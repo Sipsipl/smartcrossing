@@ -9,14 +9,17 @@ roads, room for two cars side by side per direction), curb radius 9 m; the old
 Vehicle physics: kinematic unicycle with a speed and curvature limit, a steering-rate
 limit and a tyre-grip limit (lateral acceleration v^2 * kappa <= a_lat_max), so tight
 turns are only possible at low speed. Cars enter at the end of
-an arm (at a random lateral offset) and must leave through their target arm.
+an arm (at a random lateral offset, by default in the right half of the road) and must leave
+through their target arm. Cars of a car-car crash stay as standing wrecks for cfg.wreck_time
+(hazard lights on; driving into one is a crash), off-road cars vanish.
 
 Arms are indexed counter-clockwise: 0 = south, 1 = east, 2 = north, 3 = west.
 A car entering from arm k with manoeuvre m in {1: right, 2: straight, 3: left}
 must exit through arm (k + m) % 4.
 
 All state lives in arrays of shape (B, N): B independent environments with N
-car slots each. The policy is evaluated outside of this module.
+car slots each (``alive``: driving cars; ``wreck``: wrecks, which occupy their slot until
+removed). The policy is evaluated outside of this module.
 """
 
 from dataclasses import dataclass, field

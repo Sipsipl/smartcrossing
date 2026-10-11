@@ -14,25 +14,28 @@
 
   /** Decode one recorded replay into per-car float arrays. */
   SCX.decodeReplay = function (r, q) {
-    const F = r.lamps ? 5 : 3;
-    const tracks = r.tracks.map(([t0, man, end, kind, x0, y0, th0, width, data, runs]) => {
+    const NL = +r.lamps || 0; // lamp channels recorded per sample (0, 1 or 2; old files: true = 2)
+    const nl = r.lamps === true ? 2 : NL, F = 3 + nl;
+    const tracks = r.tracks.map(([t0, man, end, kind, x0, y0, th0, width, data, runs, wreckFrom]) => {
       const d = b64(data, width), len = d.length / F;
       const x = new Float32Array(len), y = new Float32Array(len), th = new Float32Array(len);
-      const l0 = r.lamps ? new Float32Array(len) : null, l1 = r.lamps ? new Float32Array(len) : null;
+      const l0 = nl > 0 ? new Float32Array(len) : null, l1 = nl > 1 ? new Float32Array(len) : null;
       let qx = x0, qy = y0, qt = th0;
       for (let i = 0; i < len; i++) {
         qx += d[i * F]; qy += d[i * F + 1]; qt += d[i * F + 2];
         x[i] = qx * q.pos; y[i] = qy * q.pos; th[i] = qt * q.th;
-        if (l0) { l0[i] = d[i * F + 3] / q.lamp; l1[i] = d[i * F + 4] / q.lamp; }
+        if (l0) l0[i] = d[i * F + 3] / q.lamp;
+        if (l1) l1[i] = d[i * F + 4] / q.lamp;
       }
       const brake = new Uint8Array(len); // brake lights on (ranges [start, end) of samples)
       for (let j = 0; runs && j + 1 < runs.length; j += 2) brake.fill(1, runs[j], runs[j + 1]);
-      return { t0, man, end, kind, len, x, y, th, l0, l1, brake };
+      // samples from wreckFrom on: the car is a wreck (standing, hazard lights)
+      return { t0, man, end, kind, len, x, y, th, l0, l1, brake, wreckFrom: wreckFrom === undefined ? -1 : wreckFrom };
     });
     const qb = b64(r.queue, 1), queue = new Uint8Array(qb.buffer);
     const ends = (k) => tracks.filter((t) => t.kind === k && t.end >= 0).map((t) => t.end).sort((a, b) => a - b);
     return {
-      dt: r.dt, steps: r.steps, lamps: r.lamps, tracks, queue,
+      dt: r.dt, steps: r.steps, lamps: nl, tracks, queue,
       marks: r.marks.map(([k, kind, x, y]) => ({ k, kind: kind === 1 ? "crash" : "offroad", x: x * q.pos, y: y * q.pos })),
       exits: ends(KIND.exit), bad: ends(KIND.crash).concat(ends(KIND.offroad)).sort((a, b) => a - b),
     };
@@ -78,21 +81,26 @@
       ctx.setTransform(px, 0, 0, -px, S / 2, S / 2);
       SCX.drawRoad(ctx, this.world);
       const kf = t / r.dt, k = Math.floor(kf), a = kf - k;
+      for (const m of r.marks) { // under the cars: a wreck stays visible on top of its mark
+        if (m.k > k) break;
+        SCX.drawMark(ctx, m.x, m.y, m.kind, 1 - (t - m.k * r.dt) / MARK_FADE);
+      }
+      const hazard = SCX.hazardOn(t);
       for (const tr of r.tracks) {
         const i = k - tr.t0;
         if (i < 0 || i >= tr.len) continue;
+        if (tr.wreckFrom >= 0 && i >= tr.wreckFrom) {
+          SCX.drawCar(ctx, tr.x[i], tr.y[i], tr.th[i], tr.man, null, null, false, { on: hazard });
+          continue;
+        }
         let x = tr.x[i], y = tr.y[i], th = tr.th[i], lamp = null;
         let s0 = tr.l0 ? tr.l0[i] : 0, s1 = tr.l1 ? tr.l1[i] : 0;
         if (i + 1 < tr.len) {
           x += (tr.x[i + 1] - x) * a; y += (tr.y[i + 1] - y) * a; th += (tr.th[i + 1] - th) * a;
           if (tr.l0) { s0 += (tr.l0[i + 1] - s0) * a; s1 += (tr.l1[i + 1] - s1) * a; }
         }
-        if (tr.l0) lamp = SCX.lampRGB(s0, s1);
+        if (tr.l0) lamp = SCX.lampCSS(tr.l1 ? 2 : 1, s0, s1);
         SCX.drawCar(ctx, x, y, th, tr.man, null, lamp, tr.brake[i] === 1);
-      }
-      for (const m of r.marks) {
-        if (m.k > k) break;
-        SCX.drawMark(ctx, m.x, m.y, m.kind, 1 - (t - m.k * r.dt) / MARK_FADE);
       }
       // waiting cars per arm
       ctx.setTransform(1, 0, 0, 1, 0, 0);

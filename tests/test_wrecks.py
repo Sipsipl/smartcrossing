@@ -215,3 +215,26 @@ def test_old_brain_loads_with_its_interface_in_the_new_world():
     assert phys["n_signal"] == 2 and phys["brake_light"] is False
     assert interface_cfg(drv.train_cfg).n_signal == 2
     assert physics_of(SimConfig().__dict__)["n_signal"] == 1
+
+
+@pytest.mark.parametrize("control", ["light", "reservation"])
+def test_baselines_stop_behind_a_wreck(control):
+    """The rule-based drivers treat wrecks as standing obstacles (car following) and drive on
+    once the wreck is gone."""
+    cfg = SimConfig(demand=0.0)
+    sim = Sim(cfg, 1, seed=0)
+    drv = LaneDriver(sim, control)
+    for i, lat in enumerate((1.75, 5.25)):  # both right lanes blocked on the south arm
+        place(sim, i, lat, -25.0, np.pi / 2)
+    sim._make_wreck(sim.alive.copy())
+    sim.queue[0, 0] = 1
+    sim._qbuf[0, 0, 0] = (0.5, STRAIGHT, 0)
+    min_gap = np.inf
+    for _ in range(250):
+        sim.step(drv.act())
+        car = sim.alive[0]
+        if car.any() and sim.wreck[0].any():
+            min_gap = min(min_gap, float((-25.0 - 2.3) - (sim.y[0][car].max() + 2.3)))
+    assert sim.stats.crashes[0] == 0 and sim.stats.spawned[0] == 1
+    assert sim.stats.exits[0] == 1  # passed after the wrecks vanished
+    assert 0.0 < min_gap < 10.0  # it waited close behind them

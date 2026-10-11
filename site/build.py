@@ -40,10 +40,10 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "site")]
 
-from obs_labels import obs_layout  # noqa: E402
+from obs_labels import interface_key, obs_layout  # noqa: E402
 from smartcrossing.policy import default_in_scale, init_params, layer_sizes, unpack  # noqa: E402
-from smartcrossing.policy_compat import load_adapted_policy, physics_of  # noqa: E402
-from smartcrossing.sim import SimConfig, js_constants  # noqa: E402
+from smartcrossing.policy_compat import INTERFACE_KEYS, interface_cfg, load_adapted_policy, physics_of  # noqa: E402
+from smartcrossing.sim import BRAKE_ACC, SimConfig, js_constants  # noqa: E402
 
 SITE = ROOT / "site"
 SRC = SITE / "src"
@@ -216,9 +216,12 @@ def discover(world: str = "any") -> dict:
                 info = json.loads(str(z["info"]))
                 pol = {**info["policy"], "in_scale": z["in_scale"].tolist(),
                        "layers": [{"W": z[f"W{i}"].tolist(), "b": z[f"b{i}"].tolist()} for i in range(info["n_layers"])]}
-            if world != "any" and world_of(info["physics"]) != world:
+            # snapshots written before the interface keys existed: lamp count / neighbour layout from the
+            # checkpoint's own training cfg (old brains: 2 lamps, acceleration feature)
+            phys = {**info["physics"], **{k: v for k, v in physics_of(pol.get("cfg") or {}).items() if k in INTERFACE_KEYS}}
+            if world != "any" and world_of(phys) != world:
                 continue
-            e = _entry(info["run"], f.stem, info["file"], info["method"], info["gen"], info["physics"], pol)
+            e = _entry(info["run"], f.stem, info["file"], info["method"], info["gen"], phys, pol)
             found[e["id"]] = e
         return found
     if not RUNS.exists():
@@ -340,7 +343,6 @@ REPLAY_DEMANDS = [0.05, 0.15, 0.3]
 REPLAY_SEED, REPLAY_WARMUP, REPLAY_SECONDS = 7, 15.0, 90.0
 GEOMETRY_KEYS = ("L", "W", "Rc", "a_lat_max", "v_reverse")  # the "world": same for all drivers compared
 Q_POS, Q_TH, Q_LAMP = 0.05, 0.01, 100.0  # quantisation: 5 cm, 0.01 rad, lamp in 1/100
-BRAKE_ACC = -0.5  # m/s^2: brake lights on below this actual acceleration (purely visual)
 
 
 def _b64(a: np.ndarray) -> str:
@@ -351,10 +353,12 @@ def _b64(a: np.ndarray) -> str:
 
 def _replay_job(job):
     """Drive one sim (1 env) and record every car as a compact track:
-    [t0, man, end_step, end_kind, qx0, qy0, qth0, width, b64, brake] where b64 holds per sample
-    (dx, dy, dth[, lamp0, lamp1]) as int8 (width 1) or int16 (width 2), deltas of the
-    quantised values (exact reconstruction), and brake the sample ranges [start, end) with the
-    brake lights on (acceleration < BRAKE_ACC), flattened. Plus crash marks and the queue per arm."""
+    [t0, man, end_step, end_kind, qx0, qy0, qth0, width, b64, brake, wreck_from] where b64 holds per
+    sample (dx, dy, dth[, lamp per channel]) as int8 (width 1) or int16 (width 2), deltas of the
+    quantised values (exact reconstruction), brake the sample ranges [start, end) with the
+    brake lights on (acceleration < sim.BRAKE_ACC), flattened, and wreck_from the first sample at which
+    the car is a wreck (-1: never; a wreck stays cfg.wreck_time, its samples continue the track).
+    Plus crash marks and the queue per arm. "lamps" = lamp channels per sample (0 for the baselines)."""
     from smartcrossing.baselines import LaneDriver
     from smartcrossing.policy import PolicyDriver
     from smartcrossing.sim import DONE_NAMES, Sim
@@ -367,7 +371,7 @@ def _replay_job(job):
     else:
         params, sizes, in_scale = payload
         drv = PolicyDriver(sim, np.asarray(params), sizes, in_scale=np.asarray(in_scale))
-    lamps = kind != "baseline" and cfg.n_signal >= 2
+    lamps = 0 if kind == "baseline" else cfg.n_signal
     tracks, marks, queue = {}, [], []
     n_warm, n = int(round(REPLAY_WARMUP / cfg.dt)), int(round(REPLAY_SECONDS / cfg.dt))
     for k in range(-n_warm, n):
@@ -380,13 +384,17 @@ def _replay_job(job):
                 tr["end"] = (k, int(sim.done_kind[0, slot]))
         for _, ev, x, y in sim.events:
             marks.append([k, 1 if ev == "crash" else 2, int(round(x / Q_POS)), int(round(y / Q_POS))])
-        for slot in np.nonzero(sim.alive[0])[0]:
+        for slot in np.nonzero(sim.alive[0] | sim.wreck[0])[0]:
             uid = int(sim.uid[0, slot])
             tr = tracks.get(uid)
             if tr is None:
-                tr = tracks[uid] = {"t0": k, "man": int(sim.man[0, slot]), "s": [], "b": [], "end": (None, 0)}
+                if sim.wreck[0, slot]:  # a wreck from before the recording started
+                    continue
+                tr = tracks[uid] = {"t0": k, "man": int(sim.man[0, slot]), "s": [], "b": [], "end": (None, 0), "w": -1}
+            if sim.wreck[0, slot] and tr["w"] < 0:
+                tr["w"] = len(tr["s"])
             tr["b"].append(bool(sim.acc[0, slot] < BRAKE_ACC))
-            tr["s"].append((sim.x[0, slot], sim.y[0, slot], sim.th[0, slot], *(sim.sig[0, slot, :2] if lamps else ())))
+            tr["s"].append((sim.x[0, slot], sim.y[0, slot], sim.th[0, slot], *(sim.sig[0, slot, :lamps] if lamps else ())))
         queue.append(np.minimum(sim.queue[0], 255))
     out = []
     for uid, tr in tracks.items():
@@ -405,9 +413,10 @@ def _replay_job(job):
         b = np.diff(np.concatenate([[0], np.asarray(tr["b"], dtype=np.int8), [0]]))
         runs = np.stack([np.nonzero(b == 1)[0], np.nonzero(b == -1)[0]], 1).ravel().tolist()
         out.append([tr["t0"], tr["man"], end_k if end_k is not None else -1, end_kind,
-                    int(q[0, 0]), int(q[0, 1]), int(q[0, 2]), width, _b64(d.astype(np.int8 if width == 1 else "<i2")), runs])
+                    int(q[0, 0]), int(q[0, 1]), int(q[0, 2]), width, _b64(d.astype(np.int8 if width == 1 else "<i2")), runs,
+                    tr["w"]])
     return {
-        "demand": demand, "steps": n, "dt": cfg.dt, "lamps": lamps,
+        "demand": demand, "steps": n, "dt": cfg.dt, "lamps": lamps, "wreck_time": cfg.wreck_time,
         "kinds": list(DONE_NAMES), "tracks": out, "marks": marks,
         "queue": _b64(np.asarray(queue, dtype=np.uint8)),
     }
@@ -599,8 +608,9 @@ def round_policy(d: dict, digits: int = 5) -> dict:
     return {**d, "in_scale": r(d["in_scale"]), "layers": [{"W": r(l["W"]), "b": r(l["b"])} for l in d["layers"]]}
 
 
-def random_policy() -> dict:
-    cfg = SimConfig()
+def random_policy(physics: dict | None = None) -> dict:
+    """Random brain with the observation interface of `physics` (default: the current one)."""
+    cfg = interface_cfg(physics) if physics else SimConfig()
     sizes = layer_sizes(cfg)
     params = init_params(sizes, 7)
     return {
@@ -685,7 +695,7 @@ def main(argv=None):
     print(f"source: {kind}")
 
     cfg = SimConfig()
-    layout = obs_layout(cfg)  # fails loudly if the sim's observation layout changed
+    obs_layout(cfg)  # fails loudly if the sim's observation layout changed
     print("discovering checkpoints ...")
     found = discover(a.world)
     print(f"  {len(found)} loadable checkpoints")
@@ -744,7 +754,7 @@ def main(argv=None):
     # random brain as "generation 0" of the ES timeline
     if "es" in timelines:
         phys = found[picked["es"]]["physics"]
-        rp = random_policy()
+        rp = random_policy(phys)
         rid = "zufall"
         policies[rid] = {"id": rid, "run": None, "file": None, "method": "es", "gen": 0, "physics": phys,
                          "adapted": None, "policy": round_policy(rp, 4), "bench": {}}
@@ -788,9 +798,18 @@ def main(argv=None):
     baselines_by_world = {w: {drv: bench[base_key(drv, w)] for drv in ("light", "reservation")} for w in base_worlds}
     baselines = baselines_by_world[main_world]
 
+    # observation labels per interface (lamp count, neighbour layout) of the brains on the site; "layout"
+    # is the main brain's (the pages pick the one of their sim: SCX.layoutFor)
+    ifaces = {interface_key(cfg): cfg}
+    for p in policies.values():
+        c = SimConfig(**{k: p["physics"][k] for k in INTERFACE_KEYS if k in p["physics"]})
+        ifaces.setdefault(interface_key(c), c)
+    layouts = {k: obs_layout(c) for k, c in ifaces.items()}
+    main_iface = interface_key(found[main_id]["physics"]) if main_id else interface_key(cfg)
     data = {
         "built": date.today().isoformat(),
-        "layout": layout,
+        "layout": layouts[main_iface],
+        "layouts": layouts,
         "cfg": {k: (list(v) if isinstance(v, tuple) else v) for k, v in cfg.__dict__.items()},
         "policies": policies,
         "best": picked,

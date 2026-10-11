@@ -36,7 +36,9 @@
       const om = mainMethod === "ppo" ? "es" : "ppo";
       if (D.best[om]) types.push(SCX.makeType(pol(D.best[om]), `${METHOD_NAMES[om]} (bestes Gehirn)`, { share: 0 }));
     }
-    return types.slice(0, 3);
+    // all cars of one sim share the observation interface (lamp count, neighbour layout) of the first brain
+    const key = (t) => `${t.physics.n_signal}/${t.physics.brake_light}`;
+    return types.filter((t) => key(t) === key(types[0])).slice(0, 3);
   }
 
   // ------------------------------------------------------------------ stage markup
@@ -202,7 +204,8 @@
   function renderObsPanel(cx, el) {
     const n = cx.selIndex();
     if (n < 0) { el.innerHTML = ""; return; }
-    const o = cx.obsRow(n), lay = D.layout;
+    const o = cx.obsRow(n), lay = SCX.layoutFor(cx.sim.cfg);
+    if (!lay) { el.innerHTML = ""; return; }
     const ty = cx.typeOf(n), off = unusedInputs(ty && ty.raw);
     const own = lay.groups.filter((g) => g.sub !== "neighbour");
     const nbs = lay.groups.filter((g) => g.sub === "neighbour");
@@ -224,7 +227,7 @@
     const present = nbs.map((g) => o[g.items.find((it) => it.key.endsWith("_present")).i] > 0.5);
     for (let r = 0; r < nItems; r++) {
       const it0 = nbs[0].items[r];
-      const lab = { fwd: "vor mir (m)", left: "links von mir (m)", same: "gleiche Richtung", cross: "kreuzt nach links", speed: "Tempo (km/h)", present: "da?", kappa: "lenkt links (%)", acc: "beschleunigt (m/s²)" }[it0.key.split("_").slice(1).join("_")] || it0.label;
+      const lab = { fwd: "vor mir (m)", left: "links von mir (m)", same: "gleiche Richtung", cross: "kreuzt nach links", speed: "Tempo (km/h)", present: "da?", kappa: "lenkt links (%)", acc: "beschleunigt (m/s²)", brake: "Bremslicht", hazard: "Warnblinker (Wrack)" }[it0.key.split("_").slice(1).join("_")] || it0.label;
       const unused = off.has(it0.i);
       h += `<tr${unused ? ` class="unused" title="${UNUSED_TIP}"` : ""}><td>${lab}${unused ? " (ungenutzt)" : ""}</td>` + nbs.map((g, k) => {
         const it = g.items[r];
@@ -233,7 +236,7 @@
     }
     const lampIdx = nbs.map((g) => g.items.filter((it) => /_lamp\d$/.test(it.key)).map((it) => it.i));
     h += `<tr><td>Lampenfarbe</td>` + nbs.map((_, k) => present[k]
-      ? `<td><span class="lamp" style="background:${cx.sim.cfg.signal_enabled ? SCX.lampRGB(o[lampIdx[k][0]], o[lampIdx[k][1]]) : "rgb(90,90,96)"}"></span></td>`
+      ? `<td><span class="lamp" style="background:${cx.sim.cfg.signal_enabled ? SCX.lampCSS(lampIdx[k].length, o[lampIdx[k][0]], o[lampIdx[k][1]]) : "rgb(90,90,96)"}"></span></td>`
       : `<td class="none">–</td>`).join("") + `</tr>`;
     h += `</tbody></table></div>`;
     el.innerHTML = h;
@@ -246,7 +249,7 @@
       hint: "Tippe ein Auto an",
       onRefresh: (c) => { SCX.renderSelHead(c, $("selhead")); renderObsPanel(c, $("obs")); },
     });
-    $("dim-count").textContent = D.layout.dim;
+    $("dim-count").textContent = (SCX.layoutFor(cx.sim.cfg) || D.layout).dim;
     window.__sc = cx;
   }
 
@@ -293,9 +296,9 @@
           ${bar(a[0], false, c1)}<div class="bar-ends"><span>voll bremsen</span><span>${num(a[0], 2)}</span><span>Vollgas</span></div></div>
         <div class="out"><div class="top-row"><b><i class="line-key" style="border-color:${c2}"></i> Lenkung</b><span class="phys">${radius ? `Kurve nach ${a[1] > 0 ? "links" : "rechts"}, Radius ${num(radius, 0)} m` : "geradeaus"}</span></div>
           ${bar(a[1], true, c2, sc.kappa_rate < 1e5 ? k : undefined)}<div class="bar-ends"><span>links</span><span>${num(a[1], 2)}</span><span>rechts</span></div></div>
-        ${[0, 1].map((q) => `<div class="out"><div class="top-row"><b><i class="line-key" style="border-color:${cols()[2 + q]}"></i> Lampe Kanal ${q + 1}</b><span class="phys">${q === 0 ? "mehr Rot" : "mehr Blau"} bei +1</span></div>
-          ${bar(a[2 + q], false, cols()[2 + q])}<div class="bar-ends"><span>−1</span><span>${num(a[2 + q], 2)}</span><span>+1</span></div></div>`).join("")}
-        <div class="lampbox"><span class="big" style="background:${lampOn ? SCX.lampRGB(a[2], a[3]) : "rgb(90,90,96)"}"></span>
+        ${a.slice(2).map((v, q) => `<div class="out"><div class="top-row"><b><i class="line-key" style="border-color:${cols()[2 + q]}"></i> ${a.length > 3 ? `Lampe Kanal ${q + 1}` : "Lampe"}</b><span class="phys">${a.length > 3 ? (q === 0 ? "mehr Rot" : "mehr Blau") : "heller"} bei +1</span></div>
+          ${bar(v, false, cols()[2 + q])}<div class="bar-ends"><span>−1</span><span>${num(v, 2)}</span><span>+1</span></div></div>`).join("")}
+        <div class="lampbox"><span class="big" style="background:${lampOn ? SCX.lampCSS(a.length - 2, a[2], a[3]) : "rgb(90,90,96)"}"></span>
           <span>So leuchtet die Dachlampe${c.typeOf(n).mute ? " (stumm geschaltet)" : ""}${lampOn ? "" : " – die anderen sehen sie gerade nicht"}.</span></div>
         ${sc.kappa_rate < 1e5 ? `<p class="hint">Der schwarze Strich auf der Lenkung zeigt, wo das Lenkrad gerade steht: es dreht sich nur ${num(sc.kappa_rate / sc.kappa_max, 1)}-mal den vollen Weg pro Sekunde.</p>` : ""}`;
     }
@@ -311,7 +314,7 @@
       ctx.fillStyle = SCX.cssVar("--muted"); ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
       ctx.fillText("+1", 2, 10); ctx.fillText("−1", 2, H - 3); ctx.fillText("jetzt", W - 26, H / 2 - 4); ctx.fillText("vor 10 s", 22, H / 2 - 4);
       const c = cols();
-      for (let q = 0; q < 4; q++) {
+      for (let q = 0; q < Math.min(4, hist.length ? hist[0].length : 0); q++) {
         ctx.strokeStyle = c[q]; ctx.lineWidth = 2; ctx.beginPath();
         hist.forEach((a, i) => {
           const x = W - (hist.length - 1 - i) * (W / 99), y = H / 2 - a[q] * (H / 2 - 4);
@@ -346,7 +349,7 @@
         if (n < 0) return;
         const t = c.typeOf(n);
         if (!net || net.raw !== t.raw) {
-          if (!net) net = new SCX.NetView($("net"), D.layout, t.raw, { onHover: (h) => { tip.textContent = h ? net.describe(h) : "Fahre mit der Maus über einen Kreis (oder tippe darauf)."; } });
+          if (!net) net = new SCX.NetView($("net"), SCX.layoutFor(c.sim.cfg) || D.layout, t.raw, { onHover: (h) => { tip.textContent = h ? net.describe(h) : "Fahre mit der Maus über einen Kreis (oder tippe darauf)."; } });
           else net.setPolicy(t.raw);
         }
         const D_ = SC.obsDim(c.sim.cfg);
