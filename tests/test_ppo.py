@@ -45,7 +45,7 @@ def test_worker_rollout_trajectories():
     in_scale = default_in_scale(cfg)
     a_sizes = layer_sizes(cfg, (16, 16))
     c_sizes = [obs_dim(cfg) + N_PRIV, 16, 16, 1]
-    w = Worker(dict(cfg.__dict__), 3, 0, 60, 1000, 0.99, 0.95, 0.5, 0.1, in_scale, np.ones(act_dim(cfg)))
+    w = Worker(dict(cfg.__dict__), 3, 0, 60, 1000, 0.99, 0.95, in_scale, np.ones(act_dim(cfg)))
     actor, critic = MLP(a_sizes, 0, 0.01), MLP(c_sizes, 1)
     r = w.rollout(actor.p, a_sizes, np.full(act_dim(cfg), -0.5), critic.p, c_sizes, 0.3, 0.5)
     n = r["car_steps"]

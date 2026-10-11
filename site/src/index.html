@@ -21,7 +21,7 @@ und durch Ausprobieren lernen mussten, wie man hier heil auf die andere Seite ko
     <div class="group">
       <h3>Verkehr</h3>
       <div class="ctl"><label for="demand">Wie viele Autos kommen?</label><output id="demand-o" for="demand"></output>
-        <input type="range" id="demand" min="0" max="0.5" step="0.01" value="0.15"></div>
+        <input type="range" id="demand" min="0" max="1" step="0.01" value="0.15"></div>
       <div class="ctl"><label for="pright">Wollen rechts abbiegen</label><output id="pright-o" for="pright"></output>
         <input type="range" id="pright" min="0" max="100" step="1" value="33"></div>
       <div class="ctl"><label for="pleft">Wollen links abbiegen</label><output id="pleft-o" for="pleft"></output>
@@ -51,27 +51,26 @@ und durch Ausprobieren lernen mussten, wie man hier heil auf die andere Seite ko
     <span>Rahmenfarbe = welches Gehirn (siehe „Gehirne mischen“)</span>
     <span class="key"><span class="lamp" style="background:rgb(254,40,0)"></span><span class="lamp" style="background:rgb(127,40,127)"></span><span class="lamp" style="background:rgb(0,40,254)"></span></span>
     <span>Dachlampe: Farbe wählt das Auto selbst (zwei Regler: rot und blau)</span>
+    <span class="key"><span class="brakekey"></span></span>
+    <span>Bremslicht: hinten rot, wenn das Auto bremst</span>
     <span class="key"><span class="xmark" style="color:#ff3b30">×</span><span class="xmark" style="color:#ffd60a">×</span></span>
     <span><b style="color:#ff3b30">rot</b>: Unfall, <b style="color:#c9a400">gelb</b>: von der Straße abgekommen</span>
   </div>
 </div>
 
 <h2>Worum geht’s?</h2>
-<p>Stell dir vor, an einer Kreuzung fahren nur noch Roboterautos. Brauchen die dann noch Ampeln, Spuren und Vorfahrtsregeln?
-Oder finden sie selbst einen Weg? Genau das probiere ich hier aus. Die Autos dürfen fahren, wie sie wollen – sie müssen nur an ihrer Ausfahrt ankommen
+<p>Stell dir vor, an einer Kreuzung fahren nur noch Roboterautos. Finden sie ohne Regeln selbst einen Weg?
+Genau das probiere ich hier aus. Die Autos dürfen fahren, wie sie wollen – sie müssen nur an ihrer Ausfahrt ankommen
 und dürfen dabei nicht zusammenstoßen oder von der Straße fliegen.</p>
 <ul class="plain">
   <li><b>Schaffen sie das effizient und fair?</b> Also: viele Autos pro Minute, wenig Unfälle, und niemand muss ewig warten.</li>
   <li><b>Entsteht eine Sprache?</b> Jedes Auto hat eine Dachlampe, deren Farbe es frei wählen kann. Niemand hat festgelegt, was „rot“ oder „blau“ heißt.
     Fangen die Autos trotzdem an, sich damit etwas mitzuteilen – etwa „ich biege links ab“ oder „ich fahre zuerst“?</li>
-  <li><b>Rechts- oder Linksverkehr?</b> Die Straße hat keine Spuren. Einigen sich die Autos von selbst darauf, auf einer Seite zu fahren?</li>
+  <li><b>Rechts- oder Linksverkehr?</b> Einigen sich die Autos von selbst darauf, auf einer Seite zu fahren?</li>
   <li><b>Was passiert beim Mischen?</b> Verschieden trainierte Autos auf derselben Kreuzung – vertragen sie sich?</li>
 </ul>
 
 <div class="note" id="status">Die Autos lernen noch.</div>
-<p class="small">Bisheriger Stand: Die gelernten Autos schaffen mehr Autos pro Minute als eine Ampel, verunglücken bei mittlerem Verkehr aber noch zu oft (rund 15 %).
-Links- bzw. Rechtsverkehr entsteht von selbst (welche Seite, ist Zufall); die Lampe nutzen sie bisher nicht zur Verständigung.
-<a href="vergleich.html">Details im Vergleich →</a></p>
 
 <h2>Schau unter die Haube</h2>
 <div class="cards">
@@ -84,6 +83,7 @@ Links- bzw. Rechtsverkehr entsteht von selbst (welche Seite, ist Zufall); die La
 <!-- FOOTER -->
 </div>
 <script src="data/site-data.js?v={{VERSION}}"></script>
+<script src="js/sim-config.js?v={{VERSION}}"></script>
 <script src="js/sim.js?v={{VERSION}}"></script>
 <script src="js/crossing.js?v={{VERSION}}"></script>
 <script src="js/pages.js?v={{VERSION}}"></script>

@@ -13,7 +13,7 @@
 <!-- HEADER -->
 <h1>Was sieht ein Auto?</h1>
 <p class="lead">Ein Auto hat keine Kamera und keine Karte. Sein Gehirn bekommt in jedem Moment genau <b id="dim-count">48</b> Zahlen –
-und sonst nichts. <b>Tippe ein Auto an</b>, dann siehst du sie: als Linien auf der Kreuzung und als Liste daneben.</p>
+und sonst nichts. Hier siehst du sie als Linien auf der Kreuzung und als Liste daneben.</p>
 
 <div class="sim-layout">
   <section id="stage" aria-label="Live-Simulation mit Sensoranzeige"></section>
@@ -49,13 +49,14 @@ und sonst nichts. <b>Tippe ein Auto an</b>, dann siehst du sie: als Linien auf d
   <li><b>Alles ist aus Sicht des Autos.</b> „Vor mir“ und „links von mir“ drehen sich mit dem Auto mit. Position und Richtung sind so gedreht,
     als käme jedes Auto von unten (Süden). Dadurch gilt alles Gelernte für alle vier Zufahrten gleich, und keine Seite ist bevorzugt.</li>
   <li><b>Die Nachbarn sind nach Abstand sortiert:</b> Nachbar 1 ist immer das nächste Auto. Gibt es weniger als vier in der Nähe, sind die übrigen Felder leer (0).</li>
-  <li><b>Die Lampen der Nachbarn</b> sind zwei Zahlen zwischen −1 und +1 (Rot- und Blauanteil). Was sie bedeuten, weiß am Anfang niemand.</li>
-  <li>Für das Netz werden alle Werte auf ungefähr −1 bis +1 gebracht. Die Balken rechts zeigen genau diese Werte, daneben steht die verständliche Einheit.</li>
+  <li><b>Die Lampen der Nachbarn</b> sind zwei Zahlen (Rot- und Blauanteil). Was sie bedeuten, weiß am Anfang niemand.</li>
+  <li>Für das Netz werden alle Werte – auch die Lampen – auf ungefähr −1 bis +1 gebracht. Die Balken rechts zeigen genau diese Werte, daneben steht die verständliche Einheit.</li>
 </ul>
 <p><a href="tun.html">Weiter: Was kann ein Auto tun? →</a></p>
 <!-- FOOTER -->
 </div>
 <script src="data/site-data.js?v={{VERSION}}"></script>
+<script src="js/sim-config.js?v={{VERSION}}"></script>
 <script src="js/sim.js?v={{VERSION}}"></script>
 <script src="js/crossing.js?v={{VERSION}}"></script>
 <script src="js/pages.js?v={{VERSION}}"></script>

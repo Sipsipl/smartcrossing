@@ -278,3 +278,313 @@ demand 0.05 / 0.15 every 50 iters (`eval.jsonl`). All with signal on, gamma 0.99
 - Driving side: a consistent convention per seed emerges with or without signal; seed 0 runs
   (sig_s0, nosig_s0, ppo9/13/17 lineage, coop_a05) drive on the left, seed 1 runs (sig_s1,
   nosig_s1) on the right.
+
+## Wide crossing, grip limit, reverse gear, new observation (runs wide_*)
+Sim changes (all mirrored in `viewer/sim.js`, parity cases added: narrow geometry, strong grip,
+reverse-heavy trajectory, grip/impact/reverse edge cases):
+- **Geometry** default W = 7 (14 m roads, two cars side by side per direction), Rc = 9, L = 50.
+  The old crossing is `SimConfig(**sim.NARROW)` (W 3.5, Rc 6, a_lat_max 0, v_reverse 0).
+  Spawns: uniform over the whole width (both halves), as before.
+- **Tyre grip**: actual curvature clipped to min(kappa_max, a_lat_max / v^2) after the steering-
+  rate limit, a_lat_max = 4 m/s^2 (~0.4 g). Old physics allowed r = 5 m at 14 m/s (39 m/s^2).
+  Turn feasibility: tightest baseline arc (right turn from the right lane, r = 10.75 m) at
+  6.6 m/s, left turn (r = 17.75 m) at 8.4 m/s; at 14 m/s r_min = 49 m.
+- **Reverse gear** (owner decision): speed in [-v_reverse, v_max], v_reverse = 2 m/s. Pedal < 0
+  brakes a forward car (brake_max) and, once stopped, accelerates backwards (acc_max); pedal > 0
+  the mirror image; speed never crosses 0 within a step. Heading uses the signed speed. Backing
+  out of an arm = wrong exit. Baselines never reverse. (`speed_control` interface: no reverse.)
+- **Crash / off-road cost = base + factor x impact speed**: r_crash = r_offroad = -1.5,
+  -0.1 per m/s (car-car: |relative velocity| of the pair, max over partners; off-road: own
+  speed); each car pays its own term (no blame). Range -1.5 (touch) ... -2.9 (14 m/s) ... -4.3
+  (head-on 2 x 14 m/s); order exit +1 > waiting (r_time 0.1/s) > timeout -1 > crash kept.
+  No standing-still / entrance-blocking relapse seen (timeouts 0 in all evals; with r_time 0.1/s a
+  car standing 60 s pays -7).
+- **Observation** (OBS_DIM 17 -> 19, neighbour block 6+2 -> 8+2, obs_dim 48 -> 59): own position
+  in fixed 10 m units (was / L then x5: same values for L = 50), exit-gate vector in 25 m units
+  (was / L x2: same for L = 50), NEW exit-mouth vector (centre of the target arm's mouth, 25 m
+  units), NEW own grip-limited max curvature / kappa_max; per neighbour NEW curvature / kappa_max
+  and actual acceleration / brake_max (brake lights; physically visible). Old checkpoints load
+  through `export_viewer.adapt_inputs` (feature-name remap, rescaled inputs folded into in_scale,
+  new inputs weight 0): ppo17 ckpt_5250 reproduces its bench exactly (28.56/min, 0.883 @0.15).
+- `PolicyDriver.load` / viewer physics now also apply the checkpoint's L, W, Rc, a_lat_max,
+  v_reverse (old checkpoints: the narrow values), so every policy runs on the crossing it learned.
+- New analysis (`analyze.py`): `--breakdown` (solo car = 1 slot per env, and demands; outcome per
+  manoeuvre), wobble (straight arm segments: mean |yaw rate|, curvature sign changes / s, heading
+  std, |lateral speed|; split approach / leave), lane histograms, reverse usage; baselines too.
+
+### Failure breakdown "before" (ppo17 ckpt_5250 on the narrow crossing, 16 envs x 120 s, % of finished cars)
+| condition | n | exit ok | crash | offroad | timeout+wrong | R exit/off | S exit/off | L exit/off | thr/min |
+|---|---|---|---|---|---|---|---|---|---|
+| solo | 256 | 100.0 | 0.0 | 0.0 | 0.0 | 100.0/0.0 | 100.0/0.0 | 100.0/0.0 | 8.0 |
+| d0.02 | 158 | 97.5 | 2.5 | 0.0 | 0.0 | 95.2/0.0 | 97.9/0.0 | 100.0/0.0 | 4.81 |
+| d0.05 | 343 | 97.1 | 2.9 | 0.0 | 0.0 | 95.0/0.0 | 96.3/0.0 | 100.0/0.0 | 10.41 |
+| d0.15 | 1035 | 88.3 | 11.4 | 0.3 | 0.0 | 85.0/0.3 | 85.2/0.6 | 95.4/0.0 | 28.56 |
+| d0.3 | 2024 | 71.3 | 27.7 | 0.9 | 0.0 | 62.2/0.9 | 62.4/0.9 | 90.0/1.1 | 45.12 |
+
+A solo ppo17 car never fails; essentially all failures are car-car crashes (offroad <= 1%).
+Light and reservation: 100% exit at every condition (light: 1.1% timeouts at 0.3).
+
+### Baselines on the wide crossing (cli bench, 16 envs x 120 s, seed 1000)
+Two lanes per direction, right-hand traffic. Lessons from making them crash-free: with uniform
+spawns across both halves, a rule-based car spawned in the oncoming half has to cross the
+leaving traffic (gap acceptance / mutual stopping produced head-on crashes or deadlocks in every
+variant tried). Final design: baselines set `cfg.spawn_right` (lane-disciplined arrivals; same
+arrival times / manoeuvres / random draws, only the lateral offset maps to the right half);
+light: right lane for right turns, left lane for left turns, straight = nearest lane, merging
+with a heading-target law at <= 9 m/s, per-lane stop-line queues; reservation: every car keeps
+the lane nearest its spawn offset (turns from either lane, the manager resolves conflicts),
+reservation only with lateral error < 1 m, executes the plan capped by the path speed limit.
+
+| demand | arrivals/min | light thr/min (delay s) | reservation thr/min (delay s) |
+|---|---|---|---|
+| 0.05 | 11.3 | 10.0 (6.6) | 10.6 (1.6) |
+| 0.10 | 23.2 | 18.5 (12.3) | 21.5 (1.8) |
+| 0.15 | 34.3 | 23.0 (16.8) | 31.6 (2.0) |
+| 0.20 | 45.6 | 24.3 (19.7) | 41.5 (2.2) |
+| 0.30 | 68.6 | 25.7 (21.5) | 60.9 (3.0) |
+| 0.50 | 116.1 | 26.1 (23.1) | 81.1 (4.4) |
+
+All with 0 crashes, 0 offroad, 0 timeouts, exit_ok 1.00. Narrow crossing @0.15 (regression
+check): light 19.6/min, reservation 31.3/min, 0 crashes. The wide road lifts the light's
+saturation from ~21 to ~26/min and reservation's from 53 to 61/min @0.3 (81/min @0.5).
+
+### PPO on the wide crossing (wide_s0, wide_s1 -> wide_s0r / wide_s1r -> wide_s1ft)
+- Recipe = sig_s0 (dense traffic from the start: ceiling 0.15, demand_lo 0.15, safe_bad 0.05;
+  lr 1e-3 / critic 2e-3, logstd_init -1.6, gamma 0.995, r_progress 0.02 route-aware, r_time 0.1,
+  r_wrong_exit -2), n_slots 24, 1 worker x 64 envs, signal on, from scratch (obs layout changed).
+- wide_s0 / wide_s1 (seed 0 / 1, no reverse gear yet) ran to it ~700; the reverse gear was
+  added then and both were **warm-started** from their state.npz with v_reverse = 2 (same obs
+  layout, physics change only) as wide_s0r / wide_s1r. wide_s1r was switched at it 1067 to the
+  fine-tuning phase (lr 3e-4 / critic 1e-3, 2 workers x 64 envs) = **wide_s1ft**; wide_s0r kept
+  lr 1e-3. Stopped at it 1636 (s1ft) / 1936 (s0r) for the time budget (~1.3 h of training).
+- Learning speed: from scratch to @0.05 exit_ok 0.85 in ~300 it (sig_s0 on the narrow crossing
+  was at ~0.9 there); @0.15 plateau ~0.70-0.75 at lr 1e-3 (s0r until it 1900), fine-tuning
+  lifted s1 to 0.81-0.83 within 300 it (still rising slowly when stopped).
+- Ablation **wide_noman_s0** (`--zero-inputs 5,6,7`: manoeuvre one-hot hidden from actor and
+  critic, otherwise = wide_s0, no reverse, killed at it 330): at equal iterations it trails wide_s0
+  by 5-10 points (it 300: @0.05 0.78 vs 0.86, @0.15 0.59 vs 0.68). The goal vectors alone
+  are enough in principle, but the one-hot speeds learning -> kept.
+
+**Best: wide_s1ft ckpt_1400** (`results/wide_s1ft_ckpt1400.npz` / `.json`), cli-bench settings
+16 envs x 120 s (throughput/min, exit_ok, crash+offroad cars per 1000):
+
+| demand | light (wide) | reservation (wide) | **wide_s1ft 1400** | wide_s0r 1400 | ppo17 5250 (narrow, old physics) |
+|---|---|---|---|---|---|
+| 0.05 | 10.0 / 1.00 / 0 | 10.6 / 1.00 / 0 | 10.4 / 0.980 / 21 | 10.3 / 0.968 / 32 | 10.4 / 0.971 / 29 |
+| 0.15 | 23.0 / 1.00 / 0 | 31.6 / 1.00 / 0 | 26.4 / 0.825 / 175 | 24.8 / 0.779 / 221 | 28.6 / 0.883 / 117 |
+| 0.30 | 25.7 / 1.00 / 0 | 60.9 / 1.00 / 0 | 40.0 / 0.641 / 359 | 35.8 / 0.571 / 429 | 45.1 / 0.713 / 286 |
+| 0.50 | 26.1 / 1.00 / 0 | 81.1 / 1.00 / 0 | 47.5 / 0.480 / 520 | - | - |
+
+Failure breakdown wide_s1ft ckpt_1400 (% of finished cars):
+
+| condition | n | exit ok | crash | offroad | timeout+wrong | R exit/off | S exit/off | L exit/off | thr/min |
+|---|---|---|---|---|---|---|---|---|---|
+| solo | 224 | 100.0 | 0.0 | 0.0 | 0.0 | 100.0/0.0 | 100.0/0.0 | 100.0/0.0 | 7.0 |
+| d0.02 | 158 | 100.0 | 0.0 | 0.0 | 0.0 | 100.0/0.0 | 100.0/0.0 | 100.0/0.0 | 4.94 |
+| d0.05 | 341 | 98.0 | 1.8 | 0.3 | 0.0 | 98.3/0.8 | 97.2/0.0 | 98.3/0.0 | 10.44 |
+| d0.15 | 1024 | 82.5 | 17.2 | 0.3 | 0.0 | 92.0/0.3 | 81.0/0.3 | 73.8/0.3 | 26.41 |
+| d0.3 | 1996 | 64.1 | 35.4 | 0.5 | 0.0 | 81.1/0.1 | 57.6/0.6 | 53.8/0.9 | 39.97 |
+| d0.5 | 3166 | 48.0 | 51.1 | 0.9 | 0.0 | 70.2/0.4 | 41.9/1.0 | 33.4/1.2 | 47.53 |
+
+- **Solo gate passed** (already at it 400 of wide_s0): a single car on the wide crossing with
+  grip limit reaches its exit in 100% of the cases for all three manoeuvres, offroad 0. Offroad in
+  traffic <= 1% -> failures are car-car crashes; left turners and straight cars suffer most.
+- vs baselines: beats the light on throughput from 0.15 up (26.4 vs 23.0 @0.15, 40 vs 25.7 @0.3)
+  and is better than ppo17 at low demand (crash+offroad 21/1000 @0.05 vs 29), but crashes more
+  than ppo17 at 0.15+ (shorter training: ~1.6k vs 5.2k iterations; the wide box has more conflict
+  points and more speed variety). Reservation remains far ahead (61/min @0.3, 0 crashes).
+- **Reverse gear: never used** by the deterministic policies (0 of ~1100 cars at 0.15 in both
+  seeds, frac car-steps 0.0). Cars do brake more than on the narrow road (brake_frac 0.13-0.14 vs
+  0.01-0.04 before; the grip limit forces slowing for turns).
+- **Wobble** (straight arm segments, 16 envs @0.15; "leave" = after the box, no spawn merging):
+
+  | policy | mean abs yaw rate rad/s | kappa sign changes /s | heading std deg | abs lateral speed m/s |
+  |---|---|---|---|---|
+  | ppo17 5250 (narrow, no grip) all / leave | 0.139 / 0.127 | 1.01 / 1.03 | 4.9 / 3.2 | 0.77 / 0.59 |
+  | sig_s0 800 (narrow, no grip) all / leave | 0.116 / 0.108 | 0.94 / 0.82 | 4.5 / 3.1 | 0.64 / 0.55 |
+  | wide_s1ft 1400 (grip) all / leave | 0.194 / 0.190 | 0.83 / 0.80 | 9.4 / 6.8 | 1.29 / 1.06 |
+  | wide_s0r 1400 (grip) all / leave | 0.168 / 0.188 | 0.76 / 0.75 | 9.3 / 6.8 | 1.24 / 1.08 |
+  | reservation (wide) all / leave | 0.023 / 0.006 | 0.21 / 0.00 | 2.1 / 0.3 | 0.15 / 0.03 |
+
+  The grip limit lowers the weaving frequency (curvature sign changes 1.0 -> 0.8 /s) and caps the
+  yaw rate at speed (<= a_lat_max / v = 0.29 rad/s at 14 m/s), but it does **not** remove the
+  weaving: on the 14 m road the cars swing in wider, slower arcs (heading std 6.8 deg vs 3.2,
+  lateral speed ~1 m/s). With no cost for it (outcome-only reward) and room on the road, the
+  policy has no reason to drive straight; the only physics lever left would be stronger limits
+  (kappa_rate, a_lat_max) or a cost that weaving actually incurs physically (e.g. energy /
+  tyre-scrub speed loss; not modelled). Visible in `runs/wide/render_s1ft_1400/sheet.png` (cars 10-20 deg off
+  the arm axis).
+- **Driving side: right-hand traffic in both seeds** (s1ft: approach +1.69 m, 83% right of
+  centre; leave +2.65 m, 91%; s0r: +1.99 m / 86%, +2.86 m / 94%; all four arms alike). On the
+  narrow road seed 0 drove on the left; on the wide road both seeds chose the right (2 seeds only;
+  the conventions are still a symmetry breaking until >= 20 seeds say otherwise, roadmap D).
+- **Lanes: no.** The lateral-offset histograms on the arms are unimodal (approach peak at +2.25 m,
+  std 2.2 m; leave peak +2.75..3.75 m, std 1.4-1.7 m); Sarle's bimodality 0.43-0.48 (< 0.555
+  = uniform). Cars use the right half as one wide "lane", the leaving cars hug the outer side.
+  (`analyze.py --hist` prints the histograms per arm.)
+- **Signal**: still not used by receivers. @0.15 16 envs: s1ft normal 0.825 / zeroed 0.826 /
+  shuffled 0.811 exit_ok; s0r 0.779 / 0.772 / 0.785. (An 8-env run of s0r ckpt_1250 showed
+  0.751 -> 0.704 when zeroed; not reproduced at ckpt_1400 with 16 envs -> noise.) Own lamp
+  encodes manoeuvre (MI 0.35 bit s1ft, 0.12 s0r) and region (0.49 / 0.16 bit), not braking
+  (0.02 bit).
+- Not done (time): TTC / closing-speed neighbour features or a recurrent policy (open problem
+  "cars never brake/yield" - they now do brake 13% of the time, but crashes at 0.15 are still 17%).
+
+## Summary / open problems (after the wide crossing)
+- Physics: grip limit + reverse gear + wide geometry in place, parity-tested; baselines crash-free
+  on both geometries (wide: lane-disciplined arrivals via `spawn_right`).
+- Learning agents: solo driving is perfect; all residual failures are crashes in traffic, rising
+  steeply with demand (1.8% @0.05, 17% @0.15, 35% @0.3). Throughput beats the light from 0.15 up.
+- Wobble persists as a slow weave (physics alone does not remove it on a wide road).
+- No lanes, no signal use, reverse never used; right-hand traffic in both seeds.
+- Next (roadmap B): set/attention encoder over all neighbours, optional memory; more seeds.
+  (Longer fine-tuning was tried afterwards, see below: plateau at ~17% @0.15; best now
+  `results/wide_s1ft2_ckpt2650`.)
+
+## Fine-tune continuation on the wide crossing (wide_s1ft2, wide_s0ft)
+- Owner cap for this round: ~50 min of training per line (development phase; long runs only
+  before merges), then evaluate. No code or sim changes.
+- **wide_s1ft2**: warm start `runs/wide_s1ft/state.npz` (it 1636), same recipe as wide_s1ft
+  (lr 3e-4 / critic 1e-3, lam 0.95, 2 workers x 64 envs, seed 1, ceiling 0.15, demand_lo 0.15);
+  it 1637 -> 2723 (stopped). **wide_s0ft**: warm start `runs/wide_s0r/state.npz` (it 1936),
+  switched to the same fine-tuning lr (was 1e-3), 1 worker x 64 envs, seed 0; it 1937 -> 3507.
+  Its curriculum ceiling rose 0.15 -> 0.1725 at it 2306 (s1 never raised).
+- Training stats (mean of first / last 100 it): s1ft2 exit 0.876 -> 0.889, crash+off 0.124 ->
+  0.111; s0ft 0.835 -> 0.841, 0.165 -> 0.159. Both lines are **on a plateau**.
+- Every checkpoint (every 50 it) robust-benched @0.15 (cli bench 32 envs x 120 s, seed 1000):
+  s1ft2 1650-2700: 165-199 crash+offroad/1000 (mean ~178; ckpt_1400 of wide_s1ft: 185);
+  s0ft: 256 at it 1950, then 183-212 from it 2300 on. Finalists re-benched at 0.05 / 0.3 and at
+  0.15 with seed 2000 (a different traffic set; checkpoint selection on seed 1000 is biased).
+
+Robust bench (32 envs x 120 s; throughput/min, exit_ok, crash+offroad cars per 1000):
+
+| demand | light | reservation | wide_s1ft 1400 | **wide_s1ft2 2650** | wide_s1ft2 2500 | wide_s0ft 2850 | ppo17 5250 (narrow) |
+|---|---|---|---|---|---|---|---|
+| 0.05 | 9.8 / 1.00 / 0 | 10.4 / 1.00 / 0 | 10.0 / 0.951 / 49 | 10.0 / 0.949 / 51 | 10.0 / 0.960 / 40 | 9.9 / 0.951 / 49 | 10.2 / 0.962 / 38 |
+| 0.15 | 23.0 / 1.00 / 0 | 32.7 / 1.00 / 0 | 27.0 / 0.815 / 185 | 27.5 / 0.832 / 168 | 27.4 / 0.833 / 167 | 26.9 / 0.817 / 183 | 27.8 / 0.833 / 167 |
+| 0.15 seed 2000 | - | - | 26.4 / 0.807 / 193 | 27.1 / 0.827 / 173 | 27.3 / 0.836 / 164 | 26.4 / 0.809 / 191 | 28.4 / 0.859 / 141 |
+| 0.30 | 25.4 / 1.00 / 1 | 62.4 / 1.00 / 0 | 41.0 / 0.636 / 364 | 42.4 / 0.665 / 335 | 41.3 / 0.643 / 357 | 38.6 / 0.601 / 399 | 46.0 / 0.71 / 290 |
+
+(The 16-env numbers quoted for ckpt_1400 above, 21 / 175 / 359, are a luckier traffic set; at
+32 envs it is 49 / 185 / 364. The 0.05 rate is dominated by few events: ~10 crashed cars.)
+- Result: ~1.1k more fine-tuning iterations bought ~15-20 / 1000 at 0.15 and ~30 / 1000 at 0.3,
+  nothing at 0.05. On seed 1000 the wide policy now **matches ppo17 at 0.15 (168 vs 167)**, but
+  on the second traffic set ppo17 is still better (141 vs 173), so "matched" is within noise at
+  best. Throughput stays above the light from 0.15 up (27.5 vs 23.0; 42.4 vs 25.4 @0.3).
+  2500 vs 2650 are equivalent (mean over the four cells 182 both); **2650 chosen** for fewer
+  off-road cars (8-10 vs 28-32 @0.15) and the best 0.3 value.
+- Seed 0 trails seed 1 by ~15-35 / 1000 at every demand despite more iterations (it had the
+  higher lr until it 1936).
+
+Failure breakdown wide_s1ft2 ckpt_2650 (`analyze --breakdown`, 16 envs x 120 s, % of finished cars):
+
+| condition | n | exit ok | crash | offroad | timeout+wrong | R exit/off | S exit/off | L exit/off | thr/min |
+|---|---|---|---|---|---|---|---|---|---|
+| solo | 224 | 100.0 | 0.0 | 0.0 | 0.0 | 100.0/0.0 | 100.0/0.0 | 100.0/0.0 | 7.0 |
+| d0.02 | 158 | 98.7 | 1.3 | 0.0 | 0.0 | 100.0/0.0 | 97.9/0.0 | 97.9/0.0 | 4.88 |
+| d0.05 | 342 | 96.5 | 3.5 | 0.0 | 0.0 | 100.0/0.0 | 95.3/0.0 | 93.9/0.0 | 10.31 |
+| d0.15 | 1016 | 86.2 | 13.4 | 0.4 | 0.0 | 95.7/0.0 | 81.7/0.9 | 80.9/0.3 | 27.38 |
+| d0.3 | 1996 | 65.6 | 33.8 | 0.6 | 0.0 | 86.6/0.3 | 60.8/0.4 | 49.5/1.1 | 40.91 |
+| d0.5 | 3033 | 50.4 | 48.3 | 1.2 | 0.0 | 77.1/0.6 | 42.8/1.2 | 32.7/1.9 | 47.81 |
+
+Solo gate still 100%; offroad <= 1.2%; failures are car-car crashes of straight and left cars
+(right turners 96% ok @0.15). (This 16-env set gives 138 / 1000 @0.15; the 48-env run below
+201 - scenario variance is large, use the 32-env bench for comparisons.)
+
+Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
+- **Wobble** (straight arm segments; all / leave):
+
+  | policy | mean abs yaw rate rad/s | kappa sign changes /s | heading std deg | abs lateral speed m/s |
+  |---|---|---|---|---|
+  | wide_s1ft 1400 | 0.194 / 0.190 | 0.83 / 0.80 | 9.4 / 6.8 | 1.29 / 1.06 |
+  | wide_s1ft2 2650 | 0.228 / 0.223 | 1.02 / 1.13 | 9.7 / 6.7 | 1.31 / 1.02 |
+  | wide_s0ft 2850 | 0.197 / 0.208 | 0.93 / 0.91 | 9.0 / 7.0 | 1.17 / 1.07 |
+
+  Fine-tuning did not reduce the weave; s1 even steers a bit more often (sign changes 0.8 ->
+  1.1 /s on the leave segments) at the same amplitude (heading std ~6.7 deg). As expected with
+  an outcome-only reward.
+- **Braking / reverse**: brake_frac 0.178 (s1) / 0.174 (s0), up from 0.13-0.14. Reverse gear:
+  3 of 1090 cars in s1ft2 2650 reverse briefly (~1.7 s, 0.06% of car-steps); s0ft never.
+- **Driving side**: right-hand traffic in both seeds, all four arms: s1 approach +2.08 m (90%
+  right of centre), leave +3.24 m (94%); s0 approach +1.50 m (82%), leave +3.40 m (96%).
+- **Lanes: no.** Approach histograms unimodal (s1 peak +2.25 m, std 2.1 m, bimodality 0.49; s0
+  +1.25 m, 0.41). The s1 leave histogram (peak +4.0..+5.0 m, std 1.6 m) has a shoulder at
+  +2..+3 m and a bimodality coefficient of 0.57 (just above 0.555, driven by skew; one mode);
+  s0 leave 0.50. Not two lanes.
+- **Lamps**: no reliable receiver use. 16 envs showed normal 138 / zeroed 162 / shuffled 192
+  per 1000 for 2650, but with 48 envs: 2650 201 / 195 / 204, 2500 187 / 198 / 205, 2700
+  191 / 193 / 209 -> zeroing does nothing; shuffling costs ~+10-18 / 1000 in all three
+  (a hint at most; a shuffled lamp is out-of-distribution input). s0ft: 192 / 183 / 173 (16
+  envs). Own lamp: MI manoeuvre 0.25 bit, region 0.38, braking 0.02 (s1); 0.14 / 0.13 / 0.01 (s0).
+- Saved: `results/wide_s1ft2_ckpt2650.npz/.json` (best, seed 1), `results/wide_s0ft_ckpt2850.npz/.json`
+  (best seed 0 by 32-env bench @0.15, for the driving-side comparison). The .json is
+  `export_viewer.load_policy` output (same format as `wide_s1ft_ckpt1400.json`). Tests: 46 passed.
+- Conclusion: the K-nearest MLP with this reward has plateaued at ~17% crashed cars @0.15 on the
+  wide crossing (ppo17 needed 5.2k it for the same level on the narrow one). Further fine-tuning
+  is unlikely to reach < 50 / 1000; next steps remain roadmap B (set encoder, memory) or
+  TTC/closing-speed features.
+
+## Refactor: one frontend, compat module, generated JS constants (no training, behaviour unchanged)
+- Removed the standalone viewer (`viewer/app.js`, `index.html`, `policies.js`, `dist/`),
+  `results/smartcrossing_viewer.html` and `legacy/`. `sim.js` now lives in `site/src/js/`; the parity
+  test is `tests/test_sim_js_parity.py` (+ `tests/sim_js_parity_runner.js`).
+- `export_viewer.py` split: checkpoint adaptation (feature-key remap, legacy interface/physics,
+  `physics_of`, `load_adapted_policy`) -> `smartcrossing/policy_compat.py`; German observation labels ->
+  `site/obs_labels.py`; `round_policy` -> `site/build.py`.
+- sim.js takes every number from `js/sim-config.js`, generated by `site/build.py` from
+  `sim.js_constants()` (checked by `test_generated_config`). Spawn literals got names
+  (`SPAWN_BACK`, `SPAWN_CURB_GAP`, `SPAWN_RIGHT_MIN`).
+- Dead experiment knobs removed: ES `--r-geo` / `--r-queue` (use `--cfg`), PPO `--alpha` (coop runs) and
+  `--queue-coef` (never used); `speed_tau` is the constant `sim.SPEED_TAU`. Kept for site checkpoints:
+  `neighbour_vis` (ppo11/14/15) and `speed_control` (ppo16).
+- Check: cli bench (8 envs x 60 s, seed 1000, @0.15) and final-state hashes bit-identical before/after for
+  wide_s1ft2 2650, ppo17 5250, ppo16, ppo15, es5, wide_s0ft 2850, light, reservation; full site re-bench
+  (35 policies x demands, replays) identical. Tests 46 -> 47 passed.
+
+## Higher demand: spawn capacity (no training)
+- Owner: the start page slider should go to ~1 arrival/s/arm now that the road is 14 m wide.
+- **Measured bottleneck (old spawn logic)**, 16 envs x 120 s, seed 1000 (spawned vs arrived cars/min, all 4 arms):
+
+  | demand | arrivals/min | reservation spawned / thr | light spawned / thr | wide_s1ft2 2650 spawned / thr |
+  |---|---|---|---|---|
+  | 0.3 | 68.6 | 67.0 / 60.9 | 34.8 / 25.7 | 67.0 / 40.9 |
+  | 0.5 | 116.1 | 90.3 / 81.1 | 35.2 / 26.1 | 101.5 / 47.8 |
+  | 0.8 | 190.8 | 94.2 / 84.4 | 35.5 / 26.5 | 115.2 / 50.1 |
+  | 1.0 | 239.5 | 94.1 / 84.6 | 35.8 / 26.6 | 116.0 / 50.4 |
+
+  Pure entry capacity (all cars full throttle straight ahead, no driver limit): 0.69 /s/arm full
+  width, 0.85 right half (165 / 204 cars/min). Cause: one car per arm and step at the lateral
+  offset drawn at arrival; the queue head waits until exactly that spot is clear, and outside its
+  own corridor every car ahead counts as standing (up to 7 + 1.5 x 8 = 19 m clearance), so a car
+  slightly beside the previous one waits ~2 s. `n_slots` = 32 never binds (max mean 22 cars,
+  never all slots full; 64 slots gave bit-identical results).
+- **Change** (`Sim._arrivals`, mirrored in `sim.js`): each arrival draws u in [0,1) (replaces the
+  lateral draw; same number of draws, CRN unchanged). The queue head enters at its own spot (u
+  across the spawn range, on a 0.2 m grid `SPAWN_LAT_STEP`) if clear, else at the
+  floor(u x n_clear)-th clear grid position (uniform among the free ones, both halves: no side
+  preference). Up to `SPAWN_MAX_PER_STEP` = 3 cars per arm and step (side by side if the clearance
+  permits); cars spawned this step count with their real velocity in the closing-speed check.
+  Clearance rules unchanged; baselines keep `spawn_right` (same rule within the right half).
+  Candidate check is restricted to cars within reach (clearance + headway x max closing speed),
+  so the cost stays small: 64 envs, brain: arrivals 2.0 ms of 16 ms/step at 0.15, 10 of 27 ms at 1.0.
+  Pure entry capacity now 1.7 /s/arm (full width), 1.2 /s/arm (right half).
+- **After** (same setup as the table above):
+
+  | demand | arrivals/min | reservation spawned / thr | light spawned / thr | wide_s1ft2 2650 spawned / thr / crash per 1000 |
+  |---|---|---|---|---|
+  | 0.3 | 68.6 | 68.2 / 61.9 | 37.8 / 28.2 | 68.5 / 39.0 / 386 |
+  | 0.5 | 116.1 | 96.8 / 85.8 | 38.9 / 29.1 | 115.6 / 49.1 / 546 |
+  | 0.8 | 190.8 | 101.0 / 90.3 | 40.0 / 29.7 | 185.8 / 53.2 / 697 |
+  | 1.0 | 239.5 | 102.8 / 91.7 | 40.3 / 30.2 | 211.6 / 55.8 / 721 |
+
+  The brain now gets (almost) the full inflow; its throughput saturates at ~55/min because the
+  extra cars crash (72% at 1.0). Reservation and light are limited by their own intersection
+  capacity now (their queues reach back to the entry), not by the spawner. Light had one crash
+  pair at 0.3 (a lane merge in a queue; the old logic had 1 / 1000 at 0.3 in the robust bench too).
+- **Brain degradation (trained on the old logic, not retrained per owner)**: robust bench (32 envs x
+  120 s), crash+offroad per 1000, old -> new: 0.05: 51 -> 57; 0.15: 168 -> 200; 0.3: 335 -> 384.
+  At 0.15 over four traffic sets (seeds 1000-4000): old 168/173/198/171 (mean 178), new
+  200/181/194/196 (mean 193): **~+15 / 1000 (~9%)**, partly noise; no breakdown (throughput 26.5
+  vs 27.5 /min @0.15). A first variant (always uniform among the clear spots, no own spot) was
+  worse at 0.15 (207). A fine-tune on the new spawn logic would likely recover it (not done: owner).
+- Site: demand slider 0 ... 1.0 /s/arm (240 cars/min); bench demands extended by 0.5 and 1.0.

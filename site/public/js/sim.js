@@ -1,50 +1,50 @@
 /* Smart Crossing: JS port of smartcrossing/sim.py (one environment, B = 1) and of
  * the MLP forward pass in smartcrossing/policy.py.
  *
- * Keep this file in lock-step with the Python code: tests/test_viewer_parity.py
+ * Keep this file in lock-step with the Python code: tests/test_sim_js_parity.py
  * runs observe()/step() on states exported from Python and compares the results.
  * Randomness (arrivals, signal noise) uses a seeded JS PRNG; it is not meant to
  * reproduce numpy's streams.
  *
+ * All numbers (SimConfig defaults, geometry and observation constants) come from
+ * js/sim-config.js (globalThis.SC_SIM_CONFIG), which site/build.py generates from
+ * sim.py (sim.js_constants); load it first.
+ *
  * Works as a browser script (global `SmartCrossing`) and as a CommonJS module.
  */
 (function (root, factory) {
-  const api = factory();
+  const api = factory(globalThis.SC_SIM_CONFIG);
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.SmartCrossing = api;
-})(typeof self !== "undefined" ? self : this, function () {
+})(typeof self !== "undefined" ? self : this, function (C) {
   "use strict";
+  if (!C) throw new Error("SC_SIM_CONFIG missing: load js/sim-config.js before sim.js");
 
-  const RIGHT = 1, STRAIGHT = 2, LEFT = 3;
-  const DISC_OFFSETS = [-1.4, 0.0, 1.4];
-  const DISC_R = 0.9;
-  const SPAWN_LAT_MARGIN = 0.8;
-  const N_RAYS = 5;
-  const RAY_ANGLES = [-60.0, -30.0, 0.0, 30.0, 60.0].map((d) => d * (Math.PI / 180));
-  const RAY_RANGE = 20.0; // rays report the exact distance to the road edge, capped here
-  const K_NEIGHBOURS = 4;
-  const NEIGHBOUR_RANGE = 30.0;
-  const OBS_DIM = 4 + 1 + 3 + 2 + N_RAYS + 1; // ... rays, kappa / kappa_max
-  // why a slot was cleared in the last step (sim.doneKind)
-  const DONE = { none: 0, exit: 1, wrong_exit: 2, crash: 3, offroad: 4, timeout: 5 };
-  const ARM_U = [[0.0, -1.0], [1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]]; // outward unit vector of arm k
+  const { RIGHT, STRAIGHT, LEFT, DISC_OFFSETS, DISC_R, SPAWN_LAT_MARGIN, SPAWN_BACK, SPAWN_CURB_GAP, SPAWN_RIGHT_MIN, SPAWN_LAT_STEP, SPAWN_MAX_PER_STEP } = C;
+  const { SPEED_TAU, N_RAYS, RAY_ANGLES, RAY_RANGE } = C;
+  const { K_NEIGHBOURS, NEIGHBOUR_RANGE, POS_SCALE, GOAL_SCALE, NB_FEATURES, LANE_WIDTH, OBS_DIM, OBS_RAYS, ARM_U } = C;
+  // why a slot was cleared in the last step (sim.doneKind): { none: 0, exit: 1, ... }
+  const DONE = Object.fromEntries(C.DONE_NAMES.map((name, i) => [name, i]));
 
-  // Mirrors the SimConfig dataclass defaults (checked by the parity test).
+  /** A fresh copy of the SimConfig dataclass defaults. */
   function defaultConfig() {
-    return {
-      L: 50.0, W: 3.5, Rc: 6.0, dt: 0.1,
-      v_max: 14.0, acc_max: 3.0, brake_max: 7.0, kappa_max: 0.2, kappa_rate: 0.4,
-      spawn_speed: 8.0, spawn_clearance: 7.0, spawn_headway: 1.5,
-      max_age: 60.0, n_slots: 32, n_signal: 2, demand: 0.15, demand_range: null,
-      turn_probs: [1 / 3, 1 / 3, 1 / 3],
-      signal_noise: 0.0, signal_enabled: true, neighbour_vis: 30.0,
-      speed_control: false, speed_tau: 0.5,
-      r_exit: 1.0, r_wrong_exit: -1.0, r_crash: -2.0, r_offroad: -2.0,
-      r_timeout: -1.0, r_progress: 0.01, r_time: 0.0, r_queue: 0.0,
-    };
+    return JSON.parse(JSON.stringify(C.defaults));
   }
 
-  const obsDim = (cfg) => OBS_DIM + K_NEIGHBOURS * (6 + cfg.n_signal);
+  const obsDim = (cfg) => OBS_DIM + K_NEIGHBOURS * (NB_FEATURES + cfg.n_signal);
+
+  /** Largest curvature the tyres allow at speed v (sim.grip_kappa). */
+  function gripKappa(cfg, v) {
+    if (!(cfg.a_lat_max > 0)) return cfg.kappa_max;
+    return Math.min(cfg.kappa_max, cfg.a_lat_max / Math.max(v * v, 1e-9));
+  }
+
+  /** Lanes per direction (baselines / delay metric only) and lane-centre offsets (sim.lane_offsets). */
+  function laneOffsets(cfg) {
+    const n = Math.max(1, Math.round(cfg.W / LANE_WIDTH));
+    const lw = cfg.W / n;
+    return [cfg.W - lw / 2, lw / 2];
+  }
   const actDim = (cfg) => 2 + cfg.n_signal;
 
   // ------------------------------------------------------------------ helpers
@@ -116,13 +116,13 @@
   }
 
   function freeFlowTime(cfg, man) {
+    if (man === STRAIGHT) return (2 * cfg.L - SPAWN_BACK) / cfg.v_max;
     const c = cfg.W + cfg.Rc;
-    const armLen = 2 * (cfg.L - c) - 2.5;
-    let len;
-    if (man === STRAIGHT) len = 2 * cfg.L - 2.5;
-    else if (man === RIGHT) len = armLen + (Math.PI / 2) * (c - cfg.W / 2);
-    else len = armLen + (Math.PI / 2) * (c + cfg.W / 2);
-    return len / cfg.v_max;
+    const armLen = 2 * (cfg.L - c) - SPAWN_BACK;
+    const [offR, offL] = laneOffsets(cfg);
+    const r = man === RIGHT ? c - offR : c + offL;
+    const vArc = cfg.a_lat_max > 0 ? Math.min(cfg.v_max, Math.sqrt(cfg.a_lat_max * r)) : cfg.v_max;
+    return armLen / cfg.v_max + ((Math.PI / 2) * r) / vArc;
   }
 
   /** sfc32 PRNG seeded through splitmix32; returns floats in [0, 1). */
@@ -185,7 +185,8 @@
       this.y = new Float64Array(N);
       this.th = new Float64Array(N);
       this.v = new Float64Array(N);
-      this.kappa = new Float64Array(N); // actual curvature (rate limited)
+      this.kappa = new Float64Array(N); // actual curvature (rate and grip limited)
+      this.acc = new Float64Array(N); // actual acceleration of the last step
       this.sig = new Float64Array(N * S);
       this.arm = new Int32Array(N);
       this.man = new Int32Array(N);
@@ -203,7 +204,7 @@
         const [lo, hi] = this.cfg.demand_range;
         this.demand = lo + (hi - lo) * this.rng();
       }
-      this.queues = [[], [], [], []]; // FIFO of {lat, man, grp} per arm
+      this.queues = [[], [], [], []]; // FIFO of {u, man, grp} per arm (u: lateral draw)
       this.nextUid = 0;
       this.t = 0.0;
       this.events = [];
@@ -225,7 +226,7 @@
     /** Returns a Float64Array of shape (N, obsDim) in row-major order. */
     observe() {
       const cfg = this.cfg, N = this.N, S = cfg.n_signal, L = cfg.L, W = cfg.W;
-      const D = obsDim(cfg), blk = 6 + S;
+      const D = obsDim(cfg), blk = NB_FEATURES + S;
       const obs = new Float64Array(N * D);
       const cand = [];
       for (let i = 0; i < N; i++) {
@@ -235,8 +236,8 @@
         const [c, s] = rot(-this.arm[i]);
         const cx = c * x - s * y, cy = s * x + c * y;
         const cth = th - this.arm[i] * (Math.PI / 2);
-        obs[o] = cx / L;
-        obs[o + 1] = cy / L;
+        obs[o] = cx / POS_SCALE;
+        obs[o + 1] = cy / POS_SCALE;
         obs[o + 2] = Math.cos(cth);
         obs[o + 3] = Math.sin(cth);
         obs[o + 4] = this.v[i] / cfg.v_max;
@@ -244,17 +245,21 @@
         obs[o + 5] = m === RIGHT ? 1 : 0;
         obs[o + 6] = m === STRAIGHT ? 1 : 0;
         obs[o + 7] = m === LEFT ? 1 : 0;
-        const [gx, gy] = this.gateXY(i);
-        const dx = gx - x, dy = gy - y;
+        const ut = ARM_U[this.tgt(i)], c0 = W + cfg.Rc;
+        const dx = L * ut[0] - x, dy = L * ut[1] - y; // to the exit gate centre
+        const mx = c0 * ut[0] - x, my = c0 * ut[1] - y; // to the target arm's mouth centre
         const ct = Math.cos(th), st = Math.sin(th);
-        obs[o + 8] = (ct * dx + st * dy) / L;
-        obs[o + 9] = (-st * dx + ct * dy) / L;
+        obs[o + 8] = (ct * dx + st * dy) / GOAL_SCALE;
+        obs[o + 9] = (-st * dx + ct * dy) / GOAL_SCALE;
+        obs[o + 10] = (ct * mx + st * my) / GOAL_SCALE;
+        obs[o + 11] = (-st * mx + ct * my) / GOAL_SCALE;
         for (let r = 0; r < N_RAYS; r++) {
           const ang = th + RAY_ANGLES[r];
           const ca = Math.cos(ang), sa = Math.sin(ang);
-          obs[o + 10 + r] = rayEdgeDist(x, y, ca, sa, W, cfg.Rc) / RAY_RANGE;
+          obs[o + OBS_RAYS + r] = rayEdgeDist(x, y, ca, sa, W, cfg.Rc) / RAY_RANGE;
         }
-        obs[o + 10 + N_RAYS] = this.kappa[i] / cfg.kappa_max;
+        obs[o + OBS_RAYS + N_RAYS] = this.kappa[i] / cfg.kappa_max;
+        obs[o + OBS_RAYS + N_RAYS + 1] = gripKappa(cfg, this.v[i]) / cfg.kappa_max;
         // neighbours: nearest K alive cars within range
         cand.length = 0;
         for (let j = 0; j < N; j++) {
@@ -274,13 +279,15 @@
           obs[p + 3] = Math.sin(nth);
           obs[p + 4] = this.v[j] / cfg.v_max;
           obs[p + 5] = 1.0;
+          obs[p + 6] = this.kappa[j] / cfg.kappa_max;
+          obs[p + 7] = this.acc[j] / cfg.brake_max;
           for (let q = 0; q < S; q++) {
             let sv = 0.0;
             if (cfg.signal_enabled) {
               sv = this.sig[j * S + q];
               if (cfg.signal_noise > 0) sv += cfg.signal_noise * this.noiseRng.normal();
             }
-            obs[p + 6 + q] = sv;
+            obs[p + NB_FEATURES + q] = sv;
           }
         }
       }
@@ -295,13 +302,24 @@
       for (let n = 0; n < N; n++) {
         const a0 = clip(action[n * A]), a1 = clip(action[n * A + 1]);
         const alive = this.alive[n];
-        const acc = cfg.speed_control
-          ? Math.min(Math.max(((a0 + 1.0) * 0.5 * cfg.v_max - this.v[n]) / cfg.speed_tau, -cfg.brake_max), cfg.acc_max)
-          : (a0 > 0 ? a0 * cfg.acc_max : a0 * cfg.brake_max);
+        const v0 = this.v[n];
+        let v;
+        if (cfg.speed_control) {
+          const acc = Math.min(Math.max(((a0 + 1.0) * 0.5 * cfg.v_max - v0) / SPEED_TAU, -cfg.brake_max), cfg.acc_max);
+          v = Math.min(Math.max(v0 + acc * dt, 0.0), cfg.v_max); // no reverse in this interface
+        } else {
+          // pedal (sim.py): + accelerates forward / brakes a reversing car, - brakes a forward car /
+          // accelerates backwards once stopped; never crosses 0 within one step
+          const acc = a0 > 0 ? a0 * (v0 < 0 ? cfg.brake_max : cfg.acc_max) : a0 * (v0 > 0 ? cfg.brake_max : cfg.acc_max);
+          v = Math.min(Math.max(v0 + acc * dt, -cfg.v_reverse), cfg.v_max);
+          if ((v0 > 0 && v < 0) || (v0 < 0 && v > 0)) v = 0.0;
+        }
         const dk = cfg.kappa_rate * dt;
-        this.kappa[n] = alive ? this.kappa[n] + Math.min(Math.max(a1 * cfg.kappa_max - this.kappa[n], -dk), dk) : 0.0;
+        const kap = this.kappa[n] + Math.min(Math.max(a1 * cfg.kappa_max - this.kappa[n], -dk), dk);
+        const kg = gripKappa(cfg, v); // tyre grip at the new speed (after the steering-rate limit)
+        this.kappa[n] = alive ? Math.min(Math.max(kap, -kg), kg) : 0.0;
         for (let q = 0; q < S; q++) this.sig[n * S + q] = alive ? clip(action[n * A + 2 + q]) : 0.0;
-        const v = Math.min(Math.max(this.v[n] + acc * dt, 0.0), cfg.v_max);
+        this.acc[n] = alive ? (v - this.v[n]) / dt : 0.0;
         const th = this.th[n] + v * this.kappa[n] * dt;
         if (alive) {
           this.x[n] = this.x[n] + v * Math.cos(th) * dt;
@@ -355,22 +373,29 @@
           oy[n * 3 + k] = this.y[n] + st * DISC_OFFSETS[k];
         }
       }
-      const off = new Uint8Array(N), col = new Uint8Array(N);
-      const near2 = (2 * 1.4 + 2 * DISC_R) ** 2, hit2 = (2 * DISC_R) ** 2;
+      const off = new Uint8Array(N), col = new Uint8Array(N), vrel = new Float64Array(N);
+      const near2 = (2 * DISC_OFFSETS[DISC_OFFSETS.length - 1] + 2 * DISC_R) ** 2, hit2 = (2 * DISC_R) ** 2;
       for (let i = 0; i < N; i++) {
         if (!this.alive[i]) continue;
         for (let k = 0; k < 3; k++) {
           if (cornerDist(ox[i * 3 + k], oy[i * 3 + k], cfg.W, cfg.Rc) < cfg.Rc + DISC_R) { off[i] = 1; break; }
         }
-        for (let j = 0; j < N && !col[i]; j++) {
+        for (let j = 0; j < N; j++) {
           if (j === i || !this.alive[j]) continue;
           const dcx = this.x[i] - this.x[j], dcy = this.y[i] - this.y[j];
           if (!(dcx ** 2 + dcy ** 2 < near2)) continue;
-          for (let a = 0; a < 3 && !col[i]; a++) {
+          let hit = false;
+          for (let a = 0; a < 3 && !hit; a++) {
             for (let b = 0; b < 3; b++) {
               const dx = ox[i * 3 + a] - ox[j * 3 + b], dy = oy[i * 3 + a] - oy[j * 3 + b];
-              if (dx ** 2 + dy ** 2 < hit2) { col[i] = 1; break; }
+              if (dx ** 2 + dy ** 2 < hit2) { hit = true; break; }
             }
+          }
+          if (hit) {
+            col[i] = 1; // impact speed = |relative velocity|, max over partners
+            const rvx = this.v[i] * Math.cos(this.th[i]) - this.v[j] * Math.cos(this.th[j]);
+            const rvy = this.v[i] * Math.sin(this.th[i]) - this.v[j] * Math.sin(this.th[j]);
+            vrel[i] = Math.max(vrel[i], Math.hypot(rvx, rvy));
           }
         }
       }
@@ -378,13 +403,13 @@
       for (let n = 0; n < N; n++) {
         if (off[n]) {
           this.events.push({ kind: "offroad", n, uid: this.uid[n], x: this.x[n], y: this.y[n] });
-          cr[n] += cfg.r_offroad; dk[n] = DONE.offroad; this.stats.offroad += 1; bad[n] = 1;
+          cr[n] += cfg.r_offroad - cfg.r_offroad_speed * this.v[n]; dk[n] = DONE.offroad; this.stats.offroad += 1; bad[n] = 1;
         }
       }
       for (let n = 0; n < N; n++) {
         if (col[n] && !off[n]) {
           this.events.push({ kind: "crash", n, uid: this.uid[n], x: this.x[n], y: this.y[n] });
-          cr[n] += cfg.r_crash; dk[n] = DONE.crash; this.stats.crashes += 1; bad[n] = 1;
+          cr[n] += cfg.r_crash - cfg.r_crash_speed * vrel[n]; dk[n] = DONE.crash; this.stats.crashes += 1; bad[n] = 1;
         }
       }
       this._remove(bad);
@@ -411,6 +436,7 @@
         if (!mask[n]) continue;
         this.alive[n] = 0;
         this.v[n] = 0.0;
+        this.acc[n] = 0.0;
         for (let q = 0; q < S; q++) this.sig[n * S + q] = 0.0;
         this.age[n] = 0.0;
         this.uid[n] = -1;
@@ -420,64 +446,98 @@
     }
 
     // ---------------------------------------------------------------- spawning
+    /** Candidate lateral spawn offsets (see sim.py spawn_lats). */
+    spawnLats() {
+      const cfg = this.cfg;
+      const lo = cfg.spawn_right ? SPAWN_RIGHT_MIN : -(cfg.W - SPAWN_CURB_GAP);
+      const hi = cfg.W - SPAWN_CURB_GAP;
+      const m = Math.max(Math.round((hi - lo) / SPAWN_LAT_STEP), 1);
+      const lats = new Float64Array(m + 1);
+      for (let i = 0; i <= m; i++) lats[i] = lo + ((hi - lo) * i) / m;
+      return lats;
+    }
+
+    /** Queue arrivals (u, manoeuvre, group drawn at arrival), then release queued cars at their
+     *  own spot or, if blocked, a uniformly chosen clear one, several per arm and step (sim.py _arrivals). */
     _arrivals() {
       const cfg = this.cfg, N = this.N, rng = this.rng;
       const demand = this.demand === null ? cfg.demand : this.demand;
       if (demand > 0) {
         for (let k = 0; k < 4; k++) {
           const arrive = rng() < demand * cfg.dt;
-          const lat = -(cfg.W - 1.2) + 2 * (cfg.W - 1.2) * rng();
+          const u = rng();
           const man = 1 + rng.choice(cfg.turn_probs);
           const grp = rng.choice(this.groupProbs);
           if (arrive) {
-            this.queues[k].push({ lat, man, grp });
+            this.queues[k].push({ u, man, grp });
             this.stats.arrived += 1;
           }
         }
       }
-      // velocities of existing cars, taken before any spawn of this step
+      // velocities of existing cars (spawned cars are added as they enter)
       const vx = new Float64Array(N), vy = new Float64Array(N);
       for (let n = 0; n < N; n++) {
         vx[n] = this.v[n] * Math.cos(this.th[n]);
         vy[n] = this.v[n] * Math.sin(this.th[n]);
       }
+      const lats = this.spawnLats(), M = lats.length;
+      const back = -cfg.L + SPAWN_BACK;
+      const clear = new Uint8Array(M);
       for (let k = 0; k < 4; k++) {
         const q = this.queues[k];
-        if (!q.length) continue;
         const [c, s] = rot(k);
-        const u = q[0].lat;
-        const sx = c * u - s * (-cfg.L + 2.5);
-        const sy = s * u + c * (-cfg.L + 2.5);
         const h = Math.PI / 2 + k * (Math.PI / 2);
+        const hn = Math.atan2(Math.sin(h), Math.cos(h));
         const ch = Math.cos(h), sh = Math.sin(h);
-        let clear = true, free = -1;
-        for (let j = 0; j < N; j++) {
-          if (!this.alive[j]) { if (free < 0) free = j; continue; }
-          const dx = this.x[j] - sx, dy = this.y[j] - sy;
-          const dist = Math.hypot(dx, dy);
-          const dd = Math.max(dist, 1e-6);
-          const rvx = cfg.spawn_speed * ch - vx[j], rvy = cfg.spawn_speed * sh - vy[j];
-          let closing = Math.max((rvx * dx + rvy * dy) / dd, 0.0);
-          const own = Math.max((cfg.spawn_speed * (ch * dx + sh * dy)) / dd, 0.0);
-          const latOff = Math.abs(-sh * dx + ch * dy);
-          if (!(latOff < 2 * DISC_R + SPAWN_LAT_MARGIN)) closing = own;
-          if (!(dist > cfg.spawn_clearance + cfg.spawn_headway * closing)) { clear = false; break; }
+        for (let r = 0; r < SPAWN_MAX_PER_STEP && q.length; r++) {
+          let free = -1;
+          for (let j = 0; j < N; j++) if (!this.alive[j]) { free = j; break; }
+          if (free < 0) break;
+          let cnt = 0;
+          for (let i = 0; i < M; i++) {
+            const sx = c * lats[i] - s * back, sy = s * lats[i] + c * back;
+            let ok = 1;
+            for (let j = 0; j < N; j++) {
+              if (!this.alive[j]) continue;
+              const dx = this.x[j] - sx, dy = this.y[j] - sy;
+              const dist = Math.hypot(dx, dy);
+              const dd = Math.max(dist, 1e-6);
+              const rvx = cfg.spawn_speed * ch - vx[j], rvy = cfg.spawn_speed * sh - vy[j];
+              let closing = Math.max((rvx * dx + rvy * dy) / dd, 0.0);
+              const own = Math.max((cfg.spawn_speed * (ch * dx + sh * dy)) / dd, 0.0);
+              const latOff = Math.abs(-sh * dx + ch * dy);
+              if (!(latOff < 2 * DISC_R + SPAWN_LAT_MARGIN)) closing = own;
+              if (!(dist > cfg.spawn_clearance + cfg.spawn_headway * closing)) { ok = 0; break; }
+            }
+            clear[i] = ok;
+            cnt += ok;
+          }
+          if (!cnt) break;
+          const head = q.shift();
+          // own spot (u across the range) if clear, else the clear spot of the same rank u
+          let i = Math.floor(head.u * (M - 1) + 0.5);
+          if (!clear[i]) {
+            const pick = Math.min(Math.floor(head.u * cnt), cnt - 1);
+            i = 0;
+            for (let seen = -1; i < M; i++) if (clear[i] && ++seen === pick) break;
+          }
+          const sx = c * lats[i] - s * back, sy = s * lats[i] + c * back;
+          const n = free;
+          this.alive[n] = 1;
+          this.x[n] = sx; this.y[n] = sy;
+          this.th[n] = hn;
+          this.v[n] = cfg.spawn_speed;
+          vx[n] = cfg.spawn_speed * Math.cos(hn); vy[n] = cfg.spawn_speed * Math.sin(hn);
+          this.kappa[n] = 0.0;
+          this.acc[n] = 0.0;
+          this.arm[n] = k;
+          this.man[n] = head.man;
+          this.group[n] = head.grp;
+          this.age[n] = 0.0;
+          this.uid[n] = this.nextUid++;
+          this.stats.spawned += 1;
+          this.prevDist[n] = routeDist(cfg, k, head.man, sx, sy);
         }
-        if (!clear || free < 0) continue;
-        const head = q.shift();
-        const n = free;
-        this.alive[n] = 1;
-        this.x[n] = sx; this.y[n] = sy;
-        this.th[n] = Math.atan2(sh, ch);
-        this.v[n] = cfg.spawn_speed;
-        this.kappa[n] = 0.0;
-        this.arm[n] = k;
-        this.man[n] = head.man;
-        this.group[n] = head.grp;
-        this.age[n] = 0.0;
-        this.uid[n] = this.nextUid++;
-        this.stats.spawned += 1;
-        this.prevDist[n] = routeDist(cfg, k, head.man, sx, sy);
       }
     }
 
@@ -487,11 +547,11 @@
       const f64 = (a) => Float64Array.from(a);
       this.alive = Uint8Array.from(st.alive.map((b) => (b ? 1 : 0)));
       this.x = f64(st.x); this.y = f64(st.y); this.th = f64(st.th); this.v = f64(st.v);
-      this.kappa = f64(st.kappa); this.age = f64(st.age); this.prevDist = f64(st.prev_dist);
+      this.kappa = f64(st.kappa); this.acc = f64(st.acc); this.age = f64(st.age); this.prevDist = f64(st.prev_dist);
       this.sig = f64(st.sig.flat()); if (this.sig.length !== this.N * S) throw new Error("sig shape");
       this.arm = Int32Array.from(st.arm); this.man = Int32Array.from(st.man);
       this.uid = Int32Array.from(st.uid); this.group = Int32Array.from(st.group);
-      this.queues = st.queues.map((q) => q.map(([lat, man, grp]) => ({ lat, man, grp })));
+      this.queues = st.queues.map((q) => q.map(([u, man, grp]) => ({ u, man, grp })));
       this.nextUid = st.next_uid; this.t = st.t;
       Object.assign(this.stats, st.stats || {});
     }
@@ -502,9 +562,9 @@
       for (let n = 0; n < this.N; n++) sig.push(arr(this.sig.subarray(n * S, n * S + S)));
       return {
         alive: arr(this.alive).map((b) => !!b), x: arr(this.x), y: arr(this.y), th: arr(this.th),
-        v: arr(this.v), kappa: arr(this.kappa), age: arr(this.age), prev_dist: arr(this.prevDist), sig,
+        v: arr(this.v), kappa: arr(this.kappa), acc: arr(this.acc), age: arr(this.age), prev_dist: arr(this.prevDist), sig,
         arm: arr(this.arm), man: arr(this.man), uid: arr(this.uid), group: arr(this.group),
-        queues: this.queues.map((q) => q.map((e) => [e.lat, e.man, e.grp])),
+        queues: this.queues.map((q) => q.map((e) => [e.u, e.man, e.grp])),
         next_uid: this.nextUid, t: this.t,
         stats: { ...this.stats, travel: this.stats.travel.map((r) => r.slice()) },
       };
@@ -567,8 +627,9 @@
   }
 
   return {
-    RIGHT, STRAIGHT, LEFT, DISC_R, K_NEIGHBOURS, NEIGHBOUR_RANGE, OBS_DIM, RAY_RANGE, DONE,
-    defaultConfig, obsDim, actDim, rot, cornerDist, rayEdgeDist, routeDist, freeFlowTime, makeRng,
+    RIGHT, STRAIGHT, LEFT, DISC_R, K_NEIGHBOURS, NEIGHBOUR_RANGE, OBS_DIM, NB_FEATURES, POS_SCALE, GOAL_SCALE,
+    RAY_RANGE, DONE, defaultConfig, obsDim, actDim, rot, cornerDist, rayEdgeDist, routeDist, freeFlowTime,
+    gripKappa, laneOffsets, makeRng,
     Sim, loadPolicy, forward, act,
   };
 });

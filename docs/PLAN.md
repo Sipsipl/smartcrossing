@@ -9,35 +9,56 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
 ## Fixed decisions (from the owner)
 - No lanes, lane paths, traffic lights, priority rules or driving-side conventions for the
   learning agents. Steering is learned (2D kinematics), not just speed.
-- Old pygame/DQN code was replaced (moved to `legacy/`, kept for reference only).
-- Geometry: 4 arms, road 7 m wide (room for one car per direction), rounded curbs.
+- Old pygame/DQN code was replaced (deleted; it is in the git history before the refactor).
+- Geometry (since the wide-crossing change): 4 arms, roads 14 m wide (W = 7 m half width: room
+  for two cars side by side per direction), curb radius Rc = 9 m, arms L = 50 m. The original
+  7 m crossing (W 3.5, Rc 6, no grip limit) is `SimConfig(**sim.NARROW)`; checkpoints trained on
+  it still run on it (`PolicyDriver.load` / the site's physics apply the stored geometry).
+- Tyre grip (physics, not a style penalty): actual curvature <= min(kappa_max, a_lat_max / v^2),
+  a_lat_max = 4 m/s^2, applied after the steering-rate limit. Before, a 5 m turn radius at
+  14 m/s (39 m/s^2) was allowed, which made cars wobble visibly.
 - Reward principle: reward only outcomes (arriving, crashes/off-road, time/delay, waiting
-  demand). Physical limits (max speed, braking, turn radius, steering rate) are fine. No reward
+  demand). Crash / off-road cost = base + factor x impact speed (car-car: relative speed of the
+  pair; off-road: own speed), r_crash = r_offroad = -1.5, -0.1 per m/s; every car involved pays
+  its own term (no blame). Physical limits (max speed, braking, turn radius, steering rate) are fine. No reward
   terms that prescribe driving style (e.g. no penalty for wobbling, no lane-keeping bonus).
   Progress shaping (route distance) is tolerated as a learning aid only; prefer removing it once
   agents can learn without it.
+- Training budget (owner): during development keep trainings short (<= ~1 h per round); long
+  trainings only right before a merge to main.
 - Deliverable: a live, in-browser visualisation with a few sliders (keep it simple),
   incl. mixing agent types.
 
 ## Architecture
 - `smartcrossing/sim.py`: batched numpy simulator, state arrays (B envs, N slots).
-  Kinematic unicycle with curvature limit, dt=0.1 s. Cars spawn at a random lateral
-  offset (so no side is preferred), must exit through target arm. Car-car collision via
+  Kinematic unicycle with curvature, steering-rate and grip limits, dt=0.1 s. Cars spawn at a
+  random lateral offset across the full road width (own spot if clear, else uniform among the
+  clear spots; up to 3 per arm and step, side by side; so no side is preferred; `spawn_right` =
+  right half only, used by the rule-based baselines), must exit through target arm. Car-car collision via
   3 discs per car, off-road via rounded-corner distance. Removal on crash/offroad/exit/timeout.
-  Observations are mirror-neutral: own state in a canonical frame (entry arm = south),
-  goal vector, 5 edge rays, K=4 nearest neighbours (ego frame) incl. their signal but
-  NOT their destination. Action = (accel, curvature, signal[n_signal]) in [-1,1].
+  Observations are mirror-neutral: own state in a canonical frame (entry arm = south; position
+  in fixed 10 m units, not scaled by L/W), ego-frame vectors to the exit gate and to the exit
+  mouth (25 m units), 5 edge rays, own curvature and grip-limited max curvature, K=4 nearest
+  neighbours (ego frame: position, heading, speed, curvature, acceleration, signal) but NOT
+  their destination. Action = (accel, curvature, signal[n_signal]) in [-1,1].
   Common random numbers: env b uses traffic stream b % n_scenarios.
-- `smartcrossing/baselines.py`: rule-based references with lanes (light / reservation(AIM) / none).
+- `smartcrossing/baselines.py`: rule-based references with lanes (light / reservation(AIM) / none),
+  1 lane per direction on the 7 m road, 2 on the 14 m road (right-hand traffic).
 - `smartcrossing/render.py`, `metrics.py`, `cli.py` (bench / render).
 - `smartcrossing/ppo.py`: numpy PPO with parameter sharing (main training method since ppo6;
   see experiments.md). `smartcrossing/analyze.py`: signal zero/shuffle interventions,
-  MI(lamp; manoeuvre/braking/region), driving side per arm / manoeuvre.
-- SimConfig `neighbour_vis` (perception range, default 30 m) and `speed_control` (action[0] as
-  target speed instead of acceleration, default off) are per-policy "interface" settings:
-  stored in the checkpoint cfg, applied by `PolicyDriver.load`, exported as viewer physics.
-- Planned: `policy.py` (shared MLP, numpy), `es.py` (OpenAI-ES, multiprocessing), `viewer/`
-  (JS port of sim + policy, sliders, checked against Python via node test vectors).
+  MI(lamp; manoeuvre/braking/region), driving side per arm / manoeuvre, lateral-offset
+  histograms (lanes?), wobble metrics, failure breakdown (solo / per demand / per manoeuvre).
+- `smartcrossing/policy.py` (shared MLP, numpy, `PolicyDriver`), `es.py` (OpenAI-ES).
+  `smartcrossing/policy_compat.py`: running old checkpoints (observation-layout remap by
+  feature name, legacy interface/world values, `physics_of` for the browser).
+- SimConfig `neighbour_vis` (perception range, default 30 m; 60 in ppo11/14/15) and
+  `speed_control` (action[0] as target speed, ppo16 only) are per-policy "interface" settings kept
+  for those checkpoints (no benefit, see experiments.md): stored in the checkpoint cfg, applied by
+  `PolicyDriver.load`, exported as the site's physics.
+- `site/`: the website is the only frontend. `site/src/js/sim.js` is the JS port of sim + policy
+  (checked against Python by `tests/test_sim_js_parity.py` via node); its constants come from
+  `js/sim-config.js`, generated by `site/build.py` from `sim.js_constants()`.
 
 ## Self-evaluation workflow
 - `pytest` invariants; `cli bench` prints one JSON line (throughput, crashes/1000, delay,
@@ -46,8 +67,29 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
 - Subagents look at images themselves and report numbers; orchestrator keeps context small.
 - Emergence claims require ablations: signal zeroed/shuffled, no-comm training, MI(signal; intent).
 
-## Phases
-1. Simulator, baselines, metrics, rendering, tests  ← in progress
-2. ES training without/with signal; curriculum over demand
-3. Emergence analysis (driving side, signal meaning), agent-type mixing
-4. Browser viewer with sliders (demand, turn mix, signal noise/on-off, population mix)
+## Status (2026-10-11)
+Done: simulator + baselines + metrics + tests; ES and PPO training; emergence analysis tooling;
+website (site/) incl. sliders, agent mixing, side-by-side comparison; wide crossing, grip limit,
+reverse gear, impact-speed crash cost, higher inflow; refactor (single frontend, shared JS config).
+Main brain: results/wide_s1ft2_ckpt2650 (beats the light from demand 0.15 up, ~19 % crashes at 0.15).
+Open: crashes in traffic (cars rarely yield), weaving, lamps unused. Next: see "Decided for the
+next training round" and Roadmap (B), (C), (D).
+
+## Roadmap (owner, after the wide-crossing change)
+- (A) Driving quality: failure breakdown (offroad vs crash, solo vs traffic, per manoeuvre and
+  demand), solo-driving gate (a car alone never leaves the road), impact-speed crash/offroad
+  cost, physically visible neighbour features (curvature, acceleration).  <- done
+- (B) Perception / network: set (attention) encoder over all neighbours instead of K nearest,
+  optional recurrent memory (GRU).
+- (C) Geometry-independent inputs throughout + randomized geometries during training; GPU port
+  (owner has an RTX 3070 Ti, local training later).
+- (D) Norm experiments: >= 20 seeds per configuration; lateral position (driving side, lanes),
+  priority patterns, signal MI, ablations, separately trained populations (cf. Pal et al.,
+  ICLR 2022, "Emergent Road Rules").
+
+## Decided for the next training round (owner)
+- One free lamp channel instead of two (n_signal = 1): easier to read and to analyse.
+- Neighbour acceleration observation becomes a binary brake light (on when braking), as on real cars.
+- No turn signals: a built-in blinker would leak the destination, which is deliberately hidden so
+  that a lamp "language" has something to say. The free lamp is the place where one could emerge.
+- Brake lights are drawn on the website now (visual only).

@@ -13,27 +13,30 @@
   const num = (v, d = 1) => (v === null || v === undefined ? "–" : v.toFixed(d).replace(".", ","));
   const pol = (id) => D.policies[id];
   const mainMethod = D.main || (D.best.ppo ? "ppo" : "es");
+  const MAIN_ID = D.main_id || D.best[mainMethod];
+  const isNarrow = (entry) => !!(entry && entry.physics && entry.physics.W !== undefined && entry.physics.W < 5);
 
   function genLabel(entry) {
     if (!entry) return "";
     if (entry.id === "zufall") return "Start: zufälliges Gehirn";
     const unit = entry.method === "ppo" ? "Trainingsschritt" : "Generation";
-    return entry.tlGen !== undefined ? `${unit} ${entry.tlGen}` : `${entry.run_label || entry.run}`;
+    const where = isNarrow(entry) && !isNarrow(pol(MAIN_ID)) ? " · alte, schmale Kreuzung" : "";
+    return (entry.tlGen !== undefined ? `${unit} ${entry.tlGen}` : `${entry.run_label || entry.run}`) + where;
   }
 
-  /** Default agent types: best policy (+ the other method or a beginner, share 0). */
+  /** Default agent types: the main brain (100 %), plus a second run and the old narrow-road
+   *  brain for mixing (share 0). */
   function defaultTypes() {
     const types = [];
-    const main = pol(D.best[mainMethod]);
-    if (main) types.push(SCX.makeType(main, `${METHOD_NAMES[mainMethod]} (bestes Gehirn)`, { share: 100 }));
-    const om = mainMethod === "ppo" ? "es" : "ppo";
-    const other = D.best[om] ? pol(D.best[om]) : null;
-    if (other) types.push(SCX.makeType(other, `${METHOD_NAMES[om]} (bestes Gehirn)`, { share: 0 }));
-    else {
-      const tl = (D.timelines[mainMethod] || []).filter((p) => p.id !== "zufall" && p.id !== D.best[mainMethod]);
-      if (tl.length) types.push(SCX.makeType(pol(tl[0].id), `Anfänger (Gen. ${tl[0].gen})`, { share: 0 }));
+    const main = pol(MAIN_ID);
+    if (main) types.push(SCX.makeType(main, "Aktuelles Gehirn", { share: 100 }));
+    if (D.mix && pol(D.mix)) types.push(SCX.makeType(pol(D.mix), "Zweiter Lauf (anderer Zufall)", { share: 0 }));
+    if (D.history && pol(D.history) && D.history !== MAIN_ID) types.push(SCX.makeType(pol(D.history), isNarrow(pol(D.history)) ? "Alt (schmale Kreuzung)" : "Älterer Stand", { share: 0 }));
+    if (types.length < 2) {
+      const om = mainMethod === "ppo" ? "es" : "ppo";
+      if (D.best[om]) types.push(SCX.makeType(pol(D.best[om]), `${METHOD_NAMES[om]} (bestes Gehirn)`, { share: 0 }));
     }
-    return types;
+    return types.slice(0, 3);
   }
 
   // ------------------------------------------------------------------ stage markup
@@ -53,7 +56,7 @@
         <button class="btn primary" data-act="play" type="button">Pause</button>
         <div class="seg" role="radiogroup" aria-label="Tempo"></div>
         <button class="btn" data-act="reset" type="button">Neu starten</button>
-        <label class="toggle"><input type="checkbox" data-act="trails"> Spuren</label>
+        <label class="toggle"><input type="checkbox" data-act="trails"> Fahrtwege</label>
         ${opts.follow ? `<label class="toggle"><input type="checkbox" data-act="follow"> Kamera folgt</label>` : ""}
         <span class="clock" data-act="clock"></span>
       </div>`;
@@ -99,6 +102,7 @@
   function initStart() {
     const types = defaultTypes();
     const cx = makeCrossing($("stage"), { types, speeds: [1, 2, 4, 8], speed: 1, select: false, warmup: 20 });
+    window.__sc = cx;
     const c = cx.controls;
     const apply = () => {
       c.demand = +$("demand").value;
@@ -129,7 +133,7 @@
         <div class="tname" title="${t.id}">${t.name}</div>
         <div class="row2"><input type="range" min="0" max="100" step="1" value="${t.share}" aria-label="Anteil ${t.name}"><output></output>
         <label class="toggle"><input type="checkbox"> stumm</label></div>
-        <div class="meta">0 angekommen · 0 verunglückt</div>
+        <div class="meta count" hidden>0 angekommen · 0 verunglückt</div>
         ${physKey(t) !== physKey(types[0]) ? `<div class="meta">trainiert mit anderer Fahrphysik; hier fährt es mit der Physik von „${types[0].name}“</div>` : ""}`;
       const rng = row.querySelector("input[type=range]"), cb = row.querySelector("input[type=checkbox]");
       rng.addEventListener("input", () => { t.share = +rng.value; showShares(); cx.applyControls(); });
@@ -143,27 +147,31 @@
       });
     }
     showShares();
+    // per-brain counts only when more than one brain is driving
     cx.opts.onRefresh = () => {
+      const several = types.filter((t) => t.share > 0).length > 1;
       box.querySelectorAll(".type").forEach((row, i) => {
-        const p = cx.perType[i];
-        if (p) row.querySelector(".meta").textContent = `${p.exits} angekommen · ${p.bad} verunglückt`;
+        const p = cx.perType[i], m = row.querySelector(".meta.count");
+        m.hidden = !several;
+        if (p && several) m.textContent = `${p.exits} angekommen · ${p.bad} verunglückt`;
       });
     };
     // honest status line
-    const b = pol(D.best[mainMethod]);
+    const b = pol(MAIN_ID);
     const r15 = b && b.bench["0.15"], l15 = D.baselines.light["0.15"], v15 = D.baselines.reservation["0.15"];
     if (r15) {
       $("status").innerHTML = `Bei mittlerem Verkehr (${num(r15.demand_per_min, 0)} Autos pro Minute) schaffen es die besten gelernten Autos
         zu <b>${pct(r15.exit_ok_rate)}</b> heil ans Ziel – <b>${num(r15.throughput_per_min)}</b> Autos pro Minute.
         Eine Ampel schafft ${num(l15.throughput_per_min)} pro Minute, ein zentraler Verkehrsrechner ${num(v15.throughput_per_min)} – beide ohne einen einzigen Unfall.
-        Die Autos lernen also noch. <a href="vergleich.html">Zum Vergleich →</a>`;
+        Die Autos lernen also noch. Rechtsverkehr entstand von selbst, Spuren und eine Lampensprache nicht.
+        <a href="vergleich.html">Zum Vergleich →</a>`;
     }
   }
 
   // ------------------------------------------------------------------ obs panel ("Was sieht ein Auto?")
   function fmtObs(it, v, compact) {
     if (it.unit === "bool") return v > 0.5 ? "ja" : "nein";
-    if (compact) return it.unit === "m" || it.unit === "km/h" ? num(v * it.scale, 0) : num(v, 2);
+    if (compact) return it.unit === "m" || it.unit === "km/h" || it.unit === "%" ? num(v * it.scale, 0) : it.unit ? num(v * it.scale, 1) : num(v, 2);
     if (it.key.startsWith("ray_") && v >= 0.999) return `≥ ${num(it.scale, 0)} m`;
     const x = v * it.scale;
     if (it.unit === "m") return `${num(x)} m`;
@@ -178,17 +186,33 @@
     return `<span class="mini"><i style="left:${left}%;width:${w}%"></i></span>`;
   }
 
+  /** Inputs a brain ignores (all weights 0: trained before the sensor existed, see policy_compat). */
+  const unusedCache = new WeakMap();
+  function unusedInputs(raw) {
+    if (!raw) return new Set();
+    if (!unusedCache.has(raw)) {
+      const W = raw.layers[0].W, sc = raw.in_scale, off = new Set();
+      W.forEach((row, i) => { if ((sc && sc[i] === 0) || row.every((w) => w === 0)) off.add(i); });
+      unusedCache.set(raw, off);
+    }
+    return unusedCache.get(raw);
+  }
+  const UNUSED_TIP = "Dieses Gehirn nutzt den Wert nicht: es wurde trainiert, bevor es diesen Sensor gab.";
+
   function renderObsPanel(cx, el) {
     const n = cx.selIndex();
     if (n < 0) { el.innerHTML = ""; return; }
     const o = cx.obsRow(n), lay = D.layout;
+    const ty = cx.typeOf(n), off = unusedInputs(ty && ty.raw);
     const own = lay.groups.filter((g) => g.sub !== "neighbour");
     const nbs = lay.groups.filter((g) => g.sub === "neighbour");
     let h = `<div class="obs-grid">`;
     for (const g of own) {
       h += `<div class="obs-group"><div class="gname">${g.name}<span class="n">${g.items.length} ${g.items.length === 1 ? "Zahl" : "Zahlen"}</span></div>`;
       for (const it of g.items) {
-        h += `<div class="orow"><span class="lab">${it.label}</span><span class="val">${fmtObs(it, o[it.i])}</span>${miniBar(o[it.i])}</div>`;
+        h += off.has(it.i)
+          ? `<div class="orow unused" title="${UNUSED_TIP}"><span class="lab">${it.label}</span><span class="val">${fmtObs(it, o[it.i])}</span><span class="small">ungenutzt</span></div>`
+          : `<div class="orow"><span class="lab">${it.label}</span><span class="val">${fmtObs(it, o[it.i])}</span>${miniBar(o[it.i])}</div>`;
       }
       h += `</div>`;
     }
@@ -200,8 +224,9 @@
     const present = nbs.map((g) => o[g.items.find((it) => it.key.endsWith("_present")).i] > 0.5);
     for (let r = 0; r < nItems; r++) {
       const it0 = nbs[0].items[r];
-      const lab = { fwd: "vor mir (m)", left: "links von mir (m)", same: "gleiche Richtung", cross: "kreuzt nach links", speed: "Tempo (km/h)", present: "da?" }[it0.key.split("_").slice(1).join("_")] || it0.label;
-      h += `<tr><td>${lab}</td>` + nbs.map((g, k) => {
+      const lab = { fwd: "vor mir (m)", left: "links von mir (m)", same: "gleiche Richtung", cross: "kreuzt nach links", speed: "Tempo (km/h)", present: "da?", kappa: "lenkt links (%)", acc: "beschleunigt (m/s²)" }[it0.key.split("_").slice(1).join("_")] || it0.label;
+      const unused = off.has(it0.i);
+      h += `<tr${unused ? ` class="unused" title="${UNUSED_TIP}"` : ""}><td>${lab}${unused ? " (ungenutzt)" : ""}</td>` + nbs.map((g, k) => {
         const it = g.items[r];
         return present[k] ? `<td title="${it.label}">${fmtObs(it, o[it.i], true)}</td>` : `<td class="none">–</td>`;
       }).join("") + `</tr>`;
@@ -296,14 +321,15 @@
       }
     }
     // kinematics facts from the sim config
-    const p = pol(D.best[mainMethod]);
+    const p = pol(MAIN_ID);
     const phys = Object.assign({}, cfg, p ? p.physics : {});
     $("kin").innerHTML = `
       <li>Höchstens <b>${num(phys.v_max * 3.6, 0)} km/h</b> (${num(phys.v_max, 0)} m/s) – wie in der Stadt.</li>
       <li>Beschleunigen mit bis zu <b>${num(phys.acc_max, 0)} m/s²</b> (von 0 auf 50 in etwa ${num(phys.v_max / phys.acc_max, 1)} s), bremsen mit bis zu <b>${num(phys.brake_max, 0)} m/s²</b> – das ist eine kräftige Vollbremsung.</li>
-      <li>Engster Kreis: <b>${num(1 / phys.kappa_max, 0)} m Radius</b>. Rückwärts fahren geht nicht.</li>
+      <li>Engster Kreis: <b>${num(1 / phys.kappa_max, 0)} m Radius</b> – aber nur langsam: ${phys.a_lat_max > 0 ? `Die Reifen halten höchstens ${num(phys.a_lat_max, 0)} m/s² zur Seite, bei ${num(phys.v_max * 3.6, 0)} km/h ist der engste Kreis deshalb ${num(phys.v_max * phys.v_max / phys.a_lat_max, 0)} m groß.` : "(hier ohne Rutschgrenze)."}</li>
+      <li>${phys.v_reverse > 0 ? `Rückwärtsgang: bis ${num(phys.v_reverse * 3.6, 0)} km/h (Gas &lt; 0 bremst erst, dann geht es rückwärts).` : "Rückwärts fahren geht nicht."}</li>
       ${cfg.kappa_rate ? `<li>Das Lenkrad dreht sich nicht beliebig schnell: von ganz links nach ganz rechts dauert es ${num((2 * cfg.kappa_max) / cfg.kappa_rate, 1)} s.${phys.kappa_rate > 1e5 ? " (Die bisher besten Evolutions-Autos wurden noch ohne diese Grenze trainiert und fahren hier deshalb mit sofort wirkender Lenkung.)" : ""}</li>` : ""}
-      <li>Das Auto ist ${num(4.6, 1)} m lang und ${num(1.8, 1)} m breit; die Straße ist ${num(2 * cfg.W, 0)} m breit – Platz für genau ein Auto pro Richtung.</li>`;
+      <li>Das Auto ist ${num(4.6, 1)} m lang und ${num(1.8, 1)} m breit; die Straße ist ${num(2 * (phys.W || cfg.W), 0)} m breit – ${(phys.W || cfg.W) >= 5 ? "Platz für zwei Autos nebeneinander pro Richtung" : "Platz für genau ein Auto pro Richtung"}.</li>`;
     window.__sc = cx;
   }
 
@@ -339,11 +365,10 @@
         if (net.hoverN) tip.textContent = net.describe(net.hoverN);
       },
     });
-    const p = pol(D.best[mainMethod]);
+    const p = pol(MAIN_ID);
     if (p) {
       const s = p.policy.sizes, params = s.slice(1).reduce((a, n, i) => a + s[i] * n + n, 0);
       $("brain-sizes").textContent = `${s[0]} Eingänge → ${s[1]} → ${s[2]} → ${s[3]} Ausgänge`;
-      $("brain-hidden").textContent = s[1] === s[2] ? `je ${s[1]}` : `${s[1]} und ${s[2]}`;
       $("brain-params").textContent = params.toLocaleString("de-DE");
     }
     window.__sc = cx;
@@ -390,11 +415,12 @@
     function show() {
       const p = extra ? Object.assign({}, pol(extra.id)) : tl()[idx];
       $("tt-ticks").querySelectorAll("button").forEach((b, i) => b.setAttribute("aria-pressed", String(!extra && i === idx)));
-      const chain = (D.chains[method] || []).find((c) => c.run === p.run);
+      const chainAll = (D.chains[method] || []).filter((c) => ((D.curves[method] || {})[c.run] || []).length);
+      const phase = chainAll.findIndex((c) => c.run === p.run);
+      const chain = chainAll[phase];
       const note = extra ? extra.note : p.id === "zufall" ? "Vor dem Training: alle Gewichte sind Zufallszahlen. Die Autos fahren irgendwie los." : chain && chain.note;
       const b05 = p.bench["0.05"], b15 = p.bench["0.15"];
-      const runName = (r) => (chain && chain.label) || p.run_label || r;
-      $("tt-now").innerHTML = `<b>${extra ? (extra.label || extra.run) : genLabel(p)}</b>${p.run && !extra ? ` <span class="muted small">(${runName(p.run)})</span>` : ""}<br>
+      $("tt-now").innerHTML = `<b>${extra ? (extra.label || extra.run) : genLabel(p)}</b>${chain && !extra ? ` <span class="muted small">(Abschnitt <span class="num-inline">${phase + 1}</span> der Lernkurve)</span>` : ""}<br>
         <span class="small">${note || ""}</span><br>
         <span class="small muted">Gemessen in 8 × 2 Minuten Simulation: bei wenig Verkehr kommen <b>${pct(b05 && b05.exit_ok_rate)}</b> der Autos an,
         bei mittlerem Verkehr <b>${pct(b15 && b15.exit_ok_rate)}</b> (${num(b15 && b15.throughput_per_min)} Autos/min).</span>`;
@@ -419,15 +445,29 @@
 
     function drawCurves() {
       const curves = D.curves[method] || {};
-      const runs = Object.keys(curves);
-      const pts = runs.flatMap((r) => curves[r]);
-      if (!pts.length) { $("curves").innerHTML = `<p class="muted">Keine Logdaten.</p>`; return; }
-      const k = Math.max(1, Math.round(pts.length / 80));
-      const ser = (key) => runs.flatMap((r) => SCX.smooth(curves[r].filter((p) => p[key] !== undefined).map((p) => [p.x, p[key]]), k));
-      const chain = D.chains[method] || [];
-      const markers = chain.filter((c) => c.offset > 0).map((c) => ({ x: c.offset, label: c.short || c.run }));
+      const chain = (D.chains[method] || []).filter((c) => (curves[c.run] || []).length);
+      if (!chain.length) { $("curves").innerHTML = `<p class="muted">Keine Logdaten.</p>`; return; }
+      // phases = runs of the warm-start chain; each starts at the first logged point of its run
+      // (iteration counts continue across warm starts) and is cut where the next one starts
+      const starts = chain.map((c) => Math.min(...curves[c.run].map((p) => p.x)));
+      const part = (i) => curves[chain[i].run].filter((p) => i + 1 >= chain.length || p.x < starts[i + 1]);
+      const total = chain.reduce((a, _, i) => a + part(i).length, 0);
+      const k = Math.max(1, Math.round(total / 80));
+      const ser = (key) => chain.flatMap((_, i) => SCX.smooth(part(i).filter((p) => p[key] !== undefined).map((p) => [p.x, p[key]]), k));
+      const phases = chain.map((c, i) => ({ x: starts[i], n: i + 1, title: c.step || c.note || c.label || c.run }));
+      const WORLD = { narrow: "Alte, schmale Kreuzung (7 m Straßen)", wide: "Breite Kreuzung (14 m Straßen)" };
+      const worlds = new Set(chain.map((c) => c.world).filter(Boolean));
+      const bands = [];
+      if (worlds.size > 1) chain.forEach((c, i) => {
+        if (i === 0 || c.world !== chain[i - 1].world) bands.push({ x0: starts[i], x1: Infinity, label: { narrow: "schmale Kreuzung", wide: "breite Kreuzung" }[c.world] || "", world: c.world });
+        else return;
+        if (bands.length > 1) bands[bands.length - 2].x1 = starts[i];
+      });
+      const lastX = Math.max(...chain.flatMap((_, i) => part(i).map((p) => p.x)));
+      bands.forEach((b) => { if (b.x1 === Infinity) b.x1 = lastX; });
       const leg = $("chain-legend");
-      if (leg) leg.innerHTML = chain.map((c) => `<li><b>${c.short || c.run}</b> – ${c.label || c.run}${c.note ? `: <span class="muted">${c.note}</span>` : ""}</li>`).join("");
+      if (leg) leg.innerHTML = chain.map((c, i) => `${worlds.size > 1 && (i === 0 || c.world !== chain[i - 1].world) ? `<li class="world">${WORLD[c.world] || ""}</li>` : ""}<li><span class="num">${i + 1}</span><span>${c.step || c.note || c.label || c.run}</span></li>`).join("");
+      const markers = [];
       if (!extra) {
         const cur = tl()[idx];
         if (cur) markers.push({ x: cur.tlGen, label: "▼ Zeitreise" });
@@ -440,7 +480,7 @@
         ],
         yMin: 0, yMax: 1, yFmt: (v) => `${Math.round(v * 100)} %`, xLabel: method === "ppo" ? "Trainingsschritt" : "Generation",
         xTipFmt: (x) => `${method === "ppo" ? "Schritt" : "Generation"} ${Math.round(x)}`,
-        markers, directLabels: true, height: 280, aria: "Lernkurve: Anteil angekommener, verunglückter und abgekommener Autos",
+        markers, phases, bands, directLabels: true, height: 300, aria: "Lernkurve: Anteil angekommener, verunglückter und abgekommener Autos, mit nummerierten Trainingsabschnitten",
       });
     }
     setupSlider();
@@ -450,22 +490,107 @@
   }
 
   // ------------------------------------------------------------------ comparison
+  /** Three canvases replaying the same traffic (pre-recorded by site/build.py) in sync. */
+  function initSideBySide(host) {
+    const R = window.SC_REPLAYS;
+    if (!host) return;
+    if (!R || !R.runs) { host.innerHTML = `<p class="muted">Keine Aufzeichnungen vorhanden.</p>`; return; }
+    const DRIVERS = [["light", "Ampel"], ["reservation", "Verkehrsrechner"], ["policy", "Gelernte Autos"]].filter(([k]) => R.runs[k]);
+    const LEVELS = ["wenig", "mittel", "viel"];
+    const dems = R.demands.map(String);
+    const world = Object.assign({ L: 50, W: 3.5, Rc: 6 }, R.world);
+    host.innerHTML = `
+      <div class="rp-ctl">
+        <div class="seg" role="radiogroup" aria-label="Verkehr">${dems.map((d, i) => `<input type="radio" name="rp-dem" id="rp-d${i}" value="${d}"${i === 1 ? " checked" : ""}><label for="rp-d${i}">${LEVELS[i] || d}</label>`).join("")}</div>
+        <button class="btn primary" type="button" data-act="play">Pause</button>
+        <div class="seg" role="radiogroup" aria-label="Tempo">${[1, 2, 4].map((s) => `<input type="radio" name="rp-spd" id="rp-s${s}" value="${s}"${s === 1 ? " checked" : ""}><label for="rp-s${s}">${s}×</label>`).join("")}</div>
+        <button class="btn" type="button" data-act="restart">Von vorn</button>
+        <span class="clock" data-act="clock"></span>
+      </div>
+      <div class="rp-grid">${DRIVERS.map(([k, name]) => `
+        <figure class="rp" data-k="${k}"><div class="rp-box"><canvas aria-label="${name}: Kreuzung von oben"></canvas></div>
+          <figcaption><div class="rp-name">${name}</div>
+          <div class="rp-stats"><span><b data-s="thr">–</b> Autos/min</span><span class="bad"><b data-s="bad">0</b> Unfälle</span></div></figcaption></figure>`).join("")}
+      </div>`;
+    const views = DRIVERS.map(([k]) => ({ k, fig: host.querySelector(`.rp[data-k=${k}]`) }));
+    for (const v of views) v.view = new SCX.ReplayView(v.fig.querySelector("canvas"), world);
+    let dem = dems[1] || dems[0], t = 0, speed = 1, running = true, lastTs = null, lastStats = 0, visible = true, dur = 0;
+    const load = () => {
+      for (const v of views) v.view.rep = SCX.decodeReplay(R.runs[v.k][dem], R.q);
+      dur = Math.min(...views.map((v) => v.view.rep.steps * v.view.rep.dt));
+      t = 0; render(true);
+    };
+    const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+    function render(stats) {
+      for (const v of views) v.view.draw(t);
+      if (!stats) return;
+      for (const v of views) {
+        const c = v.view.counts(t);
+        v.fig.querySelector("[data-s=thr]").textContent = c.thr === null ? "–" : num(c.thr);
+        v.fig.querySelector("[data-s=bad]").textContent = c.bad;
+        v.fig.querySelector(".bad").classList.toggle("on", c.bad > 0);
+      }
+      host.querySelector("[data-act=clock]").textContent = `${mmss(t)} / ${mmss(dur)}`;
+    }
+    function frame(ts) {
+      if (running && visible) {
+        if (lastTs !== null) t += Math.min((ts - lastTs) / 1000, 0.1) * speed;
+        if (t >= dur) t = 0; // loop
+        lastTs = ts;
+        const now = performance.now(), st = now - lastStats > 200;
+        if (st) lastStats = now;
+        render(st);
+      } else lastTs = null;
+      requestAnimationFrame(frame);
+    }
+    host.querySelectorAll("input[name=rp-dem]").forEach((el) => el.addEventListener("change", () => { dem = el.value; load(); }));
+    host.querySelectorAll("input[name=rp-spd]").forEach((el) => el.addEventListener("change", () => { speed = +el.value; }));
+    const play = host.querySelector("[data-act=play]");
+    play.addEventListener("click", () => { running = !running; play.textContent = running ? "Pause" : "Weiter"; lastTs = null; });
+    host.querySelector("[data-act=restart]").addEventListener("click", () => { t = 0; render(true); });
+    new IntersectionObserver((es) => { visible = es[0].isIntersecting; }).observe(host);
+    load();
+    requestAnimationFrame(frame);
+    window.__rp = { get t() { return t; }, views };
+  }
+
   function initVergleich() {
-    const rows = [
-      { name: "Ampel", note: "Regeln + Spuren", b: D.baselines.light, color: "--c1" },
-      { name: "Verkehrsrechner", note: "Regeln + Spuren + Funk", b: D.baselines.reservation, color: "--c2" },
-    ];
-    if (D.best.es) rows.push({ name: "Evolution (gelernt)", note: "keine Regeln", b: pol(D.best.es).bench, color: "--c3" });
-    if (D.best.ppo) rows.push({ name: "PPO (gelernt)", note: "keine Regeln", b: pol(D.best.ppo).bench, color: "--c4" });
+    initSideBySide($("side"));
+    // every brain is compared with Ampel / Verkehrsrechner on the crossing it was trained on
+    const worldOf = (e) => (isNarrow(e) ? "narrow" : "wide");
+    const WORLD_NAMES = { wide: "Breite Kreuzung (14 m Straßen)", narrow: "Alte, schmale Kreuzung (7 m Straßen)" };
+    const byWorld = D.baselines_by_world || { [D.main_world || worldOf(pol(MAIN_ID))]: D.baselines };
+    const mainWorld = MAIN_ID ? worldOf(pol(MAIN_ID)) : D.main_world || "wide";
+    const brains = [];
+    if (MAIN_ID) brains.push({ name: "Gelernte Autos", e: pol(MAIN_ID), color: "--c4" });
+    if (D.history && D.history !== MAIN_ID) brains.push({ name: worldOf(pol(D.history)) === mainWorld ? "Gelernt (älter)" : "Gelernt (PPO)", e: pol(D.history), color: "--c3" });
+    if (D.best.es && D.best.es !== MAIN_ID) brains.push({ name: "Evolution", e: pol(D.best.es), color: "--c5" });
+    const worlds = [mainWorld, ...Object.keys(byWorld).filter((w) => w !== mainWorld)];
+    const groups = worlds.map((w) => {
+      const base = byWorld[w];
+      const rows = base ? [
+        { name: "Ampel", b: base.light, color: "--c1", base: true },
+        { name: "Verkehrsrechner", b: base.reservation, color: "--c2", base: true },
+      ] : [];
+      for (const r of brains) if (worldOf(r.e) === w) rows.push({ name: r.name, b: r.e.bench, color: r.color });
+      return { w, rows };
+    }).filter((g) => g.rows.some((r) => !r.base));
+    const rows = (groups.find((g) => g.w === mainWorld) || groups[0]).rows; // chart: main crossing only
     const dem = D.demands.map(String);
     const demPerMin = (d) => {
       const r = D.baselines.reservation[d];
       return r ? r.demand_per_min : +d * 240;
     };
     const head = `<thead><tr><th>Verkehr →</th>${dem.map((d) => `<th>${num(demPerMin(d), 0)}/min</th>`).join("")}</tr></thead>`;
-    $("t-thr").innerHTML = head + "<tbody>" + rows.map((r) => `<tr><td>${r.name}</td>${dem.map((d) => `<td>${r.b[d] ? num(r.b[d].throughput_per_min) : "–"}</td>`).join("")}</tr>`).join("") + "</tbody>";
-    $("t-ok").innerHTML = head + "<tbody>" + rows.map((r) => `<tr><td>${r.name}</td>${dem.map((d) => `<td>${r.b[d] ? pct(r.b[d].exit_ok_rate) : "–"}</td>`).join("")}</tr>`).join("") + "</tbody>";
-    if ($("t-bad")) $("t-bad").innerHTML = head + "<tbody>" + rows.map((r) => `<tr><td>${r.name}</td>${dem.map((d) => `<td>${r.b[d] ? num(r.b[d].crash_cars_per_1000, 0) : "–"}</td>`).join("")}</tr>`).join("") + "</tbody>";
+    const table = (fmt) => head + groups.map((g) => `<tbody>${groups.length > 1 ? `<tr class="grp"><th colspan="${dem.length + 1}">${WORLD_NAMES[g.w]}</th></tr>` : ""}`
+      + g.rows.map((r) => `<tr><td>${r.name}</td>${dem.map((d) => `<td>${r.b && r.b[d] ? fmt(r.b[d]) : "–"}</td>`).join("")}</tr>`).join("") + "</tbody>").join("");
+    $("t-thr").innerHTML = table((x) => num(x.throughput_per_min));
+    $("t-ok").innerHTML = table((x) => `${pct(x.exit_ok_rate)} <span class="muted">· ${num(x.crash_cars_per_1000, 0)}</span>`);
+    // "Ehrlich gesagt": numbers from the bench data, not hard-coded
+    const mb = MAIN_ID && pol(MAIN_ID).bench, badPct = (d) => mb && mb[d] ? pct(mb[d].crash_cars_per_1000 / 1000) : null;
+    if (badPct("0.15")) $("h-mid").textContent = `rund ${badPct("0.15")}`;
+    if (badPct("0.05")) $("h-low").textContent = `rund ${badPct("0.05")}`;
+    if ($("c-thr-note")) $("c-thr-note").textContent = groups.length > 1 ? `Diagramm: ${WORLD_NAMES[mainWorld].replace(/ \(.*/, "")}. In den Tabellen steht jedes Gehirn neben Ampel und Verkehrsrechner auf der Kreuzung, auf der es trainiert wurde.` : "";
     const draw = () => SCX.lineChart($("c-thr"), {
       series: [
         { name: "Nachfrage", color: SCX.cssVar("--c5"), dash: true, points: dem.map((d) => [demPerMin(d), demPerMin(d)]) },

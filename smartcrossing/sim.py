@@ -2,7 +2,13 @@
 
 Geometry: two perpendicular roads of width 2*W crossing at the origin, each arm
 reaching out to distance L. There are no lanes, markings or rules: the drivable
-area is simply the cross-shaped union of both strips. Cars enter at the end of
+area is simply the cross-shaped union of both strips. Default: W = 7 m (14 m wide
+roads, room for two cars side by side per direction), curb radius 9 m; the old
+7 m crossing is ``SimConfig(**NARROW)``.
+
+Vehicle physics: kinematic unicycle with a speed and curvature limit, a steering-rate
+limit and a tyre-grip limit (lateral acceleration v^2 * kappa <= a_lat_max), so tight
+turns are only possible at low speed. Cars enter at the end of
 an arm (at a random lateral offset) and must leave through their target arm.
 
 Arms are indexed counter-clockwise: 0 = south, 1 = east, 2 = north, 3 = west.
@@ -24,12 +30,21 @@ DISC_OFFSETS = np.array([-1.4, 0.0, 1.4])
 DISC_R = 0.9
 
 SPAWN_LAT_MARGIN = 0.8  # lateral corridor (beyond car width) checked for closing traffic at spawn
+SPAWN_BACK = 2.5  # cars spawn this far inside the end of their entry arm
+SPAWN_CURB_GAP = 1.2  # lateral spawn offsets keep this distance to the road edge
+SPAWN_RIGHT_MIN = 1.0  # spawn_right: smallest offset right of the centre line
+SPAWN_LAT_STEP = 0.2  # spacing (m) of the candidate lateral spawn offsets
+SPAWN_MAX_PER_STEP = 3  # at most this many cars enter per arm and step (side by side)
+SPEED_TAU = 0.5  # s, time constant of the legacy speed_control interface
 
 N_RAYS = 5
 RAY_ANGLES = np.radians([-60.0, -30.0, 0.0, 30.0, 60.0])
 RAY_RANGE = 20.0  # metres; rays report the exact distance to the road edge, capped here
 K_NEIGHBOURS = 4
-NEIGHBOUR_RANGE = 30.0
+NEIGHBOUR_RANGE = 30.0  # neighbour positions are divided by this (fixed, independent of the perception range)
+POS_SCALE = 10.0  # own canonical position is given in units of 10 m (fixed: independent of L, W)
+GOAL_SCALE = 25.0  # goal vectors (exit gate, exit mouth) in units of 25 m
+NB_FEATURES = 8  # per neighbour before its lamps: rel. pos (2), rel. heading (2), speed, present, curvature, accel
 
 # why a slot was cleared in the last step (Sim.done_kind)
 DONE_NONE, DONE_EXIT, DONE_WRONG, DONE_CRASH, DONE_OFFROAD, DONE_TIMEOUT = 0, 1, 2, 3, 4, 5
@@ -38,19 +53,39 @@ DONE_NAMES = ("none", "exit", "wrong_exit", "crash", "offroad", "timeout")
 ARM_U = np.array([[0.0, -1.0], [1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]])  # outward unit vector of arm k
 
 
+LANE_WIDTH = 3.5  # nominal lane width; only used by the rule-based baselines and delay metrics
+# the original crossing (one car per direction, no grip limit, no reverse): SimConfig(**NARROW)
+NARROW = {"W": 3.5, "Rc": 6.0, "a_lat_max": 0.0, "v_reverse": 0.0}
+
+
 @dataclass
 class SimConfig:
     L: float = 50.0  # arm length (spawn/exit distance from centre)
-    W: float = 3.5  # half road width
-    Rc: float = 6.0  # curb radius of the four inner corners
+    W: float = 7.0  # half road width (7 = two cars side by side per direction)
+    Rc: float = 9.0  # curb radius of the four inner corners
     dt: float = 0.1
     v_max: float = 14.0  # m/s (~50 km/h)
     acc_max: float = 3.0
     brake_max: float = 7.0
+    # slow reverse gear: speed range [-v_reverse, v_max] (0 = no reverse, the old physics).
+    # Heading/position use the signed speed (steering left while reversing turns the car
+    # clockwise, like a real car); grip uses v^2. Leaving through a wrong arm backwards is a
+    # wrong exit like any other.
+    v_reverse: float = 2.0
     kappa_max: float = 0.2  # 1 / minimum turning radius
     # steering rate limit: the curvature action is a target; the actual curvature moves
     # towards it by at most kappa_rate per second (0.4 = lock to lock in 1 s)
     kappa_rate: float = 0.4
+    # tyre grip: the actual curvature is limited to min(kappa_max, a_lat_max / v^2) (after
+    # the steering-rate limit). 4 m/s^2 ~ 0.4 g (normal driving); the tightest baseline
+    # turn (right turn, r ~ 10.75 m) then allows ~6.6 m/s; at 14 m/s r_min = 49 m.
+    # 0 disables the limit (the original physics: r_min = 5 m at any speed).
+    a_lat_max: float = 4.0
+    # lateral spawn offset: False = uniform over the whole road width (own spot, or uniform among
+    # the clear positions if it is blocked; both halves, no side preferred; the learning setting);
+    # True = only the right half (lane-disciplined arrivals, used by the rule-based baselines: they may rely
+    # on rules). Same random draws either way (see Sim._arrivals).
+    spawn_right: bool = False
     spawn_speed: float = 8.0
     spawn_clearance: float = 7.0
     # extra spawn clearance (s) per m/s of closing speed between the new car and an
@@ -66,34 +101,60 @@ class SimConfig:
     demand_range: tuple | None = None
     turn_probs: tuple = (1 / 3, 1 / 3, 1 / 3)  # right, straight, left
     signal_noise: float = 0.0  # std of gaussian noise on received signals
-    # perception range (m) of the neighbour block (positions stay scaled by NEIGHBOUR_RANGE)
+    # Per-checkpoint interface settings, kept only so old checkpoints still run as trained
+    # (applied by PolicyDriver.load; experiments.md: neither gave a benefit).
+    # perception range (m) of the neighbour block (positions stay scaled by NEIGHBOUR_RANGE);
+    # 60 in ppo11 / ppo14 / ppo15
     neighbour_vis: float = 30.0
-    # longitudinal action interface: False = action[0] is the acceleration (+: acc_max,
-    # -: brake_max); True = action[0] is a target speed in [0, v_max] reached with
-    # acc = clip((v_target - v) / speed_tau, -brake_max, acc_max) (same physical limits,
-    # but no flat region of the action at v_max, so "slow down" stays explorable)
+    # ppo16 only: action[0] is a target speed in [0, v_max] reached with
+    # acc = clip((v_target - v) / SPEED_TAU, -brake_max, acc_max) (no reverse)
     speed_control: bool = False
-    speed_tau: float = 0.5
     signal_enabled: bool = True
     # reward weights. Per car (Sim.car_reward); the team reward returned by step() is
     # their sum over the cars of an environment minus the queue cost.
     r_exit: float = 1.0
     r_wrong_exit: float = -1.0
-    r_crash: float = -2.0  # to every car involved in a collision
-    r_offroad: float = -2.0
+    # crash / off-road: base + per m/s of impact speed (car-car: |relative velocity| of the
+    # pair at contact, max over partners; off-road: own speed). Pure outcome, no blame: every
+    # car involved pays its own term. Order kept: exit (+1) > waiting > timeout (-1) > crash
+    # (-1.5 at walking pace ... -2.9 at 14 m/s ... -4.3 head-on at 2 x 14 m/s).
+    r_crash: float = -1.5  # to every car involved in a collision
+    r_crash_speed: float = 0.1  # extra cost per m/s of relative impact speed
+    r_offroad: float = -1.5
+    r_offroad_speed: float = 0.1  # extra cost per m/s of own speed when leaving the road
     r_timeout: float = -1.0
     r_progress: float = 0.01  # per metre of route-aware distance to the target gate (route_dist)
     r_time: float = 0.0  # cost per car per second on the road
     r_queue: float = 0.0  # team-level cost per queued (not yet entered) car per second
 
 
-# own state: canonical pos (2), heading (2), speed, manoeuvre one-hot (3), goal vector (2),
-# rays (N_RAYS), curvature kappa / kappa_max; the neighbour block is appended below
-OBS_DIM = 4 + 1 + 3 + 2 + N_RAYS + 1
+# own state: canonical pos (2, /POS_SCALE), heading (2), speed, manoeuvre one-hot (3),
+# ego-frame vectors to the exit gate (2) and to the exit mouth (2) (/GOAL_SCALE), rays (N_RAYS),
+# curvature kappa / kappa_max, grip-limited max curvature at the current speed / kappa_max;
+# the neighbour blocks are appended below
+OBS_DIM = 4 + 1 + 3 + 2 + 2 + N_RAYS + 1 + 1
+OBS_RAYS = 12  # index of the first ray
+
+
+def js_constants() -> dict:
+    """Everything the browser port (site/src/js/sim.js) takes from this module: SimConfig
+    defaults and the geometry / observation constants. site/build.py writes it to
+    js/sim-config.js, so no number is duplicated in JavaScript."""
+    defaults = {k: (list(v) if isinstance(v, tuple) else v) for k, v in SimConfig().__dict__.items()}
+    return {
+        "defaults": defaults,
+        "RIGHT": RIGHT, "STRAIGHT": STRAIGHT, "LEFT": LEFT,
+        "DISC_OFFSETS": DISC_OFFSETS.tolist(), "DISC_R": DISC_R, "SPAWN_LAT_MARGIN": SPAWN_LAT_MARGIN,
+        "SPAWN_BACK": SPAWN_BACK, "SPAWN_CURB_GAP": SPAWN_CURB_GAP, "SPAWN_RIGHT_MIN": SPAWN_RIGHT_MIN,
+        "SPAWN_LAT_STEP": SPAWN_LAT_STEP, "SPAWN_MAX_PER_STEP": SPAWN_MAX_PER_STEP, "SPEED_TAU": SPEED_TAU, "N_RAYS": N_RAYS, "RAY_ANGLES": RAY_ANGLES.tolist(), "RAY_RANGE": RAY_RANGE,
+        "K_NEIGHBOURS": K_NEIGHBOURS, "NEIGHBOUR_RANGE": NEIGHBOUR_RANGE, "POS_SCALE": POS_SCALE,
+        "GOAL_SCALE": GOAL_SCALE, "NB_FEATURES": NB_FEATURES, "LANE_WIDTH": LANE_WIDTH,
+        "OBS_DIM": OBS_DIM, "OBS_RAYS": OBS_RAYS, "DONE_NAMES": list(DONE_NAMES), "ARM_U": ARM_U.tolist(),
+    }
 
 
 def obs_dim(cfg: SimConfig) -> int:
-    return OBS_DIM + K_NEIGHBOURS * (6 + cfg.n_signal)
+    return OBS_DIM + K_NEIGHBOURS * (NB_FEATURES + cfg.n_signal)
 
 
 def act_dim(cfg: SimConfig) -> int:
@@ -178,17 +239,36 @@ def route_dist(cfg, arm, man, x, y):
     return np.where(in_box, d_box, np.where(a == man, d_target_arm, d_other))
 
 
+def n_lanes(cfg: SimConfig) -> int:
+    """Lanes per direction a W-wide half road has room for (baselines / metrics only)."""
+    return max(1, int(round(cfg.W / LANE_WIDTH)))
+
+
+def lane_offsets(cfg: SimConfig):
+    """Lateral offset (right of travel) of the outermost (right) and innermost (left) lane centre."""
+    lw = cfg.W / n_lanes(cfg)
+    return cfg.W - lw / 2, lw / 2
+
+
 def free_flow_time(cfg: SimConfig, manoeuvre):
-    """Approximate travel time of an unobstructed car at v_max (for delay metrics)."""
-    straight_len = 2 * cfg.L - 2.5
+    """Approximate travel time of an unobstructed car (for delay metrics): v_max on the
+    arms, the turn arc (right: from the right lane, left: from the left lane) at the
+    grip-limited speed min(v_max, sqrt(a_lat_max * r))."""
+    straight_len = 2 * cfg.L - SPAWN_BACK
     c = cfg.W + cfg.Rc
-    arm_len = 2 * (cfg.L - c) - 2.5
-    length = np.where(
-        manoeuvre == STRAIGHT,
-        straight_len,
-        np.where(manoeuvre == RIGHT, arm_len + np.pi / 2 * (c - cfg.W / 2), arm_len + np.pi / 2 * (c + cfg.W / 2)),
-    )
-    return length / cfg.v_max
+    arm_len = 2 * (cfg.L - c) - SPAWN_BACK
+    off_r, off_l = lane_offsets(cfg)
+    r = np.where(manoeuvre == RIGHT, c - off_r, c + off_l)
+    v_arc = np.minimum(cfg.v_max, np.sqrt(cfg.a_lat_max * r)) if cfg.a_lat_max > 0 else cfg.v_max
+    turn = arm_len / cfg.v_max + np.pi / 2 * r / v_arc
+    return np.where(manoeuvre == STRAIGHT, straight_len / cfg.v_max, turn)
+
+
+def grip_kappa(cfg: SimConfig, v):
+    """Largest curvature the tyres allow at speed v."""
+    if cfg.a_lat_max <= 0:
+        return np.full(np.shape(v), cfg.kappa_max)
+    return np.minimum(cfg.kappa_max, cfg.a_lat_max / np.maximum(np.asarray(v, dtype=float) ** 2, 1e-9))
 
 
 @dataclass
@@ -239,7 +319,8 @@ class Sim:
         self.y = np.zeros((B, N))
         self.th = np.zeros((B, N))
         self.v = np.zeros((B, N))
-        self.kappa = np.zeros((B, N))  # actual curvature (rate limited)
+        self.kappa = np.zeros((B, N))  # actual curvature (rate and grip limited)
+        self.acc = np.zeros((B, N))  # actual acceleration of the last step ((v_new - v_old) / dt)
         self.sig = np.zeros((B, N, cfg.n_signal))
         self.arm = np.zeros((B, N), dtype=np.int64)
         self.man = np.zeros((B, N), dtype=np.int64)  # manoeuvre 1..3
@@ -247,14 +328,14 @@ class Sim:
         self.uid = np.full((B, N), -1, dtype=np.int64)  # stable id per car (trajectory id for RL)
         self.group = np.zeros((B, N), dtype=np.int64)  # policy group (for mixed populations)
         self.queue = np.zeros((B, 4), dtype=np.int64)  # cars waiting to enter per arm
-        self.queue_lat = np.zeros((B, 4))  # lateral offset of the head of each queue
+        self.queue_u = np.zeros((B, 4))  # lateral draw u of the head of each queue (see _arrivals)
         self.queue_man = np.ones((B, 4), dtype=np.int64)
         self.queue_grp = np.zeros((B, 4), dtype=np.int64)
         # FIFO of queued cars' attributes (drawn at arrival time, so CRN holds even
         # when two policies release cars from the queue at different times)
         self._qcap = 64
         self._qhead = np.zeros((B, 4), dtype=np.int64)
-        self._qbuf = np.zeros((B, 4, self._qcap, 3))  # lat, man, grp
+        self._qbuf = np.zeros((B, 4, self._qcap, 3))  # u (lateral draw), man, grp
         self.next_uid = 0
         self.t = 0.0
         self.stats = Stats(B)
@@ -297,24 +378,29 @@ class Sim:
         c, s = rot(-arm)
         # canonical frame: rotate world so that the entry arm is south
         cth = th - arm * (np.pi / 2)
-        gc, gs = rot((arm + man) % 4)
-        dx, dy = gs * L - x, -gc * L - y  # to the centre of the target gate
+        ut = ARM_U[(arm + man) % 4]  # outward unit vector of the target arm (world)
+        c0 = W + cfg.Rc
+        dx, dy = L * ut[:, 0] - x, L * ut[:, 1] - y  # to the centre of the target (exit) gate
+        mx, my = c0 * ut[:, 0] - x, c0 * ut[:, 1] - y  # to the centre of the target arm's mouth
         ct, st = np.cos(th), np.sin(th)
         o = obs[bi, ni]
-        o[:, 0] = (c * x - s * y) / L
-        o[:, 1] = (s * x + c * y) / L
+        o[:, 0] = (c * x - s * y) / POS_SCALE
+        o[:, 1] = (s * x + c * y) / POS_SCALE
         o[:, 2] = np.cos(cth)
         o[:, 3] = np.sin(cth)
         o[:, 4] = self.v[bi, ni] / cfg.v_max
         o[:, 5] = man == RIGHT
         o[:, 6] = man == STRAIGHT
         o[:, 7] = man == LEFT
-        o[:, 8] = (ct * dx + st * dy) / L
-        o[:, 9] = (-st * dx + ct * dy) / L
+        o[:, 8] = (ct * dx + st * dy) / GOAL_SCALE
+        o[:, 9] = (-st * dx + ct * dy) / GOAL_SCALE
+        o[:, 10] = (ct * mx + st * my) / GOAL_SCALE
+        o[:, 11] = (-st * mx + ct * my) / GOAL_SCALE
         # rays to the road edge in the ego frame (exact distance, capped)
         ang = th[:, None] + RAY_ANGLES  # (M,R)
-        o[:, 10 : 10 + N_RAYS] = ray_edge_dist(x[:, None], y[:, None], np.cos(ang), np.sin(ang), W, cfg.Rc) / RAY_RANGE
-        o[:, 10 + N_RAYS] = self.kappa[bi, ni] / cfg.kappa_max
+        o[:, OBS_RAYS : OBS_RAYS + N_RAYS] = ray_edge_dist(x[:, None], y[:, None], np.cos(ang), np.sin(ang), W, cfg.Rc) / RAY_RANGE
+        o[:, OBS_RAYS + N_RAYS] = self.kappa[bi, ni] / cfg.kappa_max
+        o[:, OBS_RAYS + N_RAYS + 1] = grip_kappa(cfg, self.v[bi, ni]) / cfg.kappa_max
         # neighbours: K nearest other cars within range, sorted by distance
         ddx = self.x[bi] - x[:, None]  # (M, N) = x_j - x_i
         ddy = self.y[bi] - y[:, None]
@@ -333,7 +419,7 @@ class Sim:
         ny = np.take_along_axis(ddy, idx, -1)
         b2 = bi[:, None]
         nth = self.th[b2, idx] - th[:, None]
-        blk = 6 + cfg.n_signal
+        blk = NB_FEATURES + cfg.n_signal
         f = np.zeros((len(bi), K, blk))
         ct2, st2 = ct[:, None], st[:, None]
         f[..., 0] = (ct2 * nx + st2 * ny) / NEIGHBOUR_RANGE
@@ -342,10 +428,12 @@ class Sim:
         f[..., 3] = np.sin(nth)
         f[..., 4] = self.v[b2, idx] / cfg.v_max
         f[..., 5] = 1.0
+        f[..., 6] = self.kappa[b2, idx] / cfg.kappa_max  # visible: how hard it is turning
+        f[..., 7] = self.acc[b2, idx] / cfg.brake_max  # visible: brake lights / pitch
         if cfg.signal_enabled:
-            f[..., 6:] = self.sig[b2, idx]
+            f[..., NB_FEATURES:] = self.sig[b2, idx]
             if cfg.signal_noise > 0:
-                f[..., 6:] += self.noise_rng.normal(0, cfg.signal_noise, f[..., 6:].shape)
+                f[..., NB_FEATURES:] += self.noise_rng.normal(0, cfg.signal_noise, f[..., NB_FEATURES:].shape)
         f *= present[..., None]
         o[:, OBS_DIM : OBS_DIM + K * blk] = f.reshape(len(bi), -1)
         obs[bi, ni] = o
@@ -363,14 +451,25 @@ class Sim:
         alive = self.alive
         if cfg.speed_control:
             v_t = (a[..., 0] + 1.0) * 0.5 * cfg.v_max
-            acc = np.clip((v_t - self.v) / cfg.speed_tau, -cfg.brake_max, cfg.acc_max)
+            acc = np.clip((v_t - self.v) / SPEED_TAU, -cfg.brake_max, cfg.acc_max)
+            v = np.clip(self.v + acc * cfg.dt, 0.0, cfg.v_max)  # (no reverse in this interface)
         else:
-            acc = np.where(a[..., 0] > 0, a[..., 0] * cfg.acc_max, a[..., 0] * cfg.brake_max)
+            # pedal: + accelerates forward (acc_max) / brakes a reversing car (brake_max);
+            # - brakes a forward-moving car (brake_max) / accelerates backwards (acc_max) once
+            # stopped. Within one step the speed never crosses 0 (stop, then change direction).
+            u0 = a[..., 0]
+            fwd = self.v > 0
+            bwd = self.v < 0
+            acc = np.where(u0 > 0, u0 * np.where(bwd, cfg.brake_max, cfg.acc_max), u0 * np.where(fwd, cfg.brake_max, cfg.acc_max))
+            v = np.clip(self.v + acc * cfg.dt, -cfg.v_reverse, cfg.v_max)
+            v = np.where((fwd & (v < 0)) | (bwd & (v > 0)), 0.0, v)
         dk = cfg.kappa_rate * cfg.dt
-        self.kappa = np.where(alive, self.kappa + np.clip(a[..., 1] * cfg.kappa_max - self.kappa, -dk, dk), 0.0)
+        kap = self.kappa + np.clip(a[..., 1] * cfg.kappa_max - self.kappa, -dk, dk)
+        kg = grip_kappa(cfg, v)  # tyre grip at the new speed (after the steering-rate limit)
+        self.kappa = np.where(alive, np.clip(kap, -kg, kg), 0.0)
         self.sig = np.where(alive[..., None], a[..., 2:], 0.0)
-        v = np.clip(self.v + acc * cfg.dt, 0.0, cfg.v_max)
         th = self.th + v * self.kappa * cfg.dt
+        self.acc = np.where(alive, (v - self.v) / cfg.dt, 0.0)
         self.x = np.where(alive, self.x + v * np.cos(th) * cfg.dt, self.x)
         self.y = np.where(alive, self.y + v * np.sin(th) * cfg.dt, self.y)
         self.th = np.where(alive, (th + np.pi) % (2 * np.pi) - np.pi, self.th)
@@ -406,13 +505,13 @@ class Sim:
         # off-road: any disc overlapping the complement of the road
         ox, oy = self._discs()
         off = (corner_dist(ox, oy, cfg.W, cfg.Rc) < cfg.Rc + DISC_R).any(-1) & alive
-        # collisions between cars (both cars of a pair are marked)
-        col = self._collisions(ox, oy, alive)
+        # collisions between cars (both cars of a pair are marked; vrel = impact speed)
+        col, vrel = self._collisions(ox, oy, alive)
         crash = col & ~off
         for kind, m in (("offroad", off), ("crash", crash)):
             for b, n in zip(*np.nonzero(m)):
                 self.events.append((b, kind, self.x[b, n], self.y[b, n]))
-        cr += cfg.r_offroad * off + cfg.r_crash * crash
+        cr += off * (cfg.r_offroad - cfg.r_offroad_speed * self.v) + crash * (cfg.r_crash - cfg.r_crash_speed * vrel)
         self.done_kind[off] = DONE_OFFROAD
         self.done_kind[crash] = DONE_CRASH
         self.stats.offroad += off.sum(1)
@@ -438,21 +537,26 @@ class Sim:
         N = self.cfg.n_slots
         dcx = self.x[:, :, None] - self.x[:, None, :]
         dcy = self.y[:, :, None] - self.y[:, None, :]
-        near = (dcx**2 + dcy**2 < (2 * 1.4 + 2 * DISC_R) ** 2) & alive[:, :, None] & alive[:, None, :]
+        near = (dcx**2 + dcy**2 < (2 * DISC_OFFSETS[-1] + 2 * DISC_R) ** 2) & alive[:, :, None] & alive[:, None, :]
         near &= ~np.eye(N, dtype=bool)[None]
+        vrel = np.zeros(alive.shape)
         if not near.any():
-            return np.zeros_like(alive)
+            return np.zeros_like(alive), vrel
         b, i, j = np.nonzero(near)
         dx = ox[b, i][:, :, None] - ox[b, j][:, None, :]
         dy = oy[b, i][:, :, None] - oy[b, j][:, None, :]
         hit = ((dx**2 + dy**2) < (2 * DISC_R) ** 2).any((1, 2))
         col = np.zeros_like(alive)
         col[b[hit], i[hit]] = True
-        return col
+        b, i, j = b[hit], i[hit], j[hit]
+        vx, vy = self.v * np.cos(self.th), self.v * np.sin(self.th)
+        np.maximum.at(vrel, (b, i), np.hypot(vx[b, i] - vx[b, j], vy[b, i] - vy[b, j]))
+        return col, vrel
 
     def _remove(self, mask):
         self.alive &= ~mask
         self.v[mask] = 0.0
+        self.acc[mask] = 0.0
         self.sig[mask] = 0.0
         self.age[mask] = 0.0
         self.uid[mask] = -1
@@ -461,16 +565,50 @@ class Sim:
         self.y[mask] = 1e4
 
     # ------------------------------------------------------------------ spawning
+    def spawn_lats(self):
+        """Candidate lateral spawn offsets (right of travel): an even grid over the spawn
+        range (whole width, or the right half with spawn_right)."""
+        cfg = self.cfg
+        lo = SPAWN_RIGHT_MIN if cfg.spawn_right else -(cfg.W - SPAWN_CURB_GAP)
+        hi = cfg.W - SPAWN_CURB_GAP
+        m = max(int(round((hi - lo) / SPAWN_LAT_STEP)), 1)
+        return lo + (hi - lo) * np.arange(m + 1) / m
+
+    def _spawn_clear(self, sx, sy, h, x, y, vx, vy, alive):
+        """(b, M) whether candidate spawn points (sx, sy) (M,) with heading h keep the spawn
+        clearance (+ closing-speed headway) to every car (x, y, vx, vy, alive: (b, N))."""
+        cfg = self.cfg
+        dx, dy = x[:, None, :] - sx[:, None], y[:, None, :] - sy[:, None]
+        dist = np.hypot(dx, dy)
+        dd = np.maximum(dist, 1e-6)
+        ch, sh = np.cos(h), np.sin(h)
+        # closing speed along the line of sight between the new car and car j
+        rvx, rvy = cfg.spawn_speed * ch - vx[:, None, :], cfg.spawn_speed * sh - vy[:, None, :]
+        closing = np.maximum((rvx * dx + rvy * dy) / dd, 0.0)
+        # outside the new car's lateral corridor only its own speed counts (the other
+        # car is treated as standing: it may be queued in the lane the new car joins)
+        own = np.maximum(cfg.spawn_speed * (ch * dx + sh * dy) / dd, 0.0)
+        lat_off = np.abs(-sh * dx + ch * dy)
+        closing = np.where(lat_off < 2 * DISC_R + SPAWN_LAT_MARGIN, closing, own)
+        return ((dist > cfg.spawn_clearance + cfg.spawn_headway * closing) | ~alive[:, None, :]).all(-1)
+
     def _arrivals(self):
+        """Queue new arrivals, then release queued cars. Each arrival draws (u, manoeuvre,
+        group) when it arrives (CRN: the same draws for every policy). The head of a queue
+        enters as soon as some lateral position of its arm is clear (spawn_clearance +
+        closing-speed headway to every car) and a slot is free: at its own spot (fraction u
+        across the spawn range, spawn_lats grid) if that is clear, else at the floor(u * n_free)-th
+        clear position (uniform among the free ones; no side preferred). Several cars of one
+        arm may enter in the same step (side by side) while room is left."""
         cfg = self.cfg
         S = self.S
         # draw every random number unconditionally so streams stay aligned (CRN)
         dem = cfg.demand if self._stream_demand is None else self._stream_demand[:, None]
         arrive = self.rng.random((S, 4)) < dem * cfg.dt
-        lat = self.rng.uniform(-(cfg.W - 1.2), cfg.W - 1.2, (S, 4))
+        u = self.rng.random((S, 4))
         man = self.rng.choice([RIGHT, STRAIGHT, LEFT], size=(S, 4), p=np.asarray(cfg.turn_probs) / sum(cfg.turn_probs))
         grp = self.rng.choice(len(self.group_probs), size=(S, 4), p=self.group_probs)
-        arrive, lat, man, grp = arrive[self.scen], lat[self.scen], man[self.scen], grp[self.scen]
+        arrive, u, man, grp = arrive[self.scen], u[self.scen], man[self.scen], grp[self.scen]
         if (self.queue + arrive).max() > self._qcap:  # grow the FIFO (keeps order)
             new = np.zeros((self.B, 4, 2 * self._qcap, 3))
             for j in range(self._qcap):
@@ -478,55 +616,66 @@ class Sim:
             self._qbuf, self._qhead, self._qcap = new, np.zeros_like(self._qhead), 2 * self._qcap
         bi, ki = np.nonzero(arrive)
         slot = (self._qhead[bi, ki] + self.queue[bi, ki]) % self._qcap
-        self._qbuf[bi, ki, slot] = np.stack([lat[bi, ki], man[bi, ki], grp[bi, ki]], -1)
+        self._qbuf[bi, ki, slot] = np.stack([u[bi, ki], man[bi, ki], grp[bi, ki]], -1)
         self.queue += arrive
         self.stats.arrived += arrive.sum(1)
-        head = np.take_along_axis(self._qbuf, self._qhead[..., None, None], 2)[:, :, 0]
-        self.queue_lat, self.queue_man, self.queue_grp = head[..., 0], head[..., 1].astype(np.int64), head[..., 2].astype(np.int64)
         # velocities of existing cars (for the closing-speed spawn clearance)
         vx, vy = self.v * np.cos(self.th), self.v * np.sin(self.th)
         spawned = np.zeros(self.alive.shape, dtype=bool)
+        lats = self.spawn_lats()
+        back = -cfg.L + SPAWN_BACK
         for k in range(4):
-            want = self.queue[:, k] > 0
-            if not want.any():
-                continue
             c, s = rot(k)
-            u = self.queue_lat[:, k]
-            # canonical spawn point (u, -L + 2.5) rotated by k*90deg
-            sx = c * u - s * (-cfg.L + 2.5)
-            sy = s * u + c * (-cfg.L + 2.5)
             h = np.pi / 2 + k * np.pi / 2  # canonical heading (north) rotated by k*90deg
-            dx, dy = self.x - sx[:, None], self.y - sy[:, None]
-            dist = np.hypot(dx, dy)
-            # closing speed along the line of sight between the new car and car j
-            rvx, rvy = cfg.spawn_speed * np.cos(h) - vx, cfg.spawn_speed * np.sin(h) - vy
-            closing = np.maximum((rvx * dx + rvy * dy) / np.maximum(dist, 1e-6), 0.0)
-            # outside the new car's lateral corridor only its own speed counts (the other
-            # car is treated as standing: it may be queued in the lane the new car joins)
-            own = np.maximum(cfg.spawn_speed * (np.cos(h) * dx + np.sin(h) * dy) / np.maximum(dist, 1e-6), 0.0)
-            lat_off = np.abs(-np.sin(h) * dx + np.cos(h) * dy)
-            closing = np.where(lat_off < 2 * DISC_R + SPAWN_LAT_MARGIN, closing, own)
-            margin = cfg.spawn_headway * closing
-            clear = (dist > cfg.spawn_clearance + margin) | ~self.alive
-            ok = want & clear.all(1) & (~self.alive).any(1)
-            for b in np.nonzero(ok)[0]:
-                n = np.argmin(self.alive[b])
+            hn = np.arctan2(np.sin(h), np.cos(h))
+            # candidate spawn points (lat, -L + SPAWN_BACK) rotated by k*90deg
+            px, py = c * lats - s * back, s * lats + c * back
+            mx, my, half = px.mean(), py.mean(), 0.5 * (lats[-1] - lats[0])
+            for _ in range(SPAWN_MAX_PER_STEP):
+                b = np.nonzero((self.queue[:, k] > 0) & (~self.alive).any(1))[0]
+                if len(b) == 0:
+                    break
+                # only cars that can be within reach matter: clearance + headway * the largest
+                # possible closing speed around any candidate point (keeps the (b, M, K) block small)
+                reach = cfg.spawn_clearance + cfg.spawn_headway * (cfg.spawn_speed + np.hypot(vx[b], vy[b]))
+                near = self.alive[b] & (np.hypot(self.x[b] - mx, self.y[b] - my) < reach + half)
+                K = int(near.sum(1).max())
+                if K == 0:
+                    clear = np.ones((len(b), len(lats)), dtype=bool)
+                else:
+                    idx = np.argsort(~near, axis=1, kind="stable")[:, :K]
+                    g = lambda a: np.take_along_axis(a, idx, 1)  # noqa: E731
+                    clear = self._spawn_clear(px, py, h, g(self.x[b]), g(self.y[b]), g(vx[b]), g(vy[b]), g(near))
+                cnt = clear.sum(1)
+                ok = cnt > 0
+                if not ok.any():
+                    break
+                b, clear, cnt = b[ok], clear[ok], cnt[ok]
+                head = self._qhead[b, k]
+                qu, qman, qgrp = self._qbuf[b, k, head].T
+                # own spot (u across the range) if clear, else the clear spot of the same rank u
+                j0 = np.floor(qu * (len(lats) - 1) + 0.5).astype(np.int64)
+                pick = np.minimum(np.floor(qu * cnt).astype(np.int64), cnt - 1)
+                j = np.where(clear[np.arange(len(b)), j0], j0, np.argmax(np.cumsum(clear, 1) > pick[:, None], 1))
+                n = np.argmin(self.alive[b], 1)
                 self.alive[b, n] = True
-                self.x[b, n], self.y[b, n] = sx[b], sy[b]
-                self.th[b, n] = np.arctan2(np.sin(h), np.cos(h))
+                self.x[b, n], self.y[b, n] = px[j], py[j]
+                self.th[b, n] = hn
                 self.v[b, n] = cfg.spawn_speed
+                vx[b, n], vy[b, n] = cfg.spawn_speed * np.cos(hn), cfg.spawn_speed * np.sin(hn)
                 self.kappa[b, n] = 0.0
+                self.acc[b, n] = 0.0
                 self.arm[b, n] = k
-                self.man[b, n] = self.queue_man[b, k]
-                self.group[b, n] = self.queue_grp[b, k]
+                self.man[b, n] = qman.astype(np.int64)
+                self.group[b, n] = qgrp.astype(np.int64)
                 self.age[b, n] = 0.0
-                self.uid[b, n] = self.next_uid
-                self.next_uid += 1
+                self.uid[b, n] = self.next_uid + np.arange(len(b))
+                self.next_uid += len(b)
                 self.queue[b, k] -= 1
-                self._qhead[b, k] = (self._qhead[b, k] + 1) % self._qcap
+                self._qhead[b, k] = (head + 1) % self._qcap
                 self.stats.spawned[b] += 1
                 spawned[b, n] = True
-                hd = self._qbuf[b, k, self._qhead[b, k]]
-                self.queue_lat[b, k], self.queue_man[b, k], self.queue_grp[b, k] = hd[0], int(hd[1]), int(hd[2])
+        head = np.take_along_axis(self._qbuf, self._qhead[..., None, None], 2)[:, :, 0]
+        self.queue_u, self.queue_man, self.queue_grp = head[..., 0], head[..., 1].astype(np.int64), head[..., 2].astype(np.int64)
         if spawned.any():
             self._prev_dist = np.where(spawned, self.dist_to_gate(), self._prev_dist)

@@ -6,62 +6,69 @@
 <title>Vergleich – Smart Crossing</title>
 <meta name="description" content="Gelernte Autos ohne Regeln im Vergleich mit Ampel und zentralem Verkehrsrechner.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/site.css?v=04d45078">
+<link rel="stylesheet" href="css/site.css?v=2269bcb9">
 </head>
 <body data-page="vergleich">
 <div class="wrap">
 <header class="top"><a class="brand" href="index.html"><svg viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="5" fill="#3b5640"/><path d="M9 0h6v24H9zM0 9h24v6H0z" fill="#46484d"/><rect x="5" y="10.2" width="6" height="3.6" rx="1" fill="#f5a623"/><rect x="10.2" y="14" width="3.6" height="6" rx="1" fill="#4287f5"/></svg>Smart Crossing</a><nav class="nav" aria-label="Seiten"><a href="index.html">Start</a><a href="sehen.html">Was sieht ein Auto?</a><a href="tun.html">Was kann es tun?</a><a href="gehirn.html">Das Gehirn</a><a href="lernen.html">Wie lernen sie?</a><a href="vergleich.html" aria-current="page">Vergleich</a></nav></header>
 <h1>Wie gut sind sie?</h1>
-<p class="lead">Um zu wissen, was „gut“ heißt, gibt es zwei handgeschriebene Vergleichsfahrer. Die dürfen schummeln: Sie haben feste Spuren
-  und Regeln, die ich ihnen einprogrammiert habe.</p>
+<p class="lead">Damit „gut“ etwas heißt, brauchen die gelernten Autos einen Maßstab. Dafür gibt es zwei Vergleichsfahrer, die ich von Hand programmiert habe.
+  Die dürfen schummeln: Sie fahren auf festen Spuren und nach festen Regeln.</p>
 <div class="two">
-  <div class="card"><h3 style="margin-top:0">Ampel</h3><p class="small">Jede Zufahrt bekommt reihum Grün, immer nur eine. Leere Zufahrten werden übersprungen.
-    Sicher, aber viel Warterei – die vorsichtige Untergrenze.</p></div>
-  <div class="card"><h3 style="margin-top:0">Zentraler Verkehrsrechner</h3><p class="small">Jedes Auto meldet sich per Funk an und bekommt ein genaues Zeitfenster,
-    in dem es durch die Kreuzung darf („Reservierung“). So würde man es mit perfekter Technik machen – die Obergrenze.</p></div>
+  <div class="card"><h3 style="margin-top:0">Ampel</h3><p class="small">Jede Zufahrt bekommt reihum Grün, die anderen warten.
+    Sicher, aber viel Warterei – so macht man es heute.</p></div>
+  <div class="card"><h3 style="margin-top:0">Zentraler Verkehrsrechner</h3><p class="small">Ein Computer an der Kreuzung teilt jedem Auto per Funk ein genaues Zeitfenster zu,
+    in dem es durchfahren darf. Bräuchte perfekte Technik – so gut ginge es höchstens.</p></div>
 </div>
+
+<h2>Gleicher Verkehr, drei Fahrweisen</h2>
+<p>Alle drei bekommen genau dieselben Autos zur selben Zeit mit demselben Ziel. Einziger Unterschied: Bei Ampel und Verkehrsrechner tauchen die Autos
+  immer in der rechten Straßenhälfte auf (ihrer Spur), die gelernten Autos irgendwo auf der ganzen Breite.</p>
+<div id="side"></div>
+<p class="muted small">Farbe = Ziel (<b>blau</b> rechts, <b>weiß</b> geradeaus, <b>orange</b> links), rote Rücklichter = Bremslicht. „+3“ am Rand: so viele Autos warten noch auf die Einfahrt.</p>
 
 <h2>Durchsatz: wie viele kommen pro Minute durch?</h2>
 <div id="c-thr"></div>
-<p class="muted small">Die gestrichelte Linie ist die Nachfrage: so viele Autos kommen pro Minute an. Wer darauf liegt, schafft alle.</p>
+<p class="muted small">Die gestrichelte Linie ist die Nachfrage: so viele Autos kommen pro Minute an. Wer darauf liegt, schafft alle. <span id="c-thr-note"></span></p>
 <div class="tablewrap card" style="padding:4px 6px"><table class="data" id="t-thr"></table></div>
 
 <h2>Wie viele kommen heil an?</h2>
+<p>Je Feld: Anteil der Autos, die heil ans Ziel kommen · Unfälle pro 1000 Autos, die die Kreuzung verlassen haben.
+  Als Unfall zählt hier (und oben) auch, wer von der Straße abkommt.</p>
 <div class="tablewrap card" style="padding:4px 6px"><table class="data" id="t-ok"></table></div>
-
-<h2>Wie viele verunglücken?</h2>
-<p>Unfälle und Abkommen von der Straße, gezählt pro 1000 Autos, die die Kreuzung verlassen haben.</p>
-<div class="tablewrap card" style="padding:4px 6px"><table class="data" id="t-bad"></table></div>
 <p class="muted small" id="bench-setup"></p>
 
 <h2>Ehrlich gesagt</h2>
 <div class="note warn">
-  <p>Beim <b>Durchsatz</b> schlagen die gelernten Autos (PPO) die Ampel deutlich: Ab mittlerem Verkehr kommen pro Minute
-    fast anderthalbmal so viele durch, und kaum jemand wartet. Aber: Bei mittlerem Verkehr verunglückt noch etwa
-    <b>jedes sechste bis siebte Auto</b> (rund 15 %), bei wenig Verkehr etwa 4 %. Ampel und Verkehrsrechner schaffen das ohne einen einzigen Unfall –
-    und der Verkehrsrechner ist auch beim Durchsatz noch besser.</p>
-  <p style="margin:0">Der Grund: Die Autos fahren fast immer Vollgas und haben nicht gelernt, zu bremsen oder jemanden vorzulassen –
-    obwohl sie das andere Auto rechtzeitig sehen. Das ist der Stand eines Hobbyprojekts, kein Endergebnis.</p>
+  <p>Beim <b>Durchsatz</b> schlagen die gelernten Autos die Ampel ab mittlerem Verkehr: Bei viel Verkehr kommen pro Minute
+    deutlich mehr durch, und kaum jemand wartet. Aber: Bei mittlerem Verkehr verunglücken noch <b id="h-mid">viele</b> der Autos,
+    bei wenig Verkehr <span id="h-low">weniger</span> (siehe Tabelle). Ampel und Verkehrsrechner schaffen das ohne einen einzigen Unfall – und der Verkehrsrechner ist auch beim Durchsatz weit vorn.</p>
+  <p style="margin:0">Fast alle Unfälle sind Zusammenstöße mit anderen Autos; ein Auto allein kommt immer an. Die Autos bremsen inzwischen öfter
+    (die Reifen zwingen sie in Kurven dazu), lassen andere aber noch zu selten vor. Das ist der Stand eines Hobbyprojekts, kein Endergebnis.</p>
 </div>
 
 <h2>Was ist von selbst entstanden?</h2>
 <ul>
-  <li><b>Rechts- oder Linksverkehr – ja.</b> Niemand hat den Autos eine Seite vorgegeben, und sie starten an zufälliger Stelle der Straße.
-    Trotzdem einigen sich alle Autos eines Trainingslaufs auf eine Seite: In einem Lauf (Startwert 0) fahren sie links,
-    in einem anderen, sonst gleichen Lauf (Startwert 1) rechts. Welche Seite es wird, ist Zufall – dass es eine feste Seite gibt, nicht.
-    Das passiert mit und ohne Lampe.</li>
-  <li><b>Eine Lampensprache – nein (bisher).</b> Die Lampe eines Autos verrät zwar etwas darüber, wohin es abbiegt und wie schnell es ist.
-    Aber die anderen Autos achten nicht darauf: Schaltet man alle Lampen ab oder vertauscht sie zufällig zwischen den Autos,
-    fahren sie genauso gut. Autos, die ganz ohne Lampe trainiert wurden, sind gleich gut.</li>
-  <li><b>Gemeinsinn hilft (noch) nicht.</b> Wenn ein Auto auch Punkte für das Wohl der anderen bekommt, fährt es nicht anders.
-    Bekommt es sie von Anfang an voll, lernen die Autos sogar, sofort von der Straße zu fahren – wer früh weg ist, muss die Unfälle der anderen nicht mittragen.</li>
+  <li><b>Rechtsverkehr – ja.</b> Niemand hat den Autos eine Seite vorgegeben, und sie starten an zufälliger Stelle der Straße.
+    Trotzdem fahren auf der breiten Kreuzung fast alle (82–96 %) rechts – in beiden Trainingsläufen mit verschiedenem Zufallsstart.
+    (Auf der alten, schmalen Kreuzung fuhr ein Lauf links, der andere rechts. Mit nur zwei Läufen kann das noch Zufall sein.)</li>
+  <li><b>Fahrspuren – nein.</b> Die Autos nutzen die rechte Hälfte wie eine einzige breite Spur. Sie fahren dabei leicht in Schlangenlinien –
+    das kostet sie kaum etwas (ein kleiner Umweg), also lassen sie es nicht.</li>
+  <li><b>Eine Lampensprache – nein (bisher).</b> Die Lampe eines Autos verrät zwar etwas darüber, wohin es abbiegt
+    (gemessen auf der schmalen und der breiten Kreuzung). Aber die anderen Autos achten kaum darauf: Schaltet man alle Lampen ab, fahren sie genauso gut.
+    Vertauscht man die Lampen zwischen den Autos, gibt es etwas mehr Unfälle (etwa 10–18 pro 1000 Autos) – ein erster schwacher Hinweis, keine Sprache.</li>
+  <li><b>Rückwärtsgang – kaum.</b> Die Autos dürften zurücksetzen, tun es aber so gut wie nie.</li>
+  <li><b>Gemeinsinn hilft (noch) nicht.</b> Wenn ein Auto auch Punkte für das Wohl der anderen bekommt, fährt es nicht anders (getestet auf der schmalen Kreuzung).</li>
 </ul>
-<footer>Smart Crossing – ein Hobbyprojekt. Alles läuft direkt in deinem Browser, es werden keine Daten gesammelt. Stand: 2026-10-10.</footer>
+<footer>Smart Crossing – ein Hobbyprojekt. Alles läuft direkt in deinem Browser, es werden keine Daten gesammelt. Stand: 2026-10-11. <a href="https://github.com/Sipsipl/smartcrossing">Code auf GitHub</a></footer>
 </div>
-<script src="data/site-data.js?v=04d45078"></script>
-<script src="js/sim.js?v=04d45078"></script>
-<script src="js/crossing.js?v=04d45078"></script>
-<script src="js/charts.js?v=04d45078"></script>
-<script src="js/pages.js?v=04d45078"></script>
+<script src="data/site-data.js?v=2269bcb9"></script>
+<script src="js/sim-config.js?v=2269bcb9"></script>
+<script src="js/sim.js?v=2269bcb9"></script>
+<script src="js/crossing.js?v=2269bcb9"></script>
+<script src="js/charts.js?v=2269bcb9"></script>
+<script src="data/replays.js?v=2269bcb9"></script>
+<script src="js/replay.js?v=2269bcb9"></script>
+<script src="js/pages.js?v=2269bcb9"></script>
 </body>
 </html>

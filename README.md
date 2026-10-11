@@ -40,7 +40,7 @@ cd site/public && python3 -m http.server 8000                            # Websi
 | `smartcrossing/sim.py` | Simulation der Kreuzung (numpy, viele Kreuzungen parallel) |
 | `smartcrossing/ppo.py`, `es.py` | Training: PPO und Evolution Strategies |
 | `smartcrossing/baselines.py` | Vergleichsfahrer mit Spuren: Ampel und zentraler Verkehrsrechner |
-| `viewer/`, `site/` | Browser-Version der Simulation und die Website |
+| `site/` | die Website; `site/src/js/sim.js` ist die Browser-Version der Simulation |
 | `docs/PLAN.md` | Ziele, Entscheidungen, Architektur |
 | `docs/experiments.md` | Protokoll aller Trainingsläufe |
 

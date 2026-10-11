@@ -8,7 +8,11 @@ from smartcrossing.sim import (
     DONE_NONE,
     DONE_OFFROAD,
     LEFT,
+    N_RAYS,
+    NARROW,
+    OBS_RAYS,
     RIGHT,
+    SPAWN_MAX_PER_STEP,
     STRAIGHT,
     Sim,
     SimConfig,
@@ -38,7 +42,9 @@ def test_spawn_positions_and_headings_all_arms():
     cfg = SimConfig(demand=100.0)  # an arrival on every arm every step
     sim = Sim(cfg, 1, seed=3)
     sim.step(zeros(sim))
-    assert sim.alive[0].sum() == 4
+    # every arm releases at least one car; more may enter side by side
+    assert set(sim.arm[0][sim.alive[0]]) == {0, 1, 2, 3}
+    assert sim.alive[0].sum() <= 4 * SPAWN_MAX_PER_STEP
     lim = cfg.W - 1.2
     d = cfg.L - 2.5
     for n in np.nonzero(sim.alive[0])[0]:
@@ -139,21 +145,23 @@ def test_crn_identical_scenarios_identical_states():
 
 
 def test_crn_queue_attributes_independent_of_policy():
-    """Cars keep the attributes drawn at their arrival even if a policy holds the queue."""
+    """Cars keep the attributes drawn at their arrival even if a policy holds the queue
+    (the lateral offset depends on which positions are clear, so only the manoeuvre is compared)."""
     cfg = SimConfig(demand=0.3)
     sim = Sim(cfg, 2, seed=11, n_scenarios=1)
     seen = [dict(), dict()]  # per env: uid -> (arm, man, lateral)
     for i in range(400):
         a = zeros(sim)
         a[0, :, 0] = 1.0  # env 0 drives on (straight ahead)
-        a[1, :, 0] = -1.0  # env 1 stops at once -> its queues back up
+        a[1, :, 0] = np.where(sim.v[1] > 0, -1.0, 0.0)  # env 1 stops at once (no reverse) -> queues back up
         sim.step(a)
         for b in range(2):
             for n in np.nonzero(sim.alive[b])[0]:
                 if sim.age[b, n] == 0.0:
                     k = sim.arm[b, n]
                     lat = [sim.x, sim.y, sim.x, sim.y][k][b, n]
-                    seen[b][sim.uid[b, n]] = (k, sim.man[b, n], round(float(lat), 9))
+                    assert abs(lat) <= sim.cfg.W - 1.2 + 1e-9
+                    seen[b][sim.uid[b, n]] = (k, sim.man[b, n])
     for k in range(4):
         s0 = [v[1:] for _, v in sorted(seen[0].items()) if v[0] == k]
         s1 = [v[1:] for _, v in sorted(seen[1].items()) if v[0] == k]
@@ -187,8 +195,9 @@ def test_observation_shape():
 
 
 @pytest.mark.parametrize("control", ["reservation", "light"])
-def test_rule_based_baselines_are_safe(control):
-    cfg = SimConfig(demand=0.1)
+@pytest.mark.parametrize("narrow", [False, True])
+def test_rule_based_baselines_are_safe(control, narrow):
+    cfg = SimConfig(demand=0.1, **(NARROW if narrow else {}))
     sim = Sim(cfg, 2, seed=1000)
     drv = LaneDriver(sim, control)
     for _ in range(600):
@@ -237,12 +246,76 @@ def test_steering_rate_limit_and_kappa_obs():
     place(sim, 0, 0, 0.0, -30.0, np.pi / 2, v=5.0)
     a = zeros(sim)
     a[0, 0, 1] = 1.0  # full lock target
+    a[0, 0, 0] = -0.2  # slow down: at 5 m/s the grip limit (0.16) would bind before kappa_max
     sim.step(a)
     assert sim.kappa[0, 0] == pytest.approx(cfg.kappa_rate * cfg.dt)
     for _ in range(5):
         sim.step(a)
-    assert sim.alive[0, 0] and sim.kappa[0, 0] == pytest.approx(cfg.kappa_max)
-    assert sim.observe()[0, 0, obs_dim(cfg) - 4 * (6 + cfg.n_signal) - 1] == pytest.approx(1.0)
+    assert sim.alive[0, 0] and sim.v[0, 0] < 4.4 and sim.kappa[0, 0] == pytest.approx(cfg.kappa_max)
+    o = sim.observe()[0, 0]
+    assert o[OBS_RAYS + N_RAYS] == pytest.approx(1.0)
+    assert o[OBS_RAYS + N_RAYS + 1] == pytest.approx(1.0)  # grip allows full lock at this speed
+
+
+@pytest.mark.parametrize("v", [6.0, 10.0, 14.0])
+def test_grip_limit_caps_lateral_acceleration(v):
+    cfg = SimConfig(demand=0.0)
+    sim = Sim(cfg, 1, seed=0)
+    place(sim, 0, 0, 0.0, -45.0, np.pi / 2, v=v)
+    a = zeros(sim)
+    a[0, 0, 1] = 1.0
+    for _ in range(8):
+        sim.step(a)
+        k_grip = min(cfg.kappa_max, cfg.a_lat_max / sim.v[0, 0] ** 2)
+        assert abs(sim.kappa[0, 0]) <= k_grip + 1e-12
+        assert sim.v[0, 0] ** 2 * abs(sim.kappa[0, 0]) <= cfg.a_lat_max + 1e-9
+    assert sim.kappa[0, 0] == pytest.approx(min(cfg.kappa_max, cfg.a_lat_max / sim.v[0, 0] ** 2))
+    o = sim.observe()[0, 0]
+    assert o[OBS_RAYS + N_RAYS + 1] == pytest.approx(min(1.0, cfg.a_lat_max / sim.v[0, 0] ** 2 / cfg.kappa_max))
+    # the old physics (a_lat_max 0): full lock at any speed
+    old = Sim(SimConfig(demand=0.0, **NARROW), 1, seed=0)
+    place(old, 0, 0, 0.0, -9.0, np.pi / 2, v=v)  # in the box: room to turn
+    for _ in range(5):
+        old.step(a)
+    assert old.kappa[0, 0] == pytest.approx(cfg.kappa_max)
+
+
+def test_geometry_defaults_and_spawn_width():
+    cfg = SimConfig()
+    assert (cfg.W, cfg.Rc) == (7.0, 9.0) and cfg.a_lat_max > 0
+    for spawn_right, lo in ((False, -(cfg.W - 1.2)), (True, 1.0)):
+        sim = Sim(SimConfig(demand=0.5, spawn_right=spawn_right), 4, seed=5)
+        lats = []
+        for _ in range(600):
+            a = zeros(sim)
+            a[..., 0] = 1.0
+            sim.step(a)
+            new = sim.alive & (sim.age == 0.0)
+            c, s = np.rint(np.cos(sim.arm * np.pi / 2)), np.rint(np.sin(sim.arm * np.pi / 2))
+            lats += (c * sim.x + s * sim.y)[new].tolist()  # offset right of travel
+        lats = np.array(lats)
+        assert len(lats) > 400
+        assert lats.min() >= lo - 1e-9 and lats.max() <= cfg.W - 1.2 + 1e-9
+        assert lats.min() < lo + 0.5 and lats.max() > cfg.W - 1.7
+        if not spawn_right:
+            assert abs(np.mean(lats > 0) - 0.5) < 0.1  # no side preferred
+
+
+def test_impact_speed_penalty():
+    cfg = SimConfig(demand=0.0)
+    rews = []
+    for v in (1.0, 8.0):
+        sim = Sim(cfg, 1, seed=0)
+        place(sim, 0, 0, 0.0, -20.0, np.pi / 2, v=0.0)
+        place(sim, 0, 1, 0.0, -24.65, np.pi / 2, v=v)  # rear-ends car 0
+        place(sim, 0, 2, cfg.W - 1.0, 20.0, np.pi / 2 + 0.6, v=v)  # leaves the road
+        sim.step(zeros(sim))
+        assert list(sim.done_kind[0, :3]) == [DONE_CRASH, DONE_CRASH, DONE_OFFROAD]
+        rews.append(sim.car_reward[0, :3].copy())
+    lo, hi = rews
+    # both cars of a pair pay the same impact-speed term (no blame), faster impact costs more
+    assert hi[0] < lo[0] - 0.5 and hi[1] < lo[1] - 0.5 and hi[2] < lo[2] - 0.5
+    assert hi[0] == pytest.approx(cfg.r_crash - cfg.r_crash_speed * 8.0, abs=0.02)
 
 
 def test_ray_edge_dist_matches_sampling():
@@ -265,10 +338,10 @@ def test_car_rewards_and_done_info():
     place(sim, 0, 0, 0.0, -20.0, np.pi / 2)
     place(sim, 0, 1, 1.0, -21.0, np.pi / 2)  # crashes with car 0
     place(sim, 0, 2, 1.0, cfg.L - 0.1, np.pi / 2, v=10.0)  # exits north (straight from south)
-    place(sim, 0, 3, cfg.W - 0.5, 10.0, np.pi / 2)  # offroad
+    place(sim, 0, 3, cfg.W - 0.5, 30.0, np.pi / 2)  # offroad
     place(sim, 0, 4, -1.5, -35.0, np.pi / 2, v=5.0)  # keeps driving
     uids = sim.uid[0].copy()
-    sim.queue[0, 1] = 2
+    sim.queue[0, 1] = SPAWN_MAX_PER_STEP + 2  # some stay queued (at most that many enter per step)
     team = sim.step(zeros(sim))
     k, r = sim.done_kind[0], sim.car_reward[0]
     assert list(k[:5]) == [DONE_CRASH, DONE_CRASH, DONE_EXIT, DONE_OFFROAD, DONE_NONE]
@@ -286,3 +359,67 @@ def test_demand_range_per_stream():
         sim.step(zeros(sim))
     lo, hi = np.argmin(sim.demand[:4]), np.argmax(sim.demand[:4])
     assert sim.stats.arrived[hi] > sim.stats.arrived[lo]
+
+
+def test_reverse_gear():
+    cfg = SimConfig(demand=0.0)
+    sim = Sim(cfg, 1, seed=0)
+    place(sim, 0, 0, 2.0, -30.0, np.pi / 2, v=0.5)
+    a = zeros(sim)
+    a[0, 0, 0] = -1.0
+    sim.step(a)
+    assert sim.v[0, 0] == 0.0  # braking stops the car, it does not jump into reverse
+    for _ in range(20):
+        sim.step(a)
+    assert sim.v[0, 0] == pytest.approx(-cfg.v_reverse)  # then reverses, capped
+    y = sim.y[0, 0]
+    a[0, 0, 1] = 1.0  # steer left while reversing: heading turns clockwise
+    th0 = sim.th[0, 0]
+    for _ in range(5):
+        sim.step(a)
+    assert sim.y[0, 0] < y and sim.th[0, 0] < th0
+    # the old physics: no reverse
+    old = Sim(SimConfig(demand=0.0, **NARROW), 1, seed=0)
+    place(old, 0, 0, 1.0, -30.0, np.pi / 2, v=0.0)
+    old.step(a)
+    assert old.v[0, 0] == 0.0
+
+
+def test_reversing_out_of_the_entry_arm_is_a_wrong_exit():
+    cfg = SimConfig(demand=0.0)
+    sim = Sim(cfg, 1, seed=0)
+    place(sim, 0, 0, 2.0, -cfg.L + 0.1, np.pi / 2, v=-2.0, arm=0, man=STRAIGHT)
+    sim.step(zeros(sim))
+    from smartcrossing.sim import DONE_WRONG
+
+    assert sim.done_kind[0, 0] == DONE_WRONG and sim.stats.wrong_exits[0] == 1
+
+
+@pytest.mark.parametrize("spawn_right", [False, True])
+def test_spawn_capacity_at_high_demand(spawn_right):
+    """With free-flowing traffic the entry is not the bottleneck at 1 arrival / s / arm: a
+    blocked spot falls back to another clear one and cars may enter side by side."""
+    cfg = SimConfig(demand=1.0, spawn_right=spawn_right)
+    sim = Sim(cfg, 4, seed=2)
+    a = zeros(sim)
+    a[..., 0] = 1.0
+    for _ in range(600):
+        sim.step(a)
+    st = sim.stats
+    assert st.spawned.sum() > 0.9 * st.arrived.sum()
+    assert sim.alive.sum(1).max() < cfg.n_slots  # slots are not binding either
+
+
+def test_spawn_falls_back_to_a_clear_spot():
+    cfg = SimConfig(demand=0.0)
+    sim = Sim(cfg, 1, seed=0)
+    lats = sim.spawn_lats()
+    # standing car right in front of the u = 1 spot (right edge of arm 0): that side is blocked
+    place(sim, 0, 0, lats[-1], -cfg.L + 2.5 + 5.0, np.pi / 2)
+    sim._qbuf[0, 0, 0] = (1.0 - 1e-9, STRAIGHT, 0)
+    sim.queue[0, 0] = 1
+    sim.step(zeros(sim))
+    new = sim.alive[0] & (sim.age[0] == 0.0)
+    assert new.sum() == 1 and sim.queue[0, 0] == 0
+    x = sim.x[0][new][0]
+    assert x < lats[-1] - 5.0  # entered at the rightmost clear spot instead of waiting
