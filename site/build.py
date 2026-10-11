@@ -617,9 +617,9 @@ def main(argv=None):
             if i > 0 and any(crv.values()):
                 lo = min(row["x"] for rows in crv.values() for row in rows)
                 if lo < shift:  # iteration counts restart: move the whole chain behind the history
-                    chain = [(r, off + shift - lo) for r, off in chain]
+                    chain = [(r, int(off + shift - lo)) for r, off in chain]
                     crv = {r: read_curve(r, off) for r, off in chain}
-                    pts = [{**p, "gen": p["gen"] + shift - lo} for p in pts]
+                    pts = [{**p, "gen": int(p["gen"] + shift - lo)} for p in pts]
             pts_all += pts
             chain_all += chain
             curves.setdefault(method, {}).update(crv)
