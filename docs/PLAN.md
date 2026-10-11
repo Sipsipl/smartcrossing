@@ -28,6 +28,9 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
   agents can learn without it.
 - Training budget (owner): during development keep trainings short (<= ~1 h per round); long
   trainings only right before a merge to main.
+- Before every training run (owner, 2026-10-11): give a duration estimate and, if the scope can be
+  fixed in advance, 2-3 options (short for fast iteration ... long for quality) with expected
+  benefit; the owner chooses. Training runs on the owner's PC (GPU), which is busy meanwhile.
 - Deliverable: a live, in-browser visualisation with a few sliders (keep it simple),
   incl. mixing agent types.
 
