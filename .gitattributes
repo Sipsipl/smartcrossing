@@ -1,0 +1,6 @@
+# LF everywhere: site/build.py hashes source bytes (bench cache keys, asset versions),
+# so a Windows checkout must have the same bytes as CI and Linux.
+* text=auto eol=lf
+*.npz binary
+*.png binary
+*.gif binary

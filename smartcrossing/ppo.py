@@ -319,7 +319,7 @@ def eval_job(ckpt: str, out_path: str, it: int, demands, envs: int, seconds: flo
         s = summarize(sim, seconds)
         rec[f"d{d:g}"] = {k: round(s[k], 3) for k in ("throughput_per_min", "exit_ok_rate", "crash_cars_per_1000",
                                                       "crash_cars", "offroad_cars", "timeouts", "delay_mean_s", "queued_end")}
-    with open(out_path, "a") as f:
+    with open(out_path, "a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(rec) + "\n")
     if render_dir:
         subprocess.run([sys.executable, "-m", "smartcrossing.cli", "render", "--driver", f"policy:{ckpt}", "--demand",
@@ -403,7 +403,7 @@ def main(argv=None):
             logstd = np.full(A, a.logstd_init)
         if a.set_ceiling:
             ceiling = a.set_ceiling
-    (out / "args.json").write_text(json.dumps({**vars(a), "actor_sizes": a_sizes, "critic_sizes": c_sizes, "cfg": cfg_d}, indent=1))
+    (out / "args.json").write_text(json.dumps({**vars(a), "actor_sizes": a_sizes, "critic_sizes": c_sizes, "cfg": cfg_d}, indent=1), encoding="utf-8", newline="\n")
     print(f"actor {a_sizes} ({n_params(a_sizes)} params), critic {c_sizes}", flush=True)
 
     ctx = mp.get_context("spawn")
@@ -419,7 +419,7 @@ def main(argv=None):
         conns.append(c1)
         procs.append(pr)
     eval_proc = None
-    log = open(out / "log.jsonl", "a")
+    log = open(out / "log.jsonl", "a", encoding="utf-8", newline="\n")
     try:
         for it in range(it0, a.iters):
             t0 = time.time()

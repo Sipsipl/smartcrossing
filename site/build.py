@@ -52,6 +52,7 @@ CACHE = SITE / "data" / "bench_cache.json"
 RUNS = ROOT / "runs"
 SNAPSHOT = ROOT / "results" / "site"  # committed copy of what the build uses from runs/ (see docstring)
 SOURCE = {"kind": "runs", "manifest": None}  # set in main(): "runs" or "snapshot"
+MP_START = "fork" if "fork" in mp.get_all_start_methods() else "spawn"  # Windows has no fork
 
 DEMANDS = [0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 1.0]  # up to the start page slider maximum
 # the site's main brain (wide crossing) and the end of the older line whose training history is
@@ -246,7 +247,7 @@ def init_of(run: str) -> tuple[str, int] | None:
         r = SOURCE["manifest"]["runs"].get(run, {}).get("init")
         return tuple(r) if r else None
     p = RUNS / run / "args.json"
-    init = (json.loads(p.read_text()) if p.exists() else {}).get("init") or ""
+    init = (json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}).get("init") or ""
     if not init:
         return None
     ip = ROOT / init
@@ -305,7 +306,7 @@ def run_bench(entries: list[tuple[str, str, object, dict, list]], force: bool, w
                            + (ROOT / "smartcrossing" / "baselines.py").read_bytes()).hexdigest()[:12]
     cache = {}
     if CACHE.exists() and not force:
-        cache = json.loads(CACHE.read_text())
+        cache = json.loads(CACHE.read_text(encoding="utf-8"))
     jobs, keys = [], []
     for key, kind, payload, physics, demands in entries:
         for d in demands:
@@ -318,11 +319,11 @@ def run_bench(entries: list[tuple[str, str, object, dict, list]], force: bool, w
         print(f"  benchmarking {len(jobs)} runs ({BENCH_ENVS} envs x {BENCH_SECONDS:.0f} s each) ...")
         t0 = time.time()
         CACHE.parent.mkdir(parents=True, exist_ok=True)
-        with mp.get_context("fork").Pool(workers) as pool:
+        with mp.get_context(MP_START).Pool(workers) as pool:
             for i, (ck, res) in enumerate(zip(keys, pool.imap(_bench_job, jobs, chunksize=1))):
                 cache[ck] = res
                 if (i + 1) % 20 == 0 or i + 1 == len(jobs):  # save progress (an interrupted build resumes)
-                    CACHE.write_text(json.dumps(cache, indent=0, sort_keys=True))
+                    CACHE.write_text(json.dumps(cache, indent=0, sort_keys=True), encoding="utf-8", newline="\n")
                     print(f"    {i + 1}/{len(jobs)} ({time.time() - t0:.0f} s)", flush=True)
         print(f"  bench done in {time.time() - t0:.0f} s")
     out = {}
@@ -416,7 +417,7 @@ def record_replays(drivers: list[tuple[str, str, object, dict]], workers: int) -
     """drivers: (name, kind, payload, physics) -> {"q": quantisation, "runs": {name: {demand: replay}}}."""
     jobs = [(kind, payload, physics, d) for _, kind, payload, physics in drivers for d in REPLAY_DEMANDS]
     t0 = time.time()
-    with mp.get_context("fork").Pool(workers) as pool:
+    with mp.get_context(MP_START).Pool(workers) as pool:
         res = pool.map(_replay_job, jobs, chunksize=1)
     print(f"  replays: {len(jobs)} recorded in {time.time() - t0:.0f} s")
     runs = {}
@@ -459,7 +460,7 @@ def read_curve(run: str, offset: int) -> list[dict]:
     if not p.exists():
         return []
     rows = []
-    for i, line in enumerate(p.read_text().splitlines()):
+    for i, line in enumerate(p.read_text(encoding="utf-8").splitlines()):
         try:
             rec = json.loads(line)
         except json.JSONDecodeError:
@@ -538,7 +539,7 @@ def write_snapshot(found: dict, used: list[str], chain_runs: list[str]):
         "runs": {r: {"init": list(init_of(r)) if init_of(r) else None, "world": run_world(r, found)} for r in runs},
         "curves": {r: read_curve(r, 0) for r in sorted(set(chain_runs))},
     }
-    (SNAPSHOT / "manifest.json").write_text(json.dumps(manifest, separators=(",", ":"), sort_keys=True) + "\n")
+    (SNAPSHOT / "manifest.json").write_text(json.dumps(manifest, separators=(",", ":"), sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     size = sum(f.stat().st_size for f in SNAPSHOT.rglob("*") if f.is_file())
     print(f"  snapshot: {len(keep)} brains + manifest in {SNAPSHOT.relative_to(ROOT)}/ ({size / 1024:.0f} KiB)")
 
@@ -643,14 +644,14 @@ def copy_src(version: str, built: str):
     if OUT.exists():
         shutil.rmtree(OUT)
     shutil.copytree(SRC, OUT)
-    (OUT / "js" / "sim-config.js").write_text(sim_config_js())
+    (OUT / "js" / "sim-config.js").write_text(sim_config_js(), encoding="utf-8", newline="\n")
     for html in OUT.glob("*.html"):
-        t = html.read_text()
+        t = html.read_text(encoding="utf-8")
         t = t.replace("<!-- HEADER -->", header_html(html.name)).replace("<!-- FOOTER -->", FOOTER.format(built=built))
         t = t.replace("{{VERSION}}", version)
         if re.search(r'\s(src|href)="(https?:)?//', t.replace(f'href="{REPO}"', "")):
             raise SystemExit(f"{html.name}: external request found; the site must be self-contained")
-        html.write_text(t)
+        html.write_text(t, encoding="utf-8", newline="\n")
 
 
 def main(argv=None):
@@ -680,7 +681,7 @@ def main(argv=None):
     if kind == "snapshot":
         if not (SNAPSHOT / "manifest.json").exists():
             raise SystemExit(f"no runs/ and no snapshot in {SNAPSHOT.relative_to(ROOT)}/")
-        SOURCE["manifest"] = json.loads((SNAPSHOT / "manifest.json").read_text())
+        SOURCE["manifest"] = json.loads((SNAPSHOT / "manifest.json").read_text(encoding="utf-8"))
     print(f"source: {kind}")
 
     cfg = SimConfig()
@@ -828,9 +829,9 @@ def main(argv=None):
     copy_src(version, data["built"])
     (OUT / "data").mkdir(exist_ok=True)
     js = "// Generated by site/build.py - do not edit.\nwindow.SC_DATA = " + json.dumps(data, separators=(",", ":")) + ";\n"
-    (OUT / "data" / "site-data.js").write_text(js)
+    (OUT / "data" / "site-data.js").write_text(js, encoding="utf-8", newline="\n")
     rjs = "// Generated by site/build.py - do not edit.\nwindow.SC_REPLAYS = " + json.dumps(replays, separators=(",", ":")) + ";\n"
-    (OUT / "data" / "replays.js").write_text(rjs)
+    (OUT / "data" / "replays.js").write_text(rjs, encoding="utf-8", newline="\n")
     print(f"  replays.js: {len(rjs) / 1024:.0f} KiB")
     size = sum(f.stat().st_size for f in OUT.rglob("*") if f.is_file())
     print(f"wrote {OUT.relative_to(ROOT)}/ ({size / 1024:.0f} KiB, data {len(js) / 1024:.0f} KiB, version {version})")

@@ -88,7 +88,7 @@ def load_adapted_policy(path: str | Path) -> dict:
     if path.suffix == ".npz":
         d = export_json(path)
     else:
-        d = json.loads(path.read_text())
+        d = json.loads(path.read_text(encoding="utf-8"))
         d = d.get("policy", d)  # accept a {name, policy} wrapper
     sizes = d.get("sizes") or [len(d["layers"][0]["W"]), *[len(layer["b"]) for layer in d["layers"]]]
     n_signal = int((d.get("cfg") or {}).get("n_signal", SimConfig.n_signal))

@@ -75,7 +75,7 @@ def test_json_export(tmp_path):
     cfg, sizes, obs, params = _setup()
     save_npz(tmp_path / "p.npz", params[0], sizes, cfg)
     d = export_json(tmp_path / "p.npz", tmp_path / "p.json")
-    d2 = json.loads((tmp_path / "p.json").read_text())
+    d2 = json.loads((tmp_path / "p.json").read_text(encoding="utf-8"))
     assert d2["sizes"] == sizes and len(d2["layers"]) == len(sizes) - 1
     h = obs[0]
     for layer in d["layers"]:
