@@ -84,3 +84,10 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
 - (D) Norm experiments: >= 20 seeds per configuration; lateral position (driving side, lanes),
   priority patterns, signal MI, ablations, separately trained populations (cf. Pal et al.,
   ICLR 2022, "Emergent Road Rules").
+
+## Decided for the next training round (owner)
+- One free lamp channel instead of two (n_signal = 1): easier to read and to analyse.
+- Neighbour acceleration observation becomes a binary brake light (on when braking), as on real cars.
+- No turn signals: a built-in blinker would leak the destination, which is deliberately hidden so
+  that a lamp "language" has something to say. The free lamp is the place where one could emerge.
+- Brake lights are drawn on the website now (visual only).
