@@ -33,6 +33,8 @@ SPAWN_LAT_MARGIN = 0.8  # lateral corridor (beyond car width) checked for closin
 SPAWN_BACK = 2.5  # cars spawn this far inside the end of their entry arm
 SPAWN_CURB_GAP = 1.2  # lateral spawn offsets keep this distance to the road edge
 SPAWN_RIGHT_MIN = 1.0  # spawn_right: smallest offset right of the centre line
+SPAWN_LAT_STEP = 0.2  # spacing (m) of the candidate lateral spawn offsets
+SPAWN_MAX_PER_STEP = 3  # at most this many cars enter per arm and step (side by side)
 SPEED_TAU = 0.5  # s, time constant of the legacy speed_control interface
 
 N_RAYS = 5
@@ -79,9 +81,10 @@ class SimConfig:
     # turn (right turn, r ~ 10.75 m) then allows ~6.6 m/s; at 14 m/s r_min = 49 m.
     # 0 disables the limit (the original physics: r_min = 5 m at any speed).
     a_lat_max: float = 4.0
-    # lateral spawn offset: False = uniform over the whole road width (both halves, no side
-    # preferred; the learning setting); True = only the right half (lane-disciplined arrivals,
-    # used by the rule-based baselines: they may rely on rules). Same random draws either way.
+    # lateral spawn offset: False = uniform among the clear positions across the whole road
+    # width (both halves, no side preferred; the learning setting); True = only among those of
+    # the right half (lane-disciplined arrivals, used by the rule-based baselines: they may rely
+    # on rules). Same random draws either way (see Sim._arrivals).
     spawn_right: bool = False
     spawn_speed: float = 8.0
     spawn_clearance: float = 7.0
@@ -142,7 +145,8 @@ def js_constants() -> dict:
         "defaults": defaults,
         "RIGHT": RIGHT, "STRAIGHT": STRAIGHT, "LEFT": LEFT,
         "DISC_OFFSETS": DISC_OFFSETS.tolist(), "DISC_R": DISC_R, "SPAWN_LAT_MARGIN": SPAWN_LAT_MARGIN,
-        "SPAWN_BACK": SPAWN_BACK, "SPAWN_CURB_GAP": SPAWN_CURB_GAP, "SPAWN_RIGHT_MIN": SPAWN_RIGHT_MIN, "SPEED_TAU": SPEED_TAU, "N_RAYS": N_RAYS, "RAY_ANGLES": RAY_ANGLES.tolist(), "RAY_RANGE": RAY_RANGE,
+        "SPAWN_BACK": SPAWN_BACK, "SPAWN_CURB_GAP": SPAWN_CURB_GAP, "SPAWN_RIGHT_MIN": SPAWN_RIGHT_MIN,
+        "SPAWN_LAT_STEP": SPAWN_LAT_STEP, "SPAWN_MAX_PER_STEP": SPAWN_MAX_PER_STEP, "SPEED_TAU": SPEED_TAU, "N_RAYS": N_RAYS, "RAY_ANGLES": RAY_ANGLES.tolist(), "RAY_RANGE": RAY_RANGE,
         "K_NEIGHBOURS": K_NEIGHBOURS, "NEIGHBOUR_RANGE": NEIGHBOUR_RANGE, "POS_SCALE": POS_SCALE,
         "GOAL_SCALE": GOAL_SCALE, "NB_FEATURES": NB_FEATURES, "LANE_WIDTH": LANE_WIDTH,
         "OBS_DIM": OBS_DIM, "OBS_RAYS": OBS_RAYS, "DONE_NAMES": list(DONE_NAMES), "ARM_U": ARM_U.tolist(),
@@ -324,14 +328,14 @@ class Sim:
         self.uid = np.full((B, N), -1, dtype=np.int64)  # stable id per car (trajectory id for RL)
         self.group = np.zeros((B, N), dtype=np.int64)  # policy group (for mixed populations)
         self.queue = np.zeros((B, 4), dtype=np.int64)  # cars waiting to enter per arm
-        self.queue_lat = np.zeros((B, 4))  # lateral offset of the head of each queue
+        self.queue_u = np.zeros((B, 4))  # lateral draw u of the head of each queue (see _arrivals)
         self.queue_man = np.ones((B, 4), dtype=np.int64)
         self.queue_grp = np.zeros((B, 4), dtype=np.int64)
         # FIFO of queued cars' attributes (drawn at arrival time, so CRN holds even
         # when two policies release cars from the queue at different times)
         self._qcap = 64
         self._qhead = np.zeros((B, 4), dtype=np.int64)
-        self._qbuf = np.zeros((B, 4, self._qcap, 3))  # lat, man, grp
+        self._qbuf = np.zeros((B, 4, self._qcap, 3))  # u (lateral draw), man, grp
         self.next_uid = 0
         self.t = 0.0
         self.stats = Stats(B)
@@ -561,17 +565,49 @@ class Sim:
         self.y[mask] = 1e4
 
     # ------------------------------------------------------------------ spawning
+    def spawn_lats(self):
+        """Candidate lateral spawn offsets (right of travel): an even grid over the spawn
+        range (whole width, or the right half with spawn_right)."""
+        cfg = self.cfg
+        lo = SPAWN_RIGHT_MIN if cfg.spawn_right else -(cfg.W - SPAWN_CURB_GAP)
+        hi = cfg.W - SPAWN_CURB_GAP
+        m = max(int(round((hi - lo) / SPAWN_LAT_STEP)), 1)
+        return lo + (hi - lo) * np.arange(m + 1) / m
+
+    def _spawn_clear(self, sx, sy, h, x, y, vx, vy, alive):
+        """(b, M) whether candidate spawn points (sx, sy) (M,) with heading h keep the spawn
+        clearance (+ closing-speed headway) to every car (x, y, vx, vy, alive: (b, N))."""
+        cfg = self.cfg
+        dx, dy = x[:, None, :] - sx[:, None], y[:, None, :] - sy[:, None]
+        dist = np.hypot(dx, dy)
+        dd = np.maximum(dist, 1e-6)
+        ch, sh = np.cos(h), np.sin(h)
+        # closing speed along the line of sight between the new car and car j
+        rvx, rvy = cfg.spawn_speed * ch - vx[:, None, :], cfg.spawn_speed * sh - vy[:, None, :]
+        closing = np.maximum((rvx * dx + rvy * dy) / dd, 0.0)
+        # outside the new car's lateral corridor only its own speed counts (the other
+        # car is treated as standing: it may be queued in the lane the new car joins)
+        own = np.maximum(cfg.spawn_speed * (ch * dx + sh * dy) / dd, 0.0)
+        lat_off = np.abs(-sh * dx + ch * dy)
+        closing = np.where(lat_off < 2 * DISC_R + SPAWN_LAT_MARGIN, closing, own)
+        return ((dist > cfg.spawn_clearance + cfg.spawn_headway * closing) | ~alive[:, None, :]).all(-1)
+
     def _arrivals(self):
+        """Queue new arrivals, then release queued cars. Each arrival draws (u, manoeuvre,
+        group) when it arrives (CRN: the same draws for every policy). A queued car enters
+        as soon as some lateral position of its arm is clear (spawn_clearance + closing-speed
+        headway to every car) and a slot is free; its offset is the floor(u * n_free)-th of
+        the currently clear grid positions (spawn_lats), i.e. uniform among the free ones.
+        Several cars of one arm may enter in the same step (side by side) while room is left."""
         cfg = self.cfg
         S = self.S
         # draw every random number unconditionally so streams stay aligned (CRN)
         dem = cfg.demand if self._stream_demand is None else self._stream_demand[:, None]
         arrive = self.rng.random((S, 4)) < dem * cfg.dt
-        lat_lo = SPAWN_RIGHT_MIN if cfg.spawn_right else -(cfg.W - SPAWN_CURB_GAP)
-        lat = lat_lo + (cfg.W - SPAWN_CURB_GAP - lat_lo) * self.rng.random((S, 4))
+        u = self.rng.random((S, 4))
         man = self.rng.choice([RIGHT, STRAIGHT, LEFT], size=(S, 4), p=np.asarray(cfg.turn_probs) / sum(cfg.turn_probs))
         grp = self.rng.choice(len(self.group_probs), size=(S, 4), p=self.group_probs)
-        arrive, lat, man, grp = arrive[self.scen], lat[self.scen], man[self.scen], grp[self.scen]
+        arrive, u, man, grp = arrive[self.scen], u[self.scen], man[self.scen], grp[self.scen]
         if (self.queue + arrive).max() > self._qcap:  # grow the FIFO (keeps order)
             new = np.zeros((self.B, 4, 2 * self._qcap, 3))
             for j in range(self._qcap):
@@ -579,56 +615,64 @@ class Sim:
             self._qbuf, self._qhead, self._qcap = new, np.zeros_like(self._qhead), 2 * self._qcap
         bi, ki = np.nonzero(arrive)
         slot = (self._qhead[bi, ki] + self.queue[bi, ki]) % self._qcap
-        self._qbuf[bi, ki, slot] = np.stack([lat[bi, ki], man[bi, ki], grp[bi, ki]], -1)
+        self._qbuf[bi, ki, slot] = np.stack([u[bi, ki], man[bi, ki], grp[bi, ki]], -1)
         self.queue += arrive
         self.stats.arrived += arrive.sum(1)
-        head = np.take_along_axis(self._qbuf, self._qhead[..., None, None], 2)[:, :, 0]
-        self.queue_lat, self.queue_man, self.queue_grp = head[..., 0], head[..., 1].astype(np.int64), head[..., 2].astype(np.int64)
         # velocities of existing cars (for the closing-speed spawn clearance)
         vx, vy = self.v * np.cos(self.th), self.v * np.sin(self.th)
         spawned = np.zeros(self.alive.shape, dtype=bool)
+        lats = self.spawn_lats()
+        back = -cfg.L + SPAWN_BACK
         for k in range(4):
-            want = self.queue[:, k] > 0
-            if not want.any():
-                continue
             c, s = rot(k)
-            u = self.queue_lat[:, k]
-            # canonical spawn point (u, -L + SPAWN_BACK) rotated by k*90deg
-            sx = c * u - s * (-cfg.L + SPAWN_BACK)
-            sy = s * u + c * (-cfg.L + SPAWN_BACK)
             h = np.pi / 2 + k * np.pi / 2  # canonical heading (north) rotated by k*90deg
-            dx, dy = self.x - sx[:, None], self.y - sy[:, None]
-            dist = np.hypot(dx, dy)
-            # closing speed along the line of sight between the new car and car j
-            rvx, rvy = cfg.spawn_speed * np.cos(h) - vx, cfg.spawn_speed * np.sin(h) - vy
-            closing = np.maximum((rvx * dx + rvy * dy) / np.maximum(dist, 1e-6), 0.0)
-            # outside the new car's lateral corridor only its own speed counts (the other
-            # car is treated as standing: it may be queued in the lane the new car joins)
-            own = np.maximum(cfg.spawn_speed * (np.cos(h) * dx + np.sin(h) * dy) / np.maximum(dist, 1e-6), 0.0)
-            lat_off = np.abs(-np.sin(h) * dx + np.cos(h) * dy)
-            closing = np.where(lat_off < 2 * DISC_R + SPAWN_LAT_MARGIN, closing, own)
-            margin = cfg.spawn_headway * closing
-            clear = (dist > cfg.spawn_clearance + margin) | ~self.alive
-            ok = want & clear.all(1) & (~self.alive).any(1)
-            for b in np.nonzero(ok)[0]:
-                n = np.argmin(self.alive[b])
+            hn = np.arctan2(np.sin(h), np.cos(h))
+            # candidate spawn points (lat, -L + SPAWN_BACK) rotated by k*90deg
+            px, py = c * lats - s * back, s * lats + c * back
+            mx, my, half = px.mean(), py.mean(), 0.5 * (lats[-1] - lats[0])
+            for _ in range(SPAWN_MAX_PER_STEP):
+                b = np.nonzero((self.queue[:, k] > 0) & (~self.alive).any(1))[0]
+                if len(b) == 0:
+                    break
+                # only cars that can be within reach matter: clearance + headway * the largest
+                # possible closing speed around any candidate point (keeps the (b, M, K) block small)
+                reach = cfg.spawn_clearance + cfg.spawn_headway * (cfg.spawn_speed + np.hypot(vx[b], vy[b]))
+                near = self.alive[b] & (np.hypot(self.x[b] - mx, self.y[b] - my) < reach + half)
+                K = int(near.sum(1).max())
+                if K == 0:
+                    clear = np.ones((len(b), len(lats)), dtype=bool)
+                else:
+                    idx = np.argsort(~near, axis=1, kind="stable")[:, :K]
+                    g = lambda a: np.take_along_axis(a, idx, 1)  # noqa: E731
+                    clear = self._spawn_clear(px, py, h, g(self.x[b]), g(self.y[b]), g(vx[b]), g(vy[b]), g(near))
+                cnt = clear.sum(1)
+                ok = cnt > 0
+                if not ok.any():
+                    break
+                b, clear, cnt = b[ok], clear[ok], cnt[ok]
+                head = self._qhead[b, k]
+                qu, qman, qgrp = self._qbuf[b, k, head].T
+                pick = np.minimum(np.floor(qu * cnt).astype(np.int64), cnt - 1)
+                j = np.argmax(np.cumsum(clear, 1) > pick[:, None], 1)
+                n = np.argmin(self.alive[b], 1)
                 self.alive[b, n] = True
-                self.x[b, n], self.y[b, n] = sx[b], sy[b]
-                self.th[b, n] = np.arctan2(np.sin(h), np.cos(h))
+                self.x[b, n], self.y[b, n] = px[j], py[j]
+                self.th[b, n] = hn
                 self.v[b, n] = cfg.spawn_speed
+                vx[b, n], vy[b, n] = cfg.spawn_speed * np.cos(hn), cfg.spawn_speed * np.sin(hn)
                 self.kappa[b, n] = 0.0
                 self.acc[b, n] = 0.0
                 self.arm[b, n] = k
-                self.man[b, n] = self.queue_man[b, k]
-                self.group[b, n] = self.queue_grp[b, k]
+                self.man[b, n] = qman.astype(np.int64)
+                self.group[b, n] = qgrp.astype(np.int64)
                 self.age[b, n] = 0.0
-                self.uid[b, n] = self.next_uid
-                self.next_uid += 1
+                self.uid[b, n] = self.next_uid + np.arange(len(b))
+                self.next_uid += len(b)
                 self.queue[b, k] -= 1
-                self._qhead[b, k] = (self._qhead[b, k] + 1) % self._qcap
+                self._qhead[b, k] = (head + 1) % self._qcap
                 self.stats.spawned[b] += 1
                 spawned[b, n] = True
-                hd = self._qbuf[b, k, self._qhead[b, k]]
-                self.queue_lat[b, k], self.queue_man[b, k], self.queue_grp[b, k] = hd[0], int(hd[1]), int(hd[2])
+        head = np.take_along_axis(self._qbuf, self._qhead[..., None, None], 2)[:, :, 0]
+        self.queue_u, self.queue_man, self.queue_grp = head[..., 0], head[..., 1].astype(np.int64), head[..., 2].astype(np.int64)
         if spawned.any():
             self._prev_dist = np.where(spawned, self.dist_to_gate(), self._prev_dist)

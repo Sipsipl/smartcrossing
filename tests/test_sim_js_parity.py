@@ -40,8 +40,8 @@ def export_state(sim: Sim) -> dict:
     for k in range(4):
         q = []
         for j in range(int(sim.queue[0, k])):
-            lat, man, grp = sim._qbuf[0, k, (sim._qhead[0, k] + j) % sim._qcap]
-            q.append([float(lat), int(man), int(grp)])
+            u, man, grp = sim._qbuf[0, k, (sim._qhead[0, k] + j) % sim._qcap]
+            q.append([float(u), int(man), int(grp)])
         queues.append(q)
     return {
         "alive": sim.alive[0].tolist(),
@@ -112,9 +112,10 @@ def place(sim, n, x, y, th, v, arm=0, man=STRAIGHT, age=1.0, sig=(0.0, 0.0), gro
     sim._prev_dist[0, n] = sim.dist_to_gate()[0, n] + 0.3
 
 
-def push_queue(sim, k, lat, man, grp=0):
+def push_queue(sim, k, u, man, grp=0):
+    """Queue a car on arm k; u in [0, 1) picks its lateral position among the clear ones."""
     j = (sim._qhead[0, k] + sim.queue[0, k]) % sim._qcap
-    sim._qbuf[0, k, j] = (lat, man, grp)
+    sim._qbuf[0, k, j] = (u, man, grp)
     sim.queue[0, k] += 1
 
 
@@ -186,15 +187,35 @@ def edge_cases(cfg, tag=""):
     place(sp, 0, 0.3, -L + 2.5 + 6.0, hp, 0.0)
     place(sp, 1, 0.0, L - 2.5 - 20.0, hp, 12.0, arm=0, man=STRAIGHT)  # heads into arm-2 spawn
     place(sp, 2, -(L - 2.5 - 14.0), 1.0, np.pi, 6.0, arm=1, man=STRAIGHT)  # moving towards arm-3 spawn
-    for k, (lat, man, grp) in enumerate([(0.5, RIGHT, 0), (-1.0, LEFT, 1), (0.0, STRAIGHT, 2), (1.5, LEFT, 0)]):
-        push_queue(sp, k, lat, man, grp)
-        push_queue(sp, k, -lat, STRAIGHT, 1)
+    for k, (u, man, grp) in enumerate([(0.5, RIGHT, 0), (0.1, LEFT, 1), (0.0, STRAIGHT, 2), (0.9, LEFT, 0)]):
+        push_queue(sp, k, u, man, grp)
+        push_queue(sp, k, 1.0 - u - 1e-9, STRAIGHT, 1)
     a = np.zeros((N, A))
     cases.append(make_case(f"{tag}spawn", sp, a))
     sp2 = copy.deepcopy(sp)
     sp2.alive[0] = False
     sp2.x[0], sp2.y[0] = 1e4, 1e4
     cases.append(make_case(f"{tag}spawn_all_clear", sp2, a))
+    # free-position spawning: long queues on every arm (several cars may enter side by side
+    # in one step), u at the ends of [0, 1), a standing car blocking part of the arm-0 width,
+    # a car moving away in arm 1, and the same with lane-disciplined arrivals (spawn_right)
+    for sr in (False, True):
+        mp = Sim(dataclasses.replace(cfg, demand=0.0, spawn_right=sr), 1, seed=3)
+        mp.t = 7.0
+        place(mp, 0, 4.0, -L + 2.5 + 16.0, hp, 0.0)
+        place(mp, 1, -(L - 2.5 - 9.0), -1.5, 0.0, 9.0, arm=3, man=STRAIGHT)
+        for k in range(4):
+            for j, uu in enumerate([0.0, 0.999999, 0.5, 0.25, 0.75][: 3 + k % 3]):
+                push_queue(mp, k, uu, [RIGHT, STRAIGHT, LEFT][(j + k) % 3], j % 3)
+        cases.append(make_case(f"{tag}spawn_multi{'_right' if sr else ''}", mp, a))
+        # only two free slots: the release stops when the slots run out
+        full = copy.deepcopy(mp)
+        for i, n in enumerate(range(2, N - 2)):  # standing cars mid-arm, out of spawn reach
+            k, lat = i % 4, (-4.5, 0.0, 4.5)[(i // 4) % 3]
+            c, s_ = np.rint(np.cos(k * hp)), np.rint(np.sin(k * hp))
+            d = 20.0 + 0.37 * i  # distinct distances (no neighbour-order ties)
+            place(full, n, c * lat + s_ * d, s_ * lat - c * d, hp + k * hp, 0.0, arm=k)
+        cases.append(make_case(f"{tag}spawn_slots{'_right' if sr else ''}", full, a))
     # grip limit: fast cars steering hard (curvature clipped to a_lat_max / v^2), a slow one
     # (kappa_max wins), and a head-on crash pair at speed (impact-speed penalty)
     gp = Sim(dataclasses.replace(cfg, demand=0.0), 1, seed=2)
@@ -305,7 +326,8 @@ def test_generated_config(parity):
               "POS_SCALE", "GOAL_SCALE", "RAY_RANGE"):
         assert ex[k] == getattr(simmod, k), k
     assert ex["DONE"] == {name: i for i, name in enumerate(simmod.DONE_NAMES)}
-    for k in ("SPAWN_LAT_MARGIN", "SPAWN_BACK", "SPAWN_CURB_GAP", "SPAWN_RIGHT_MIN", "SPEED_TAU", "N_RAYS",
+    for k in ("SPAWN_LAT_MARGIN", "SPAWN_BACK", "SPAWN_CURB_GAP", "SPAWN_RIGHT_MIN", "SPAWN_LAT_STEP",
+              "SPAWN_MAX_PER_STEP", "SPEED_TAU", "N_RAYS",
               "LANE_WIDTH", "OBS_RAYS"):
         assert cfg[k] == getattr(simmod, k), k
 

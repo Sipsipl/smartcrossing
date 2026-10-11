@@ -12,6 +12,7 @@ from smartcrossing.sim import (
     NARROW,
     OBS_RAYS,
     RIGHT,
+    SPAWN_MAX_PER_STEP,
     STRAIGHT,
     Sim,
     SimConfig,
@@ -41,7 +42,9 @@ def test_spawn_positions_and_headings_all_arms():
     cfg = SimConfig(demand=100.0)  # an arrival on every arm every step
     sim = Sim(cfg, 1, seed=3)
     sim.step(zeros(sim))
-    assert sim.alive[0].sum() == 4
+    # every arm releases at least one car; more may enter side by side
+    assert set(sim.arm[0][sim.alive[0]]) == {0, 1, 2, 3}
+    assert sim.alive[0].sum() <= 4 * SPAWN_MAX_PER_STEP
     lim = cfg.W - 1.2
     d = cfg.L - 2.5
     for n in np.nonzero(sim.alive[0])[0]:
@@ -142,7 +145,8 @@ def test_crn_identical_scenarios_identical_states():
 
 
 def test_crn_queue_attributes_independent_of_policy():
-    """Cars keep the attributes drawn at their arrival even if a policy holds the queue."""
+    """Cars keep the attributes drawn at their arrival even if a policy holds the queue
+    (the lateral offset depends on which positions are clear, so only the manoeuvre is compared)."""
     cfg = SimConfig(demand=0.3)
     sim = Sim(cfg, 2, seed=11, n_scenarios=1)
     seen = [dict(), dict()]  # per env: uid -> (arm, man, lateral)
@@ -156,7 +160,8 @@ def test_crn_queue_attributes_independent_of_policy():
                 if sim.age[b, n] == 0.0:
                     k = sim.arm[b, n]
                     lat = [sim.x, sim.y, sim.x, sim.y][k][b, n]
-                    seen[b][sim.uid[b, n]] = (k, sim.man[b, n], round(float(lat), 9))
+                    assert abs(lat) <= sim.cfg.W - 1.2 + 1e-9
+                    seen[b][sim.uid[b, n]] = (k, sim.man[b, n])
     for k in range(4):
         s0 = [v[1:] for _, v in sorted(seen[0].items()) if v[0] == k]
         s1 = [v[1:] for _, v in sorted(seen[1].items()) if v[0] == k]
@@ -281,10 +286,15 @@ def test_geometry_defaults_and_spawn_width():
     for spawn_right, lo in ((False, -(cfg.W - 1.2)), (True, 1.0)):
         sim = Sim(SimConfig(demand=0.5, spawn_right=spawn_right), 4, seed=5)
         lats = []
-        for _ in range(300):
-            sim.step(zeros(sim))
-            lats += sim.queue_lat[sim.queue > 0].tolist()
+        for _ in range(600):
+            a = zeros(sim)
+            a[..., 0] = 1.0
+            sim.step(a)
+            new = sim.alive & (sim.age == 0.0)
+            c, s = np.rint(np.cos(sim.arm * np.pi / 2)), np.rint(np.sin(sim.arm * np.pi / 2))
+            lats += (c * sim.x + s * sim.y)[new].tolist()  # offset right of travel
         lats = np.array(lats)
+        assert len(lats) > 400
         assert lats.min() >= lo - 1e-9 and lats.max() <= cfg.W - 1.2 + 1e-9
         assert lats.min() < lo + 0.5 and lats.max() > cfg.W - 1.7
         if not spawn_right:
@@ -331,7 +341,7 @@ def test_car_rewards_and_done_info():
     place(sim, 0, 3, cfg.W - 0.5, 30.0, np.pi / 2)  # offroad
     place(sim, 0, 4, -1.5, -35.0, np.pi / 2, v=5.0)  # keeps driving
     uids = sim.uid[0].copy()
-    sim.queue[0, 1] = 2
+    sim.queue[0, 1] = SPAWN_MAX_PER_STEP + 2  # some stay queued (at most that many enter per step)
     team = sim.step(zeros(sim))
     k, r = sim.done_kind[0], sim.car_reward[0]
     assert list(k[:5]) == [DONE_CRASH, DONE_CRASH, DONE_EXIT, DONE_OFFROAD, DONE_NONE]
