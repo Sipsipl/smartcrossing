@@ -13,27 +13,30 @@
   const num = (v, d = 1) => (v === null || v === undefined ? "–" : v.toFixed(d).replace(".", ","));
   const pol = (id) => D.policies[id];
   const mainMethod = D.main || (D.best.ppo ? "ppo" : "es");
+  const MAIN_ID = D.main_id || D.best[mainMethod];
+  const isNarrow = (entry) => !!(entry && entry.physics && entry.physics.W !== undefined && entry.physics.W < 5);
 
   function genLabel(entry) {
     if (!entry) return "";
     if (entry.id === "zufall") return "Start: zufälliges Gehirn";
     const unit = entry.method === "ppo" ? "Trainingsschritt" : "Generation";
-    return entry.tlGen !== undefined ? `${unit} ${entry.tlGen}` : `${entry.run_label || entry.run}`;
+    const where = isNarrow(entry) && !isNarrow(pol(MAIN_ID)) ? " · alte, schmale Kreuzung" : "";
+    return (entry.tlGen !== undefined ? `${unit} ${entry.tlGen}` : `${entry.run_label || entry.run}`) + where;
   }
 
-  /** Default agent types: best policy (+ the other method or a beginner, share 0). */
+  /** Default agent types: the main brain (100 %), plus a second run and the old narrow-road
+   *  brain for mixing (share 0). */
   function defaultTypes() {
     const types = [];
-    const main = pol(D.best[mainMethod]);
-    if (main) types.push(SCX.makeType(main, `${METHOD_NAMES[mainMethod]} (bestes Gehirn)`, { share: 100 }));
-    const om = mainMethod === "ppo" ? "es" : "ppo";
-    const other = D.best[om] ? pol(D.best[om]) : null;
-    if (other) types.push(SCX.makeType(other, `${METHOD_NAMES[om]} (bestes Gehirn)`, { share: 0 }));
-    else {
-      const tl = (D.timelines[mainMethod] || []).filter((p) => p.id !== "zufall" && p.id !== D.best[mainMethod]);
-      if (tl.length) types.push(SCX.makeType(pol(tl[0].id), `Anfänger (Gen. ${tl[0].gen})`, { share: 0 }));
+    const main = pol(MAIN_ID);
+    if (main) types.push(SCX.makeType(main, "Aktuelles Gehirn", { share: 100 }));
+    if (D.mix && pol(D.mix)) types.push(SCX.makeType(pol(D.mix), "Zweiter Lauf (anderer Zufall)", { share: 0 }));
+    if (D.history && pol(D.history) && D.history !== MAIN_ID) types.push(SCX.makeType(pol(D.history), isNarrow(pol(D.history)) ? "Alt (schmale Kreuzung)" : "Älterer Stand", { share: 0 }));
+    if (types.length < 2) {
+      const om = mainMethod === "ppo" ? "es" : "ppo";
+      if (D.best[om]) types.push(SCX.makeType(pol(D.best[om]), `${METHOD_NAMES[om]} (bestes Gehirn)`, { share: 0 }));
     }
-    return types;
+    return types.slice(0, 3);
   }
 
   // ------------------------------------------------------------------ stage markup
@@ -151,7 +154,7 @@
       });
     };
     // honest status line
-    const b = pol(D.best[mainMethod]);
+    const b = pol(MAIN_ID);
     const r15 = b && b.bench["0.15"], l15 = D.baselines.light["0.15"], v15 = D.baselines.reservation["0.15"];
     if (r15) {
       $("status").innerHTML = `Bei mittlerem Verkehr (${num(r15.demand_per_min, 0)} Autos pro Minute) schaffen es die besten gelernten Autos
@@ -297,14 +300,15 @@
       }
     }
     // kinematics facts from the sim config
-    const p = pol(D.best[mainMethod]);
+    const p = pol(MAIN_ID);
     const phys = Object.assign({}, cfg, p ? p.physics : {});
     $("kin").innerHTML = `
       <li>Höchstens <b>${num(phys.v_max * 3.6, 0)} km/h</b> (${num(phys.v_max, 0)} m/s) – wie in der Stadt.</li>
       <li>Beschleunigen mit bis zu <b>${num(phys.acc_max, 0)} m/s²</b> (von 0 auf 50 in etwa ${num(phys.v_max / phys.acc_max, 1)} s), bremsen mit bis zu <b>${num(phys.brake_max, 0)} m/s²</b> – das ist eine kräftige Vollbremsung.</li>
-      <li>Engster Kreis: <b>${num(1 / phys.kappa_max, 0)} m Radius</b>. Rückwärts fahren geht nicht.</li>
+      <li>Engster Kreis: <b>${num(1 / phys.kappa_max, 0)} m Radius</b> – aber nur langsam: ${phys.a_lat_max > 0 ? `Die Reifen halten höchstens ${num(phys.a_lat_max, 0)} m/s² zur Seite, bei ${num(phys.v_max * 3.6, 0)} km/h ist der engste Kreis deshalb ${num(phys.v_max * phys.v_max / phys.a_lat_max, 0)} m groß.` : "(hier ohne Rutschgrenze)."}</li>
+      <li>${phys.v_reverse > 0 ? `Rückwärtsgang: bis ${num(phys.v_reverse * 3.6, 0)} km/h (Gas &lt; 0 bremst erst, dann geht es rückwärts).` : "Rückwärts fahren geht nicht."}</li>
       ${cfg.kappa_rate ? `<li>Das Lenkrad dreht sich nicht beliebig schnell: von ganz links nach ganz rechts dauert es ${num((2 * cfg.kappa_max) / cfg.kappa_rate, 1)} s.${phys.kappa_rate > 1e5 ? " (Die bisher besten Evolutions-Autos wurden noch ohne diese Grenze trainiert und fahren hier deshalb mit sofort wirkender Lenkung.)" : ""}</li>` : ""}
-      <li>Das Auto ist ${num(4.6, 1)} m lang und ${num(1.8, 1)} m breit; die Straße ist ${num(2 * cfg.W, 0)} m breit – Platz für genau ein Auto pro Richtung.</li>`;
+      <li>Das Auto ist ${num(4.6, 1)} m lang und ${num(1.8, 1)} m breit; die Straße ist ${num(2 * (phys.W || cfg.W), 0)} m breit – ${(phys.W || cfg.W) >= 5 ? "Platz für zwei Autos nebeneinander pro Richtung" : "Platz für genau ein Auto pro Richtung"}.</li>`;
     window.__sc = cx;
   }
 
@@ -340,7 +344,7 @@
         if (net.hoverN) tip.textContent = net.describe(net.hoverN);
       },
     });
-    const p = pol(D.best[mainMethod]);
+    const p = pol(MAIN_ID);
     if (p) {
       const s = p.policy.sizes, params = s.slice(1).reduce((a, n, i) => a + s[i] * n + n, 0);
       $("brain-sizes").textContent = `${s[0]} Eingänge → ${s[1]} → ${s[2]} → ${s[3]} Ausgänge`;

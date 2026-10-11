@@ -46,6 +46,11 @@ CACHE = SITE / "data" / "bench_cache.json"
 RUNS = ROOT / "runs"
 
 DEMANDS = [0.05, 0.1, 0.15, 0.2, 0.3]
+# the site's main brain (wide crossing) and the end of the older line whose training history is
+# shown before it (narrow crossing); override with --main / --history
+DEFAULT_MAIN = ["runs/wide_s1ft2/ckpt_2650.npz"]
+DEFAULT_HISTORY = "runs/ppo17/ckpt_5250.npz"
+DEFAULT_MIX = "runs/wide_s0ft/ckpt_2850.npz"  # second brain offered for mixing on the start page
 TIMELINE_DEMANDS = [0.05, 0.15]
 BENCH_ENVS, BENCH_SECONDS, BENCH_SEED = 8, 120.0, 1000
 # Plain German names for known runs: run id -> (short label for chart markers, label, one-line
@@ -96,7 +101,23 @@ RUN_INFO = {
     "ppo16": ("P16", "PPO Versuch 16: Wunschtempo statt Gaspedal",
               "Das Gehirn wählt eine Zielgeschwindigkeit statt Gas/Bremse. Anfangs vorsichtiger, am Ende gleich gut."),
     "ppo17": ("P17", "Noch feiner, mehr Weitblick",
-              "Noch kleinere Lernschritte und längerer Blick auf Folgen: der beste Stand."),
+              "Noch kleinere Lernschritte und längerer Blick auf Folgen: der beste Stand auf der alten, schmalen Kreuzung."),
+    "wide_s1": ("B1", "Breite Kreuzung: neu gelernt",
+                "Neue Kreuzung: Straßen doppelt so breit, Reifen rutschen bei zu schnellen Kurven. Von Null an gelernt."),
+    "wide_s1r": ("B2", "Breite Kreuzung: mit Rückwärtsgang",
+                 "Die Autos dürfen jetzt auch rückwärts fahren – sie tun es aber fast nie."),
+    "wide_s1ft": ("B3", "Breite Kreuzung: Feinschliff",
+                  "Kleinere Lernschritte: weniger Unfälle."),
+    "wide_s1ft2": ("B4", "Breite Kreuzung: länger feinschleifen",
+                   "Noch eine Stunde Feinschliff: nur noch etwas besser – das aktuelle Gehirn."),
+    "wide_s0": ("B1'", "Breite Kreuzung, zweiter Lauf",
+                "Gleiches Rezept, anderer Zufallsstart (noch ohne Rückwärtsgang)."),
+    "wide_s0r": ("B2'", "Zweiter Lauf: mit Rückwärtsgang",
+                 "Anderer Zufallsstart, mit Rückwärtsgang weitergelernt."),
+    "wide_s0ft": ("B3'", "Zweiter Lauf: Feinschliff",
+                  "Anderer Zufallsstart, genauso fein geschliffen: fährt auch rechts, ein paar Unfälle mehr."),
+    "wide_noman_s0": ("B0", "Ohne Abbiege-Wunsch",
+                      "Die Autos erfahren nicht, ob sie links, rechts oder geradeaus wollen – nur, wo das Ziel liegt. Lernt langsamer."),
 }
 
 # One short line per phase of the main training chain, shown next to the numbered markers
@@ -109,7 +130,11 @@ STEP_INFO = {
     "ppo8": "Ruhiger ausprobieren, weniger Zappeln → gut, aber nur auf fast leeren Straßen geübt",
     "ppo9": "Üben mit viel dichterem Verkehr → Kurve fällt erst, weil es schwerer wird; dann weniger Unfälle",
     "ppo13": "Kleinere Lernschritte → stetig besser; gegen Ende noch mehr Verkehr, daher wieder etwas mehr Unfälle",
-    "ppo17": "Noch kleinere Schritte, mehr Blick auf die Folgen → der beste Stand",
+    "ppo17": "Noch kleinere Schritte, mehr Blick auf die Folgen → bester Stand auf der alten, schmalen Kreuzung",
+    "wide_s1": "Neue Kreuzung: Straße doppelt so breit, Reifen rutschen in zu schnellen Kurven → von Null an neu gelernt, die Kurve beginnt wieder unten",
+    "wide_s1r": "Rückwärtsgang dazu → kaum benutzt, es geht weiter bergauf",
+    "wide_s1ft": "Kleinere Lernschritte → weniger Unfälle",
+    "wide_s1ft2": "Länger feinschleifen → nur noch wenig besser: das aktuelle Gehirn",
 }
 
 
@@ -262,12 +287,14 @@ def run_bench(entries: list[tuple[str, str, object, dict, list]], force: bool, w
     if jobs:
         print(f"  benchmarking {len(jobs)} runs ({BENCH_ENVS} envs x {BENCH_SECONDS:.0f} s each) ...")
         t0 = time.time()
-        with mp.get_context("fork").Pool(workers) as pool:
-            for ck, res in zip(keys, pool.map(_bench_job, jobs, chunksize=1)):
-                cache[ck] = res
-        print(f"  bench done in {time.time() - t0:.0f} s")
         CACHE.parent.mkdir(parents=True, exist_ok=True)
-        CACHE.write_text(json.dumps(cache, indent=0, sort_keys=True))
+        with mp.get_context("fork").Pool(workers) as pool:
+            for i, (ck, res) in enumerate(zip(keys, pool.imap(_bench_job, jobs, chunksize=1))):
+                cache[ck] = res
+                if (i + 1) % 20 == 0 or i + 1 == len(jobs):  # save progress (an interrupted build resumes)
+                    CACHE.write_text(json.dumps(cache, indent=0, sort_keys=True))
+                    print(f"    {i + 1}/{len(jobs)} ({time.time() - t0:.0f} s)", flush=True)
+        print(f"  bench done in {time.time() - t0:.0f} s")
     out = {}
     for key, kind, payload, physics, demands in entries:
         out.setdefault(key, {})
@@ -455,6 +482,9 @@ def timeline(found: dict, best_id: str, n_max: int) -> list[dict]:
         if g not in by_gen or cid == best_id:
             by_gen[g] = cid
     pts = sorted(by_gen.items())
+    best_gen = next((g for g, cid in pts if cid == best_id), None)
+    if best_gen is not None:  # nothing after the chosen checkpoint
+        pts = [p for p in pts if p[0] <= best_gen]
     # drop near-duplicates (closer than 3% of the whole span to the next point)
     span = max((g for g, _ in pts), default=0) or 1
     kept = []
@@ -522,14 +552,21 @@ def copy_src(version: str, built: str):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--main", action="append", default=[], metavar="PATH",
-                    help="use this checkpoint as the best one of its method (runs/<es*|ppo*>/x.npz); repeatable")
+    ap.add_argument("--main", action="append", default=None, metavar="PATH",
+                    help=f"the site's main brain (first one; drives start page, sensors, brain, Vergleich) and/or the best "
+                         f"of its method (runs/<run>/x.npz); repeatable; default {DEFAULT_MAIN}")
+    ap.add_argument("--history", default=DEFAULT_HISTORY, metavar="PATH",
+                    help="checkpoint whose warm-start chain is shown before the main chain in the learning curve and "
+                         "Zeitreise (older crossing / earlier line); '' = none")
     ap.add_argument("--bench", action="store_true", help="ignore the bench cache and re-run all benchmarks")
     ap.add_argument("--timeline", type=int, default=6, help="max checkpoints per Zeitreise")
     ap.add_argument("--workers", type=int, default=4)
-    ap.add_argument("--world", choices=["narrow", "wide", "any"], default="narrow",
+    ap.add_argument("--world", choices=["narrow", "wide", "any"], default="any",
                     help="only use checkpoints trained on this crossing (narrow = original 7 m road, wide = 14 m road)")
+    ap.add_argument("--mix", default=DEFAULT_MIX, metavar="PATH", help="second brain for mixing on the start page ('' = none)")
     a = ap.parse_args(argv)
+    if a.main is None:
+        a.main = list(DEFAULT_MAIN)
 
     cfg = SimConfig()
     layout = obs_layout(cfg)  # fails loudly if the sim's observation layout changed
@@ -537,12 +574,21 @@ def main(argv=None):
     found = discover(a.world)
     print(f"  {len(found)} loadable checkpoints")
 
-    # quick bench of every checkpoint at demand 0.15 -> pick the best per method
-    quick_entries = [(*pol_entry(c), [0.15]) for c in found.values()]
+    def cid_of(spec):
+        cid = next((k for k, c in found.items() if c["file"] == spec or k == spec), None)
+        if cid is None:
+            raise SystemExit(f"{spec}: not a loadable checkpoint under runs/ (see skip messages)")
+        return cid
+
+    # methods without an explicit --main: quick bench of all their checkpoints at demand 0.15
+    fixed = {found[cid_of(s)]["method"] for s in a.main}
+    quick_entries = [(*pol_entry(c), [0.15]) for c in found.values() if c["method"] not in fixed]
     qb = run_bench(quick_entries, a.bench, a.workers)
-    quick = {cid: qb[pol_entry(c)[0]]["0.15"] for cid, c in found.items()}
+    quick = {cid: qb[pol_entry(c)[0]]["0.15"] for cid, c in found.items() if c["method"] not in fixed}
     picked = choose(found, a.main, quick)
-    print(f"  best per method: {picked}")
+    main_id = cid_of(a.main[0]) if a.main else max(picked.values(), key=lambda k: quick[k]["throughput_per_min"] * quick[k]["exit_ok_rate"])
+    hist_id = cid_of(a.history) if a.history else None
+    print(f"  best per method: {picked}, main: {main_id}, history: {hist_id}")
 
     policies, bench_entries = {}, []
 
@@ -559,12 +605,30 @@ def main(argv=None):
     timelines, curves, chains = {}, {}, {}
     for method, cid in picked.items():
         use(cid, DEMANDS)
-        pts, chain = timeline(found, cid, a.timeline)
-        chains[method] = [{"run": r, "offset": off, **run_info(r)} for r, off in chain]
-        for p in pts:
+        parts = [cid]
+        if hist_id and found[hist_id]["method"] == method and hist_id != cid:
+            use(hist_id, DEMANDS)
+            parts.insert(0, hist_id)
+        pts_all, chain_all, shift = [], [], 0
+        for i, pid in enumerate(parts):
+            # history first (fewer Zeitreise points), then the main chain, shifted to follow it
+            pts, chain = timeline(found, pid, max(2, a.timeline // 2) if i < len(parts) - 1 else a.timeline)
+            crv = {r: read_curve(r, off) for r, off in chain}
+            if i > 0 and any(crv.values()):
+                lo = min(row["x"] for rows in crv.values() for row in rows)
+                if lo < shift:  # iteration counts restart: move the whole chain behind the history
+                    chain = [(r, off + shift - lo) for r, off in chain]
+                    crv = {r: read_curve(r, off) for r, off in chain}
+                    pts = [{**p, "gen": p["gen"] + shift - lo} for p in pts]
+            pts_all += pts
+            chain_all += chain
+            curves.setdefault(method, {}).update(crv)
+            shift = 1 + max([row["x"] for rows in crv.values() for row in rows] + [p["gen"] for p in pts_all] + [0])
+        chains[method] = [{"run": r, "offset": off, "world": world_of(found[next(k for k, c in found.items() if c["run"] == r)]["physics"])
+                           if any(c["run"] == r for c in found.values()) else None, **run_info(r)} for r, off in chain_all]
+        for p in pts_all:
             use(p["id"], TIMELINE_DEMANDS)
-        timelines[method] = pts
-        curves[method] = {r: read_curve(r, off) for r, off in chain}
+        timelines[method] = pts_all
     # random brain as "generation 0" of the ES timeline
     if "es" in timelines:
         phys = found[picked["es"]]["physics"]
@@ -584,8 +648,10 @@ def main(argv=None):
         use(cid, TIMELINE_DEMANDS)
         others.append({"run": run, "id": cid, "method": found[cid]["method"], **run_info(run)})
 
-    # the rule-based drivers run in the same world (geometry, grip) as the best policy
-    main_id = picked.get("ppo") or picked.get("es")
+    mix_id = cid_of(a.mix) if a.mix else None
+    if mix_id:
+        use(mix_id, DEMANDS)
+    # the rule-based drivers run in the same world (geometry, grip) as the main policy
     world = {k: v for k, v in found[main_id]["physics"].items() if k in GEOMETRY_KEYS} if main_id else {}
     base_phys = {**physics_of(cfg.__dict__), **world}
     baselines = {}
@@ -604,8 +670,10 @@ def main(argv=None):
         "cfg": {k: (list(v) if isinstance(v, tuple) else v) for k, v in cfg.__dict__.items()},
         "policies": policies,
         "best": picked,
-        # method whose best checkpoint drives best (shown first on the site)
-        "main": max(picked, key=lambda m: quick[picked[m]]["throughput_per_min"] * quick[picked[m]]["exit_ok_rate"]) if picked else None,
+        "main": found[main_id]["method"] if main_id else None,  # method of the main brain (shown first on the site)
+        "main_id": main_id,
+        "history": hist_id,
+        "mix": mix_id,
         "timelines": timelines,
         "chains": chains,
         "curves": curves,
