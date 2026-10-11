@@ -145,3 +145,37 @@ def physics_of(train_cfg: dict) -> dict:
         v = train_cfg[k] if k in train_cfg else LEGACY_PHYSICS.get(k, getattr(SimConfig, k))
         out[k] = int(v) if k == "n_signal" else bool(v) if k == "brake_light" else float(v)
     return out
+
+
+# ------------------------------------------------------------------ warm start across interfaces
+def transplant_actor(npz_path: str | Path, cfg: SimConfig, in_scale: np.ndarray, sizes: list[int]) -> np.ndarray:
+    """Flat actor params (policy.py layout) for ``cfg``'s interface from an older checkpoint
+    (e.g. 2 lamps + neighbour acceleration -> 1 lamp + brake light + hazard), for a PPO warm start.
+
+    Inputs are matched by feature key (scale folded in so the first layer sees the same
+    pre-activations); inputs the old brain did not have (brake, hazard, ...) start at weight 0
+    (the old acceleration input is dropped, not remapped); outputs: accel, curvature and the
+    first lamps are kept, extra old lamp outputs are dropped, missing ones start at 0."""
+    from .policy import load_in_scale, load_npz, unpack
+
+    params, old_sizes, old_cfg = load_npz(npz_path)
+    old_s = load_in_scale(npz_path)
+    old_s = np.ones(old_sizes[0]) if old_s is None else old_s
+    if list(old_sizes[1:-1]) != list(sizes[1:-1]):
+        raise ValueError(f"hidden sizes differ: {old_sizes} vs {sizes}")
+    old_icfg = interface_cfg(old_cfg)
+    old_keys, new_keys = obs_keys(old_icfg), obs_keys(cfg)
+    assert len(old_keys) == old_sizes[0] and len(new_keys) == sizes[0]
+    Ls = unpack(params, old_sizes)
+    W0, b0 = np.asarray(Ls[0][0]), np.asarray(Ls[0][1])
+    W = np.zeros((sizes[0], W0.shape[1]))
+    pos = {k: j for j, k in enumerate(old_keys)}
+    for j, k in enumerate(new_keys):
+        if k in pos and in_scale[j] != 0:
+            W[j] = W0[pos[k]] * old_s[pos[k]] / in_scale[j]
+    WL, bL = np.asarray(Ls[-1][0]), np.asarray(Ls[-1][1])
+    n = min(sizes[-1], old_sizes[-1])
+    WN, bN = np.zeros((WL.shape[0], sizes[-1])), np.zeros(sizes[-1])
+    WN[:, :n], bN[:n] = WL[:, :n], bL[:n]
+    layers = [(W, b0), *[(np.asarray(w), np.asarray(b)) for w, b in Ls[1:-1]], (WN, bN)]
+    return np.concatenate([x for w, b in layers for x in (w.ravel(), b.ravel())])

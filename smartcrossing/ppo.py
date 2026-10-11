@@ -365,6 +365,9 @@ def main(argv=None):
     p.add_argument("--no-signal", dest="signal", action="store_false")
     p.add_argument("--cfg", default="", help="JSON SimConfig overrides")
     p.add_argument("--init", default="", help="resume from a full checkpoint (state.npz)")
+    p.add_argument("--init-policy", default="", help="warm-start the actor from a policy .npz of an older interface "
+                   "(policy_compat.transplant_actor); critic fresh")
+    p.add_argument("--critic-warmup", type=int, default=0, help="first N iterations of this run train only the critic")
     p.add_argument("--reset-logstd", action="store_true", help="with --init: restart log-std at --logstd-init")
     p.add_argument("--set-ceiling", type=float, default=0.0, help="with --init: override the stored curriculum ceiling")
     p.add_argument("--eval-every", type=int, default=25)
@@ -406,6 +409,10 @@ def main(argv=None):
     logstd = np.full(A, a.logstd_init)
     opt_a, opt_c = Adam(len(actor.p), a.lr), Adam(len(critic.p), a.lr_critic)
     ceiling, it0, total_steps = a.demand_start, 0, 0
+    if a.init_policy:
+        from .policy_compat import transplant_actor
+
+        actor.p = transplant_actor(a.init_policy, cfg, in_scale, a_sizes)
     if a.init:
         z = np.load(a.init)
         actor.p, critic.p, logstd = z["actor"].copy(), z["critic"].copy(), z["logstd"].copy()
@@ -464,7 +471,13 @@ def main(argv=None):
             kinds = sum(r["kinds"] for r in res)
             car_steps = sum(r["car_steps"] for r in res)
             total_steps += car_steps
+            warm = it - it0 < a.critic_warmup
+            if warm:  # critic warm-up: keep the actor (params, log-std, Adam state) unchanged
+                keep = (actor.p.copy(), logstd.copy(), opt_a.m.copy(), opt_a.v.copy(), opt_a.t)
             upd = update(actor, logstd, critic, opt_a, opt_c, data, a, act_mask, in_scale, rng)
+            if warm:
+                actor.p[...], logstd[...], opt_a.m, opt_a.v, opt_a.t = keep
+                upd["critic_warmup"] = True
             fin = max(kinds[1:].sum(), 1)
             tr = {
                 "exit_ok": kinds[DONE_EXIT] / fin,
