@@ -107,8 +107,8 @@ next training round" and Roadmap (B), (C), (D).
   information (next turn) as input instead of only the exit arm.
 - Run tracking (owner, 2026-10-11), with the next refactoring step: git commit hash (+ dirty flag)
   in every run's args.json, full state.npz of important runs kept under results/ (cloud runs were
-  lost), a small script listing runs/ (name, commit, settings, key metrics). Weights & Biases only
-  later as an optional `--wandb` flag, when the many-seed norm experiments (D) start.
+  lost), a small script listing runs/ (name, commit, settings, key metrics). The owner needs no
+  tracking UI (the /lernen curve is enough); tooling is for the coordinator and agents, their call.
 - Quick wins: small GIF of the crossing at the top of README.md (rendered from the main brain);
   short, plain explanation on /lernen of how training with many cars works (PPO: all cars share one
   brain, each learns from its own reward; ES: each mutation drives in its own environments, all
