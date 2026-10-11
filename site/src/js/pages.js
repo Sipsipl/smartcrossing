@@ -435,8 +435,18 @@
       const k = Math.max(1, Math.round(total / 80));
       const ser = (key) => chain.flatMap((_, i) => SCX.smooth(part(i).filter((p) => p[key] !== undefined).map((p) => [p.x, p[key]]), k));
       const phases = chain.map((c, i) => ({ x: starts[i], n: i + 1, title: c.step || c.note || c.label || c.run }));
+      const WORLD = { narrow: "Alte, schmale Kreuzung (7 m Straßen)", wide: "Breite Kreuzung (14 m Straßen)" };
+      const worlds = new Set(chain.map((c) => c.world).filter(Boolean));
+      const bands = [];
+      if (worlds.size > 1) chain.forEach((c, i) => {
+        if (i === 0 || c.world !== chain[i - 1].world) bands.push({ x0: starts[i], x1: Infinity, label: { narrow: "schmale Kreuzung", wide: "breite Kreuzung" }[c.world] || "", world: c.world });
+        else return;
+        if (bands.length > 1) bands[bands.length - 2].x1 = starts[i];
+      });
+      const lastX = Math.max(...chain.flatMap((_, i) => part(i).map((p) => p.x)));
+      bands.forEach((b) => { if (b.x1 === Infinity) b.x1 = lastX; });
       const leg = $("chain-legend");
-      if (leg) leg.innerHTML = chain.map((c, i) => `<li><span class="num">${i + 1}</span><span>${c.step || c.note || c.label || c.run}</span></li>`).join("");
+      if (leg) leg.innerHTML = chain.map((c, i) => `${worlds.size > 1 && (i === 0 || c.world !== chain[i - 1].world) ? `<li class="world">${WORLD[c.world] || ""}</li>` : ""}<li><span class="num">${i + 1}</span><span>${c.step || c.note || c.label || c.run}</span></li>`).join("");
       const markers = [];
       if (!extra) {
         const cur = tl()[idx];
@@ -450,7 +460,7 @@
         ],
         yMin: 0, yMax: 1, yFmt: (v) => `${Math.round(v * 100)} %`, xLabel: method === "ppo" ? "Trainingsschritt" : "Generation",
         xTipFmt: (x) => `${method === "ppo" ? "Schritt" : "Generation"} ${Math.round(x)}`,
-        markers, phases, directLabels: true, height: 300, aria: "Lernkurve: Anteil angekommener, verunglückter und abgekommener Autos, mit nummerierten Trainingsabschnitten",
+        markers, phases, bands, directLabels: true, height: 300, aria: "Lernkurve: Anteil angekommener, verunglückter und abgekommener Autos, mit nummerierten Trainingsabschnitten",
       });
     }
     setupSlider();
@@ -498,6 +508,7 @@
         const c = v.view.counts(t);
         v.fig.querySelector("[data-s=thr]").textContent = c.thr === null ? "–" : num(c.thr);
         v.fig.querySelector("[data-s=bad]").textContent = c.bad;
+        v.fig.querySelector(".bad").classList.toggle("on", c.bad > 0);
       }
       host.querySelector("[data-act=clock]").textContent = `${mmss(t)} / ${mmss(dur)}`;
     }
@@ -529,8 +540,10 @@
       { name: "Ampel", note: "Regeln + Spuren", b: D.baselines.light, color: "--c1" },
       { name: "Verkehrsrechner", note: "Regeln + Spuren + Funk", b: D.baselines.reservation, color: "--c2" },
     ];
-    if (D.best.es) rows.push({ name: "Evolution (gelernt)", note: "keine Regeln", b: pol(D.best.es).bench, color: "--c3" });
-    if (D.best.ppo) rows.push({ name: "PPO (gelernt)", note: "keine Regeln", b: pol(D.best.ppo).bench, color: "--c4" });
+    const narrowTag = (e) => (isNarrow(e) && !isNarrow(pol(MAIN_ID)) ? " (alt, schmal)" : "");
+    if (MAIN_ID) rows.push({ name: "Gelernte Autos", note: "keine Regeln", b: pol(MAIN_ID).bench, color: "--c4" });
+    if (D.history && D.history !== MAIN_ID) rows.push({ name: "Gelernt" + narrowTag(pol(D.history)), note: "keine Regeln", b: pol(D.history).bench, color: "--c3" });
+    if (D.best.es && D.best.es !== MAIN_ID) rows.push({ name: "Evolution" + narrowTag(pol(D.best.es)), note: "keine Regeln", b: pol(D.best.es).bench, color: "--c5", noChart: true });
     const dem = D.demands.map(String);
     const demPerMin = (d) => {
       const r = D.baselines.reservation[d];
@@ -543,7 +556,7 @@
     const draw = () => SCX.lineChart($("c-thr"), {
       series: [
         { name: "Nachfrage", color: SCX.cssVar("--c5"), dash: true, points: dem.map((d) => [demPerMin(d), demPerMin(d)]) },
-        ...rows.map((r) => ({ name: r.name, color: SCX.cssVar(r.color), dots: true, points: dem.filter((d) => r.b[d]).map((d) => [demPerMin(d), r.b[d].throughput_per_min]) })),
+        ...rows.filter((r) => !r.noChart).map((r) => ({ name: r.name, color: SCX.cssVar(r.color), dots: true, points: dem.filter((d) => r.b[d]).map((d) => [demPerMin(d), r.b[d].throughput_per_min]) })),
       ],
       xLabel: "ankommende Autos pro Minute (alle 4 Zufahrten)", yLabel: "durchgekommen pro Minute",
       yFmt: (v, tip) => (tip ? num(v) : String(Math.round(v))), xFmt: (v) => String(Math.round(v)), xTipFmt: (v) => `${Math.round(v)} Autos/min kommen an`,

@@ -213,7 +213,7 @@ table.data thead th { font-size: 12px; text-transform: uppercase; letter-spacing
 .rp-name { font-weight: 650; font-size: 14px; overflow-wrap: anywhere; hyphens: auto; }
 .rp-stats { display: flex; flex-wrap: wrap; gap: 0 10px; font-size: 13px; color: var(--muted); }
 .rp-stats b { font: 600 15px var(--font-num); color: var(--fg); font-variant-numeric: tabular-nums; }
-.rp-stats .bad b { color: var(--warn); }
+.rp-stats .bad.on b { color: var(--warn); }
 @media (max-width: 560px) { .rp-grid { gap: 6px; } .rp-name { font-size: 13px; } .rp-stats { font-size: 12px; } }
 
 /* learning curve: numbered phase markers */
@@ -223,3 +223,6 @@ ol.phases { list-style: none; padding: 0; margin: 6px 0 12px; max-width: 72ch; d
 ol.phases li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 6px; align-items: baseline; }
 ol.phases .num { display: inline-grid; place-items: center; width: 19px; height: 19px; border-radius: 50%; border: 1.5px solid var(--fg); font: 700 11px var(--font-ui); }
 .num-inline { display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; border: 1.5px solid currentColor; font: 700 10.5px var(--font-ui); vertical-align: 1px; }
+.chart .band { fill: var(--fg); opacity: 0.045; }
+.chart .band-label { font-size: 12px; font-weight: 600; }
+ol.phases li.world { display: block; font-weight: 650; margin-top: 6px; color: var(--muted); }

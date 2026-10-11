@@ -62,6 +62,13 @@
         t.textContent = mk.label;
       }
     }
+    // labelled background bands (e.g. which crossing a stretch of training used)
+    (opts.bands || []).forEach((b, i) => {
+      const x0 = X(Math.max(b.x0, xMin)), x1 = X(Math.min(b.x1, xMax));
+      if (i % 2 === 0) el("rect", { x: x0, y: m.t, width: Math.max(0, x1 - x0), height: H - m.t - m.b, class: "band" }, svg);
+      const tx = el("text", { x: (x0 + x1) / 2, y: m.t + (H - m.t - m.b) * 0.48, "text-anchor": "middle", class: "band-label" }, svg);
+      tx.textContent = b.label;
+    });
     // numbered phase markers: dashed line at x, numbered circle above the plot
     // (circles that would overlap are pushed right, with a short leader line)
     let lastCx = -1e9;

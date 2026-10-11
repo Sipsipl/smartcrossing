@@ -63,7 +63,7 @@
       if (!r) return { thr: null, bad: 0, exits: 0 };
       const k = Math.floor(t / r.dt);
       const exits = countUpTo(r.exits, k);
-      return { exits, bad: countUpTo(r.bad, k), thr: t >= 10 ? (exits / t) * 60 : null };
+      return { exits, bad: countUpTo(r.bad, k), thr: t >= 5 ? (exits / t) * 60 : null };
     }
 
     draw(t) {
