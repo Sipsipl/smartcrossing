@@ -41,15 +41,16 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
 ## Architecture
 - `smartcrossing/sim.py`: batched numpy simulator, state arrays (B envs, N slots).
   Kinematic unicycle with curvature, steering-rate and grip limits, dt=0.1 s. Cars spawn at a
-  random lateral offset across the full road width (own spot if clear, else uniform among the
-  clear spots; up to 3 per arm and step, side by side; so no side is preferred; `spawn_right` =
-  right half only, used by the rule-based baselines), must exit through target arm. Car-car collision via
+  random lateral offset on the right half of the road in driving direction (`spawn_right`, default
+  for baselines and learners; own spot if clear, else uniform among the clear spots; up to 3 per arm
+  and step, side by side), must exit through target arm. Crashed cars stay 5 s as wrecks (hazard
+  lights, driving into one = crash). Car-car collision via
   3 discs per car, off-road via rounded-corner distance. Removal on crash/offroad/exit/timeout.
   Observations are mirror-neutral: own state in a canonical frame (entry arm = south; position
   in fixed 10 m units, not scaled by L/W), ego-frame vectors to the exit gate and to the exit
   mouth (25 m units), 5 edge rays, own curvature and grip-limited max curvature, K=4 nearest
-  neighbours (ego frame: position, heading, speed, curvature, acceleration, signal) but NOT
-  their destination. Action = (accel, curvature, signal[n_signal]) in [-1,1].
+  neighbours (ego frame: position, heading, speed, curvature, brake light, hazard light, one lamp
+  `n_signal=1`) but NOT their destination. Action = (accel, curvature, signal[n_signal]) in [-1,1].
   Common random numbers: env b uses traffic stream b % n_scenarios.
 - `smartcrossing/baselines.py`: rule-based references with lanes (light / reservation(AIM) / none),
   1 lane per direction on the 7 m road, 2 on the 14 m road (right-hand traffic).
@@ -58,7 +59,12 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
   see experiments.md). `smartcrossing/analyze.py`: signal zero/shuffle interventions,
   MI(lamp; manoeuvre/braking/region), driving side per arm / manoeuvre, lateral-offset
   histograms (lanes?), wobble metrics, failure breakdown (solo / per demand / per manoeuvre).
-- `smartcrossing/policy.py` (shared MLP, numpy, `PolicyDriver`), `es.py` (OpenAI-ES).
+  GPU path (optional `poetry install --with gpu`, torch): `sim_torch.py` (TorchSim, parity-tested
+  against `sim.py`), `rollout_torch.py` (rollouts on the device, CUDA graph), `ppo_torch.py` (update);
+  enabled by `ppo.py --update-device cuda --rollout-device cuda`. Warm start: `--init-policy`
+  (actor from an older-interface checkpoint) + `--critic-warmup N` (first N iterations critic only).
+- `smartcrossing/policy.py` (shared MLP, numpy, `PolicyDriver`). The old ES trainer was removed
+  (history only); ES checkpoints still load via `policy_compat.py`.
   `smartcrossing/policy_compat.py`: running old checkpoints (observation-layout remap by
   feature name, legacy interface/world values, `physics_of` for the browser).
 - SimConfig `neighbour_vis` (perception range, default 30 m; 60 in ppo11/14/15) and
@@ -77,12 +83,13 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
 - Emergence claims require ablations: signal zeroed/shuffled, no-comm training, MI(signal; intent).
 
 ## Status (2026-10-11)
-Done: simulator + baselines + metrics + tests; ES and PPO training; emergence analysis tooling;
-website (site/) incl. sliders, agent mixing, side-by-side comparison; wide crossing, grip limit,
-reverse gear, impact-speed crash cost, higher inflow; refactor (single frontend, shared JS config).
-Main brain: results/wide_s1ft2_ckpt2650 (beats the light from demand 0.15 up, ~19 % crashes at 0.15).
-Open: crashes in traffic (cars rarely yield), weaving, lamps unused. Next: see "Decided for the
-next training round" and Roadmap (B), (C), (D).
+Done: simulator + baselines + metrics + tests; PPO training (numpy and GPU); emergence analysis
+tooling; website (site/) incl. sliders, agent mixing, side-by-side comparison; wide crossing, grip
+limit, reverse gear, impact-speed crash cost, wrecks / brake light / hazard / one lamp / right-half
+spawning; round 1 (crash cost x3, warm start).
+Main brain: round-1 brain results/round1_x3.npz (site main `r1_main_x3`; previous: wide_s1ft2_ckpt2650).
+Open: cars see obstacles but don't brake to a stop; crashes in the box; weaving; lamps unused.
+Next: round 2 (A/B/C, see Roadmap (E)), then (B), (C), (D).
 
 ## Roadmap (owner, after the wide-crossing change)
 - (A) Driving quality: failure breakdown (offroad vs crash, solo vs traffic, per manoeuvre and

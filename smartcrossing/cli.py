@@ -18,11 +18,12 @@ from .sim import Sim, SimConfig
 
 
 def make_driver(spec: str, sim: Sim):
-    if spec.startswith("policy:"):
-        from .policy import PolicyDriver
+    """light / reservation / none -> rule-based LaneDriver; policy:<file> or a plain .npz path -> PolicyDriver."""
+    if spec in ("light", "reservation", "none"):
+        return LaneDriver(sim, spec)
+    from .policy import PolicyDriver
 
-        return PolicyDriver.load(spec.split(":", 1)[1], sim)
-    return LaneDriver(sim, spec)
+    return PolicyDriver.load(spec.removeprefix("policy:"), sim)
 
 
 def run(spec, cfg, n_envs, seconds, seed, frame_every=None, b_render=0, view=None, spacetime=None):

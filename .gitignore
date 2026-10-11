@@ -33,3 +33,5 @@ models/
 # OS-specific
 .DS_Store
 Thumbs.db
+# Coverage
+.coverage
