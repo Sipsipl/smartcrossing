@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .sim import K_NEIGHBOURS, NB_FEATURES, OBS_DIM, Sim, SimConfig, act_dim, obs_dim
+from .sim import K_NEIGHBOURS, OBS_DIM, Sim, SimConfig, act_dim, nb_features, obs_dim
 
 
 def layer_sizes(cfg: SimConfig, hidden=(32, 32)) -> list[int]:
@@ -26,7 +26,7 @@ def default_in_scale(cfg: SimConfig) -> np.ndarray:
     units) are already scaled by fixed constants in the sim; neighbour positions are
     divided by 30 m there, rescale them to ~10 m units."""
     s = np.ones(obs_dim(cfg))
-    blk = NB_FEATURES + cfg.n_signal
+    blk = nb_features(cfg) + cfg.n_signal
     for k in range(K_NEIGHBOURS):
         # neighbour relative position (~10 m units; a longer perception range keeps far cars in range)
         s[OBS_DIM + k * blk : OBS_DIM + k * blk + 2] = 3.0 * min(1.0, 30.0 / cfg.neighbour_vis)
@@ -97,8 +97,18 @@ class PolicyDriver:
         """``path`` may be one .npz file or several joined by '+' (one per group)."""
         from .policy_compat import LEGACY_INTERFACE, adapt_inputs
 
+        paths = str(path).split("+")
+        # sensors, the action interface and the world (geometry, grip) are part of what a policy
+        # learned: run it with the values it was trained with (first policy wins; older
+        # checkpoints: the legacy values, see policy_compat). Traffic settings (spawn_right,
+        # wreck_time, demand) stay those of the given sim.
+        tc = load_npz(paths[0])[2]
+        for k, legacy in LEGACY_INTERFACE.items():
+            setattr(sim.cfg, k, type(legacy)(tc.get(k, legacy)))
+        if sim.sig.shape[-1] != sim.cfg.n_signal:  # lamp count of the checkpoint (fresh sim: lamps are 0)
+            sim.sig = np.zeros((*sim.sig.shape[:-1], sim.cfg.n_signal))
         plist, sizes, tcfg, scale = [], None, None, None
-        for p in str(path).split("+"):
+        for p in paths:
             params, sizes, tcfg = load_npz(p)
             scale = load_in_scale(p)
             if sizes[0] != obs_dim(sim.cfg):  # older observation layout: remap inputs by feature name
@@ -108,13 +118,7 @@ class PolicyDriver:
                 scale = np.asarray(d["in_scale"], dtype=float)
             plist.append(params)
         if mute is None:  # policies trained without signal never learned to use their lamp
-            mute = [not load_npz(p)[2].get("signal_enabled", True) for p in str(path).split("+")]
-        # sensors, the action interface and the world (geometry, grip) are part of what a policy
-        # learned: run it with the values it was trained with (first policy wins; older
-        # checkpoints: the legacy values, see policy_compat)
-        tc = load_npz(str(path).split("+")[0])[2]
-        for k, legacy in LEGACY_INTERFACE.items():
-            setattr(sim.cfg, k, type(legacy)(tc.get(k, legacy)))
+            mute = [not load_npz(p)[2].get("signal_enabled", True) for p in paths]
         return cls(sim, plist, sizes, mute=mute, train_cfg=tcfg, in_scale=scale)
 
     def act(self) -> np.ndarray:

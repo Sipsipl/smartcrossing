@@ -13,7 +13,8 @@ is drivable and (b) give lower/upper reference numbers for throughput:
 - ``none``: lane-following and car-following only, no intersection control
 
 Arrivals: the baselines set ``cfg.spawn_right`` (cars arrive in the right half of the road,
-as lane-disciplined traffic would; the learning agents spawn anywhere across the width).
+as lane-disciplined traffic would; since 2026-10-11 this is the default for the learners too).
+Wrecks (``cfg.wreck_time``) are standing obstacles for the car following (no rule knows about them).
 
 Lanes (right-hand traffic): the road has n_lanes(cfg) lanes per direction (1 on the 7 m
 crossing, 2 on the 14 m crossing). Right turners use the right (outer) lane, left turners
@@ -294,7 +295,9 @@ class LaneDriver:
                 continue
             # order by distance to the centre so cars closer to the box decide first
             alive = alive[np.argsort(np.hypot(sim.x[b, alive], sim.y[b, alive]))]
-            ax, ay, ath, av = sim.x[b, alive], sim.y[b, alive], sim.th[b, alive], sim.v[b, alive]
+            # obstacles: the driving cars (same order, index j) followed by the wrecks (standing cars)
+            obst = np.concatenate([alive, np.nonzero(sim.wreck[b])[0]])
+            ax, ay, ath, av = sim.x[b, obst], sim.y[b, obst], sim.th[b, obst], sim.v[b, obst]
             arm_blocked = {}  # (arm, lane) -> an uncommitted car of this lane is ahead
             uids = sim.uid[b, alive]
             planned = alive[[int(u) in self.plans[b] and kk - self.plans[b][int(u)][0] < len(self.plans[b][int(u)][1]) - 1 for u in uids]]
@@ -319,11 +322,11 @@ class LaneDriver:
                     self.merging.discard(mkey)
                 merging = mkey in self.merging
                 hold, back, stop = False, False, False
-                if merging and len(alive) > 1 and uid not in self.committed[b]:
+                if merging and len(obst) > 1 and uid not in self.committed[b]:
                     # oncoming cars in the strip between me and my lane (incl. my own corridor):
                     # stop and wait (no sidestep) until they have passed or stopped for me;
                     # too close laterally: step back away from them
-                    others = np.arange(len(alive)) != j
+                    others = np.arange(len(obst)) != j
                     dx, dy = ax[others] - sim.x[b, n], ay[others] - sim.y[b, n]
                     f, lat = np.cos(th) * dx + np.sin(th) * dy, -np.sin(th) * dx + np.cos(th) * dy
                     onc = np.abs((ath[others] - th + np.pi) % (2 * np.pi) - np.pi) > 2 * np.pi / 3
@@ -352,7 +355,7 @@ class LaneDriver:
                 hi = min(i + 90, path.n)
                 ahead = path.p[i + 1 : hi]
                 if len(ahead):
-                    others = np.arange(len(alive)) != j
+                    others = np.arange(len(obst)) != j
                     d2 = (ahead[None, :, 0] - ax[others, None]) ** 2 + (ahead[None, :, 1] - ay[others, None]) ** 2
                     kmin = d2.argmin(1)
                     dmin = np.sqrt(d2[np.arange(len(kmin)), kmin])
@@ -372,7 +375,7 @@ class LaneDriver:
                         # separation from other planned cars is guaranteed by the manager
                         # (inside the box); outside it planned cars follow each other tightly
                         tight = True
-                        cand &= ~(np.isin(alive[others], planned) & in_box)
+                        cand &= ~(np.isin(obst[others], planned) & in_box)
                     if cand.any():
                         # oncoming cars (merging spawns): stop well before them so they can cross
                         g = (kmin + 1) * STEP - 4.6 - np.where(oncoming, 8.0, 0.0)

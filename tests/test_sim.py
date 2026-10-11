@@ -399,7 +399,7 @@ def test_reversing_out_of_the_entry_arm_is_a_wrong_exit():
 def test_spawn_capacity_at_high_demand(spawn_right):
     """With free-flowing traffic the entry is not the bottleneck at 1 arrival / s / arm: a
     blocked spot falls back to another clear one and cars may enter side by side."""
-    cfg = SimConfig(demand=1.0, spawn_right=spawn_right)
+    cfg = SimConfig(demand=1.0, spawn_right=spawn_right, wreck_time=0.0)  # (wrecks would block the box)
     sim = Sim(cfg, 4, seed=2)
     a = zeros(sim)
     a[..., 0] = 1.0
@@ -411,7 +411,7 @@ def test_spawn_capacity_at_high_demand(spawn_right):
 
 
 def test_spawn_falls_back_to_a_clear_spot():
-    cfg = SimConfig(demand=0.0)
+    cfg = SimConfig(demand=0.0, spawn_right=False)  # full width: the other half has room
     sim = Sim(cfg, 1, seed=0)
     lats = sim.spawn_lats()
     # standing car right in front of the u = 1 spot (right edge of arm 0): that side is blocked

@@ -44,7 +44,11 @@ K_NEIGHBOURS = 4
 NEIGHBOUR_RANGE = 30.0  # neighbour positions are divided by this (fixed, independent of the perception range)
 POS_SCALE = 10.0  # own canonical position is given in units of 10 m (fixed: independent of L, W)
 GOAL_SCALE = 25.0  # goal vectors (exit gate, exit mouth) in units of 25 m
-NB_FEATURES = 8  # per neighbour before its lamps: rel. pos (2), rel. heading (2), speed, present, curvature, accel
+# per neighbour before its lamps: rel. pos (2), rel. heading (2), speed, present, curvature, then
+# brake light + hazard lights (cfg.brake_light, the default) or the legacy acceleration (8 features)
+NB_FEATURES = 9
+NB_FEATURES_LEGACY = 8
+BRAKE_ACC = -0.5  # m/s^2: brake lights are on while the actual acceleration is below this
 
 # why a slot was cleared in the last step (Sim.done_kind)
 DONE_NONE, DONE_EXIT, DONE_WRONG, DONE_CRASH, DONE_OFFROAD, DONE_TIMEOUT = 0, 1, 2, 3, 4, 5
@@ -81,11 +85,11 @@ class SimConfig:
     # turn (right turn, r ~ 10.75 m) then allows ~6.6 m/s; at 14 m/s r_min = 49 m.
     # 0 disables the limit (the original physics: r_min = 5 m at any speed).
     a_lat_max: float = 4.0
-    # lateral spawn offset: False = uniform over the whole road width (own spot, or uniform among
-    # the clear positions if it is blocked; both halves, no side preferred; the learning setting);
-    # True = only the right half (lane-disciplined arrivals, used by the rule-based baselines: they may rely
-    # on rules). Same random draws either way (see Sim._arrivals).
-    spawn_right: bool = False
+    # lateral spawn offset: True = only the right half of the road in driving direction (default
+    # for everyone since the owner's decision of 2026-10-11); False = uniform over the whole road
+    # width (own spot, or uniform among the clear positions if it is blocked; both halves, no side
+    # preferred; how the old checkpoints were trained). Same random draws either way (Sim._arrivals).
+    spawn_right: bool = True
     spawn_speed: float = 8.0
     spawn_clearance: float = 7.0
     # extra spawn clearance (s) per m/s of closing speed between the new car and an
@@ -93,8 +97,13 @@ class SimConfig:
     # into the back of a queue)
     spawn_headway: float = 1.5
     max_age: float = 60.0  # cars older than this are removed (counted as timeout)
+    # wrecks: cars of a car-car crash stay this long (s) as standing obstacles (speed 0, no control,
+    # no reward, hazard lights on; their episode ends at the crash). A moving car that hits a wreck
+    # crashes too (impact speed = its own speed) and becomes a wreck. 0 = crashed cars vanish at
+    # once (the old behaviour). Off-road cars always vanish.
+    wreck_time: float = 5.0
     n_slots: int = 32
-    n_signal: int = 2  # dimensions of the free "light" signal
+    n_signal: int = 1  # dimensions of the free "light" signal (old checkpoints: 2)
     demand: float = 0.15  # arrivals per second per arm
     # if set (lo, hi): every traffic stream draws its own demand uniformly at reset
     # (one batch mixes densities); cfg.demand is then ignored
@@ -109,6 +118,9 @@ class SimConfig:
     # ppo16 only: action[0] is a target speed in [0, v_max] reached with
     # acc = clip((v_target - v) / SPEED_TAU, -brake_max, acc_max) (no reverse)
     speed_control: bool = False
+    # neighbour block: binary brake light + hazard lights (True) or the legacy continuous
+    # acceleration feature (False, checkpoints trained before 2026-10-11; no hazard feature)
+    brake_light: bool = True
     signal_enabled: bool = True
     # reward weights. Per car (Sim.car_reward); the team reward returned by step() is
     # their sum over the cars of an environment minus the queue cost.
@@ -148,13 +160,24 @@ def js_constants() -> dict:
         "SPAWN_BACK": SPAWN_BACK, "SPAWN_CURB_GAP": SPAWN_CURB_GAP, "SPAWN_RIGHT_MIN": SPAWN_RIGHT_MIN,
         "SPAWN_LAT_STEP": SPAWN_LAT_STEP, "SPAWN_MAX_PER_STEP": SPAWN_MAX_PER_STEP, "SPEED_TAU": SPEED_TAU, "N_RAYS": N_RAYS, "RAY_ANGLES": RAY_ANGLES.tolist(), "RAY_RANGE": RAY_RANGE,
         "K_NEIGHBOURS": K_NEIGHBOURS, "NEIGHBOUR_RANGE": NEIGHBOUR_RANGE, "POS_SCALE": POS_SCALE,
-        "GOAL_SCALE": GOAL_SCALE, "NB_FEATURES": NB_FEATURES, "LANE_WIDTH": LANE_WIDTH,
+        "GOAL_SCALE": GOAL_SCALE, "NB_FEATURES": NB_FEATURES, "NB_FEATURES_LEGACY": NB_FEATURES_LEGACY,
+        "BRAKE_ACC": BRAKE_ACC, "LANE_WIDTH": LANE_WIDTH,
         "OBS_DIM": OBS_DIM, "OBS_RAYS": OBS_RAYS, "DONE_NAMES": list(DONE_NAMES), "ARM_U": ARM_U.tolist(),
     }
 
 
+def nb_features(cfg: SimConfig) -> int:
+    """Features per neighbour before its lamps (depends on the brake_light interface)."""
+    return NB_FEATURES if cfg.brake_light else NB_FEATURES_LEGACY
+
+
 def obs_dim(cfg: SimConfig) -> int:
-    return OBS_DIM + K_NEIGHBOURS * (NB_FEATURES + cfg.n_signal)
+    return OBS_DIM + K_NEIGHBOURS * (nb_features(cfg) + cfg.n_signal)
+
+
+def wreck_steps(cfg: SimConfig) -> int:
+    """How many steps a wreck stays (it is part of the state after this many steps)."""
+    return int(round(cfg.wreck_time / cfg.dt))
 
 
 def act_dim(cfg: SimConfig) -> int:
@@ -280,13 +303,14 @@ class Stats:
     spawned: np.ndarray = None
     exits: np.ndarray = None
     wrong_exits: np.ndarray = None
-    crashes: np.ndarray = None  # number of cars involved in car-car collisions
+    crashes: np.ndarray = None  # number of (moving) cars involved in car-car collisions; wrecks are not recounted
+    wreck_hits: np.ndarray = None  # of these: cars that hit (at least) one wreck
     offroad: np.ndarray = None
     timeouts: np.ndarray = None
     travel: list = field(default_factory=list)  # per env: list of (time, free_flow_time)
 
     def __post_init__(self):
-        for name in ("arrived", "spawned", "exits", "wrong_exits", "crashes", "offroad", "timeouts"):
+        for name in ("arrived", "spawned", "exits", "wrong_exits", "crashes", "wreck_hits", "offroad", "timeouts"):
             setattr(self, name, np.zeros(self.B, dtype=np.int64))
         self.travel = [[] for _ in range(self.B)]
 
@@ -314,7 +338,9 @@ class Sim:
             lo, hi = cfg.demand_range
             self._stream_demand = self.rng.uniform(lo, hi, self.S)
             self.demand = self._stream_demand[self.scen]
-        self.alive = np.zeros((B, N), dtype=bool)
+        self.alive = np.zeros((B, N), dtype=bool)  # driving cars (controlled, observed, rewarded)
+        self.wreck = np.zeros((B, N), dtype=bool)  # crashed cars standing as obstacles (see cfg.wreck_time)
+        self.wreck_left = np.zeros((B, N), dtype=np.int64)  # steps until the wreck is removed
         self.x = np.zeros((B, N))
         self.y = np.zeros((B, N))
         self.th = np.zeros((B, N))
@@ -401,11 +427,11 @@ class Sim:
         o[:, OBS_RAYS : OBS_RAYS + N_RAYS] = ray_edge_dist(x[:, None], y[:, None], np.cos(ang), np.sin(ang), W, cfg.Rc) / RAY_RANGE
         o[:, OBS_RAYS + N_RAYS] = self.kappa[bi, ni] / cfg.kappa_max
         o[:, OBS_RAYS + N_RAYS + 1] = grip_kappa(cfg, self.v[bi, ni]) / cfg.kappa_max
-        # neighbours: K nearest other cars within range, sorted by distance
+        # neighbours: K nearest other cars (driving or wrecked) within range, sorted by distance
         ddx = self.x[bi] - x[:, None]  # (M, N) = x_j - x_i
         ddy = self.y[bi] - y[:, None]
         d = np.hypot(ddx, ddy)
-        valid = self.alive[bi] & (d < cfg.neighbour_vis)
+        valid = (self.alive | self.wreck)[bi] & (d < cfg.neighbour_vis)
         valid[np.arange(len(bi)), ni] = False
         d = np.where(valid, d, np.inf)
         K = min(K_NEIGHBOURS, N)
@@ -419,7 +445,8 @@ class Sim:
         ny = np.take_along_axis(ddy, idx, -1)
         b2 = bi[:, None]
         nth = self.th[b2, idx] - th[:, None]
-        blk = NB_FEATURES + cfg.n_signal
+        nbf = nb_features(cfg)
+        blk = nbf + cfg.n_signal
         f = np.zeros((len(bi), K, blk))
         ct2, st2 = ct[:, None], st[:, None]
         f[..., 0] = (ct2 * nx + st2 * ny) / NEIGHBOUR_RANGE
@@ -429,11 +456,15 @@ class Sim:
         f[..., 4] = self.v[b2, idx] / cfg.v_max
         f[..., 5] = 1.0
         f[..., 6] = self.kappa[b2, idx] / cfg.kappa_max  # visible: how hard it is turning
-        f[..., 7] = self.acc[b2, idx] / cfg.brake_max  # visible: brake lights / pitch
+        if cfg.brake_light:
+            f[..., 7] = self.acc[b2, idx] < BRAKE_ACC  # visible: brake lights
+            f[..., 8] = self.wreck[b2, idx]  # visible: hazard lights (a wreck)
+        else:
+            f[..., 7] = self.acc[b2, idx] / cfg.brake_max  # legacy interface: acceleration
         if cfg.signal_enabled:
-            f[..., NB_FEATURES:] = self.sig[b2, idx]
+            f[..., nbf:] = self.sig[b2, idx]
             if cfg.signal_noise > 0:
-                f[..., NB_FEATURES:] += self.noise_rng.normal(0, cfg.signal_noise, f[..., NB_FEATURES:].shape)
+                f[..., nbf:] += self.noise_rng.normal(0, cfg.signal_noise, f[..., nbf:].shape)
         f *= present[..., None]
         o[:, OBS_DIM : OBS_DIM + K * blk] = f.reshape(len(bi), -1)
         obs[bi, ni] = o
@@ -479,6 +510,9 @@ class Sim:
         self.events = []
         self.done_kind = np.zeros(alive.shape, dtype=np.int8)
         self.done_uid = np.where(alive, self.uid, -1)
+        if self.wreck.any():  # wrecks whose time is up disappear (before the collision check)
+            self.wreck_left -= self.wreck
+            self._remove(self.wreck & (self.wreck_left <= 0))
 
         cr = np.where(alive, -cfg.r_time * cfg.dt, 0.0)
         dist = self.dist_to_gate()
@@ -506,7 +540,7 @@ class Sim:
         ox, oy = self._discs()
         off = (corner_dist(ox, oy, cfg.W, cfg.Rc) < cfg.Rc + DISC_R).any(-1) & alive
         # collisions between cars (both cars of a pair are marked; vrel = impact speed)
-        col, vrel = self._collisions(ox, oy, alive)
+        col, vrel, hit_wreck = self._collisions(ox, oy, alive)
         crash = col & ~off
         for kind, m in (("offroad", off), ("crash", crash)):
             for b, n in zip(*np.nonzero(m)):
@@ -516,7 +550,12 @@ class Sim:
         self.done_kind[crash] = DONE_CRASH
         self.stats.offroad += off.sum(1)
         self.stats.crashes += crash.sum(1)
-        self._remove(off | crash)
+        self.stats.wreck_hits += (crash & hit_wreck).sum(1)
+        if wreck_steps(cfg) > 0:  # crashed cars stay as wrecks, off-road cars vanish
+            self._remove(off)
+            self._make_wreck(crash)
+        else:
+            self._remove(off | crash)
 
         timeout = self.alive & (self.age > cfg.max_age)
         cr += cfg.r_timeout * timeout
@@ -534,14 +573,17 @@ class Sim:
         return self.x[..., None] + ct * DISC_OFFSETS, self.y[..., None] + st * DISC_OFFSETS
 
     def _collisions(self, ox, oy, alive):
+        """Collisions of driving cars with driving cars or wrecks: (col, vrel, hit_wreck) per slot
+        (only driving cars are marked; wrecks are not hit again, wreck-wreck pairs are ignored)."""
         N = self.cfg.n_slots
         dcx = self.x[:, :, None] - self.x[:, None, :]
         dcy = self.y[:, :, None] - self.y[:, None, :]
-        near = (dcx**2 + dcy**2 < (2 * DISC_OFFSETS[-1] + 2 * DISC_R) ** 2) & alive[:, :, None] & alive[:, None, :]
+        near = (dcx**2 + dcy**2 < (2 * DISC_OFFSETS[-1] + 2 * DISC_R) ** 2) & alive[:, :, None] & (alive | self.wreck)[:, None, :]
         near &= ~np.eye(N, dtype=bool)[None]
         vrel = np.zeros(alive.shape)
+        hit_wreck = np.zeros_like(alive)
         if not near.any():
-            return np.zeros_like(alive), vrel
+            return np.zeros_like(alive), vrel, hit_wreck
         b, i, j = np.nonzero(near)
         dx = ox[b, i][:, :, None] - ox[b, j][:, None, :]
         dy = oy[b, i][:, :, None] - oy[b, j][:, None, :]
@@ -551,10 +593,24 @@ class Sim:
         b, i, j = b[hit], i[hit], j[hit]
         vx, vy = self.v * np.cos(self.th), self.v * np.sin(self.th)
         np.maximum.at(vrel, (b, i), np.hypot(vx[b, i] - vx[b, j], vy[b, i] - vy[b, j]))
-        return col, vrel
+        hit_wreck[b, i] |= self.wreck[b, j]
+        return col, vrel, hit_wreck
+
+    def _make_wreck(self, mask):
+        """Crashed cars become standing wrecks at their crash position (no control, speed 0,
+        lamps off, hazard lights on) for wreck_steps(cfg) steps; they keep their uid."""
+        self.alive &= ~mask
+        self.wreck |= mask
+        self.wreck_left[mask] = wreck_steps(self.cfg)
+        self.v[mask] = 0.0
+        self.acc[mask] = 0.0
+        self.kappa[mask] = 0.0
+        self.sig[mask] = 0.0
 
     def _remove(self, mask):
         self.alive &= ~mask
+        self.wreck &= ~mask
+        self.wreck_left[mask] = 0
         self.v[mask] = 0.0
         self.acc[mask] = 0.0
         self.sig[mask] = 0.0
@@ -622,6 +678,7 @@ class Sim:
         # velocities of existing cars (for the closing-speed spawn clearance)
         vx, vy = self.v * np.cos(self.th), self.v * np.sin(self.th)
         spawned = np.zeros(self.alive.shape, dtype=bool)
+        occ = self.alive | self.wreck  # wrecks occupy their slot and block like a standing car
         lats = self.spawn_lats()
         back = -cfg.L + SPAWN_BACK
         for k in range(4):
@@ -632,13 +689,13 @@ class Sim:
             px, py = c * lats - s * back, s * lats + c * back
             mx, my, half = px.mean(), py.mean(), 0.5 * (lats[-1] - lats[0])
             for _ in range(SPAWN_MAX_PER_STEP):
-                b = np.nonzero((self.queue[:, k] > 0) & (~self.alive).any(1))[0]
+                b = np.nonzero((self.queue[:, k] > 0) & (~occ).any(1))[0]
                 if len(b) == 0:
                     break
                 # only cars that can be within reach matter: clearance + headway * the largest
                 # possible closing speed around any candidate point (keeps the (b, M, K) block small)
                 reach = cfg.spawn_clearance + cfg.spawn_headway * (cfg.spawn_speed + np.hypot(vx[b], vy[b]))
-                near = self.alive[b] & (np.hypot(self.x[b] - mx, self.y[b] - my) < reach + half)
+                near = occ[b] & (np.hypot(self.x[b] - mx, self.y[b] - my) < reach + half)
                 K = int(near.sum(1).max())
                 if K == 0:
                     clear = np.ones((len(b), len(lats)), dtype=bool)
@@ -657,8 +714,9 @@ class Sim:
                 j0 = np.floor(qu * (len(lats) - 1) + 0.5).astype(np.int64)
                 pick = np.minimum(np.floor(qu * cnt).astype(np.int64), cnt - 1)
                 j = np.where(clear[np.arange(len(b)), j0], j0, np.argmax(np.cumsum(clear, 1) > pick[:, None], 1))
-                n = np.argmin(self.alive[b], 1)
+                n = np.argmin(occ[b], 1)
                 self.alive[b, n] = True
+                occ[b, n] = True
                 self.x[b, n], self.y[b, n] = px[j], py[j]
                 self.th[b, n] = hn
                 self.v[b, n] = cfg.spawn_speed

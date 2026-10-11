@@ -22,7 +22,7 @@ import numpy as np
 
 from .metrics import summarize
 from .policy import PolicyDriver
-from .sim import ARM_U, K_NEIGHBOURS, NB_FEATURES, OBS_DIM, Sim, SimConfig
+from .sim import ARM_U, K_NEIGHBOURS, OBS_DIM, Sim, SimConfig, nb_features
 
 MODES = ("normal", "zero", "shuffle")
 
@@ -34,8 +34,9 @@ def _intervene(sim: Sim, mode: str, rng):
         return
     orig = sim.observe
     S = sim.cfg.n_signal
-    blk = NB_FEATURES + S
-    cols = np.array([OBS_DIM + k * blk + NB_FEATURES + q for k in range(K_NEIGHBOURS) for q in range(S)]).reshape(K_NEIGHBOURS, S)
+    nbf = nb_features(sim.cfg)
+    blk = nbf + S
+    cols = np.array([OBS_DIM + k * blk + nbf + q for k in range(K_NEIGHBOURS) for q in range(S)]).reshape(K_NEIGHBOURS, S)
     pres = np.array([OBS_DIM + k * blk + 5 for k in range(K_NEIGHBOURS)])
 
     def observe():
