@@ -540,3 +540,51 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
 - Check: cli bench (8 envs x 60 s, seed 1000, @0.15) and final-state hashes bit-identical before/after for
   wide_s1ft2 2650, ppo17 5250, ppo16, ppo15, es5, wide_s0ft 2850, light, reservation; full site re-bench
   (35 policies x demands, replays) identical. Tests 46 -> 47 passed.
+
+## Higher demand: spawn capacity (no training)
+- Owner: the start page slider should go to ~1 arrival/s/arm now that the road is 14 m wide.
+- **Measured bottleneck (old spawn logic)**, 16 envs x 120 s, seed 1000 (spawned vs arrived cars/min, all 4 arms):
+
+  | demand | arrivals/min | reservation spawned / thr | light spawned / thr | wide_s1ft2 2650 spawned / thr |
+  |---|---|---|---|---|
+  | 0.3 | 68.6 | 67.0 / 60.9 | 34.8 / 25.7 | 67.0 / 40.9 |
+  | 0.5 | 116.1 | 90.3 / 81.1 | 35.2 / 26.1 | 101.5 / 47.8 |
+  | 0.8 | 190.8 | 94.2 / 84.4 | 35.5 / 26.5 | 115.2 / 50.1 |
+  | 1.0 | 239.5 | 94.1 / 84.6 | 35.8 / 26.6 | 116.0 / 50.4 |
+
+  Pure entry capacity (all cars full throttle straight ahead, no driver limit): 0.69 /s/arm full
+  width, 0.85 right half (165 / 204 cars/min). Cause: one car per arm and step at the lateral
+  offset drawn at arrival; the queue head waits until exactly that spot is clear, and outside its
+  own corridor every car ahead counts as standing (up to 7 + 1.5 x 8 = 19 m clearance), so a car
+  slightly beside the previous one waits ~2 s. `n_slots` = 32 never binds (max mean 22 cars,
+  never all slots full; 64 slots gave bit-identical results).
+- **Change** (`Sim._arrivals`, mirrored in `sim.js`): each arrival draws u in [0,1) (replaces the
+  lateral draw; same number of draws, CRN unchanged). The queue head enters at its own spot (u
+  across the spawn range, on a 0.2 m grid `SPAWN_LAT_STEP`) if clear, else at the
+  floor(u x n_clear)-th clear grid position (uniform among the free ones, both halves: no side
+  preference). Up to `SPAWN_MAX_PER_STEP` = 3 cars per arm and step (side by side if the clearance
+  permits); cars spawned this step count with their real velocity in the closing-speed check.
+  Clearance rules unchanged; baselines keep `spawn_right` (same rule within the right half).
+  Candidate check is restricted to cars within reach (clearance + headway x max closing speed),
+  so the cost stays small: 64 envs, brain: arrivals 2.0 ms of 16 ms/step at 0.15, 10 of 27 ms at 1.0.
+  Pure entry capacity now 1.7 /s/arm (full width), 1.2 /s/arm (right half).
+- **After** (same setup as the table above):
+
+  | demand | arrivals/min | reservation spawned / thr | light spawned / thr | wide_s1ft2 2650 spawned / thr / crash per 1000 |
+  |---|---|---|---|---|
+  | 0.3 | 68.6 | 68.2 / 61.9 | 37.8 / 28.2 | 68.5 / 39.0 / 386 |
+  | 0.5 | 116.1 | 96.8 / 85.8 | 38.9 / 29.1 | 115.6 / 49.1 / 546 |
+  | 0.8 | 190.8 | 101.0 / 90.3 | 40.0 / 29.7 | 185.8 / 53.2 / 697 |
+  | 1.0 | 239.5 | 102.8 / 91.7 | 40.3 / 30.2 | 211.6 / 55.8 / 721 |
+
+  The brain now gets (almost) the full inflow; its throughput saturates at ~55/min because the
+  extra cars crash (72% at 1.0). Reservation and light are limited by their own intersection
+  capacity now (their queues reach back to the entry), not by the spawner. Light had one crash
+  pair at 0.3 (a lane merge in a queue; the old logic had 1 / 1000 at 0.3 in the robust bench too).
+- **Brain degradation (trained on the old logic, not retrained per owner)**: robust bench (32 envs x
+  120 s), crash+offroad per 1000, old -> new: 0.05: 51 -> 57; 0.15: 168 -> 200; 0.3: 335 -> 384.
+  At 0.15 over four traffic sets (seeds 1000-4000): old 168/173/198/171 (mean 178), new
+  200/181/194/196 (mean 193): **~+15 / 1000 (~9%)**, partly noise; no breakdown (throughput 26.5
+  vs 27.5 /min @0.15). A first variant (always uniform among the clear spots, no own spot) was
+  worse at 0.15 (207). A fine-tune on the new spawn logic would likely recover it (not done: owner).
+- Site: demand slider 0 ... 1.0 /s/arm (240 cars/min); bench demands extended by 0.5 and 1.0.

@@ -53,7 +53,7 @@ RUNS = ROOT / "runs"
 SNAPSHOT = ROOT / "results" / "site"  # committed copy of what the build uses from runs/ (see docstring)
 SOURCE = {"kind": "runs", "manifest": None}  # set in main(): "runs" or "snapshot"
 
-DEMANDS = [0.05, 0.1, 0.15, 0.2, 0.3]
+DEMANDS = [0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 1.0]  # up to the start page slider maximum
 # the site's main brain (wide crossing) and the end of the older line whose training history is
 # shown before it (narrow crossing); override with --main / --history
 # Checkpoints are named <run>/<file stem> (found in runs/ or in the snapshot); a path to an

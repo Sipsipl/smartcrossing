@@ -32,7 +32,8 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
 ## Architecture
 - `smartcrossing/sim.py`: batched numpy simulator, state arrays (B envs, N slots).
   Kinematic unicycle with curvature, steering-rate and grip limits, dt=0.1 s. Cars spawn at a
-  random lateral offset across the full road width (so no side is preferred; `spawn_right` =
+  random lateral offset across the full road width (own spot if clear, else uniform among the
+  clear spots; up to 3 per arm and step, side by side; so no side is preferred; `spawn_right` =
   right half only, used by the rule-based baselines), must exit through target arm. Car-car collision via
   3 discs per car, off-road via rounded-corner distance. Removal on crash/offroad/exit/timeout.
   Observations are mirror-neutral: own state in a canonical frame (entry arm = south; position

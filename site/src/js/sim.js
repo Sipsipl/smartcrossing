@@ -457,8 +457,8 @@
       return lats;
     }
 
-    /** Queue arrivals (u, manoeuvre, group drawn at arrival), then release queued cars at a
-     *  uniformly chosen clear lateral position, several per arm and step (see sim.py _arrivals). */
+    /** Queue arrivals (u, manoeuvre, group drawn at arrival), then release queued cars at their
+     *  own spot or, if blocked, a uniformly chosen clear one, several per arm and step (sim.py _arrivals). */
     _arrivals() {
       const cfg = this.cfg, N = this.N, rng = this.rng;
       const demand = this.demand === null ? cfg.demand : this.demand;
@@ -514,9 +514,13 @@
           }
           if (!cnt) break;
           const head = q.shift();
-          const pick = Math.min(Math.floor(head.u * cnt), cnt - 1);
-          let i = 0;
-          for (let seen = -1; i < M; i++) if (clear[i] && ++seen === pick) break;
+          // own spot (u across the range) if clear, else the clear spot of the same rank u
+          let i = Math.floor(head.u * (M - 1) + 0.5);
+          if (!clear[i]) {
+            const pick = Math.min(Math.floor(head.u * cnt), cnt - 1);
+            i = 0;
+            for (let seen = -1; i < M; i++) if (clear[i] && ++seen === pick) break;
+          }
           const sx = c * lats[i] - s * back, sy = s * lats[i] + c * back;
           const n = free;
           this.alive[n] = 1;

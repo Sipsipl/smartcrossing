@@ -393,3 +393,33 @@ def test_reversing_out_of_the_entry_arm_is_a_wrong_exit():
     from smartcrossing.sim import DONE_WRONG
 
     assert sim.done_kind[0, 0] == DONE_WRONG and sim.stats.wrong_exits[0] == 1
+
+
+@pytest.mark.parametrize("spawn_right", [False, True])
+def test_spawn_capacity_at_high_demand(spawn_right):
+    """With free-flowing traffic the entry is not the bottleneck at 1 arrival / s / arm: a
+    blocked spot falls back to another clear one and cars may enter side by side."""
+    cfg = SimConfig(demand=1.0, spawn_right=spawn_right)
+    sim = Sim(cfg, 4, seed=2)
+    a = zeros(sim)
+    a[..., 0] = 1.0
+    for _ in range(600):
+        sim.step(a)
+    st = sim.stats
+    assert st.spawned.sum() > 0.9 * st.arrived.sum()
+    assert sim.alive.sum(1).max() < cfg.n_slots  # slots are not binding either
+
+
+def test_spawn_falls_back_to_a_clear_spot():
+    cfg = SimConfig(demand=0.0)
+    sim = Sim(cfg, 1, seed=0)
+    lats = sim.spawn_lats()
+    # standing car right in front of the u = 1 spot (right edge of arm 0): that side is blocked
+    place(sim, 0, 0, lats[-1], -cfg.L + 2.5 + 5.0, np.pi / 2)
+    sim._qbuf[0, 0, 0] = (1.0 - 1e-9, STRAIGHT, 0)
+    sim.queue[0, 0] = 1
+    sim.step(zeros(sim))
+    new = sim.alive[0] & (sim.age[0] == 0.0)
+    assert new.sum() == 1 and sim.queue[0, 0] == 0
+    x = sim.x[0][new][0]
+    assert x < lats[-1] - 5.0  # entered at the rightmost clear spot instead of waiting

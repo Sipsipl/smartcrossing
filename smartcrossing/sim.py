@@ -81,9 +81,9 @@ class SimConfig:
     # turn (right turn, r ~ 10.75 m) then allows ~6.6 m/s; at 14 m/s r_min = 49 m.
     # 0 disables the limit (the original physics: r_min = 5 m at any speed).
     a_lat_max: float = 4.0
-    # lateral spawn offset: False = uniform among the clear positions across the whole road
-    # width (both halves, no side preferred; the learning setting); True = only among those of
-    # the right half (lane-disciplined arrivals, used by the rule-based baselines: they may rely
+    # lateral spawn offset: False = uniform over the whole road width (own spot, or uniform among
+    # the clear positions if it is blocked; both halves, no side preferred; the learning setting);
+    # True = only the right half (lane-disciplined arrivals, used by the rule-based baselines: they may rely
     # on rules). Same random draws either way (see Sim._arrivals).
     spawn_right: bool = False
     spawn_speed: float = 8.0
@@ -594,11 +594,12 @@ class Sim:
 
     def _arrivals(self):
         """Queue new arrivals, then release queued cars. Each arrival draws (u, manoeuvre,
-        group) when it arrives (CRN: the same draws for every policy). A queued car enters
-        as soon as some lateral position of its arm is clear (spawn_clearance + closing-speed
-        headway to every car) and a slot is free; its offset is the floor(u * n_free)-th of
-        the currently clear grid positions (spawn_lats), i.e. uniform among the free ones.
-        Several cars of one arm may enter in the same step (side by side) while room is left."""
+        group) when it arrives (CRN: the same draws for every policy). The head of a queue
+        enters as soon as some lateral position of its arm is clear (spawn_clearance +
+        closing-speed headway to every car) and a slot is free: at its own spot (fraction u
+        across the spawn range, spawn_lats grid) if that is clear, else at the floor(u * n_free)-th
+        clear position (uniform among the free ones; no side preferred). Several cars of one
+        arm may enter in the same step (side by side) while room is left."""
         cfg = self.cfg
         S = self.S
         # draw every random number unconditionally so streams stay aligned (CRN)
@@ -653,7 +654,7 @@ class Sim:
                 head = self._qhead[b, k]
                 qu, qman, qgrp = self._qbuf[b, k, head].T
                 # own spot (u across the range) if clear, else the clear spot of the same rank u
-                j0 = np.rint(qu * (len(lats) - 1)).astype(np.int64)
+                j0 = np.floor(qu * (len(lats) - 1) + 0.5).astype(np.int64)
                 pick = np.minimum(np.floor(qu * cnt).astype(np.int64), cnt - 1)
                 j = np.where(clear[np.arange(len(b)), j0], j0, np.argmax(np.cumsum(clear, 1) > pick[:, None], 1))
                 n = np.argmin(self.alive[b], 1)

@@ -25,8 +25,7 @@
 <p>Alle drei bekommen genau dieselben Autos zur selben Zeit mit demselben Ziel. Einziger Unterschied: Bei Ampel und Verkehrsrechner tauchen die Autos
   immer in der rechten Straßenhälfte auf (ihrer Spur), die gelernten Autos irgendwo auf der ganzen Breite.</p>
 <div id="side"></div>
-<p class="muted small">Farbe = wohin das Auto will: <b>blau</b> rechts, <b>weiß</b> geradeaus, <b>orange</b> links. „+3“ am Rand: so viele Autos warten noch auf die Einfahrt.
-  Unfälle zählen hier auch Autos, die von der Straße abgekommen sind.</p>
+<p class="muted small">Farbe = Ziel (<b>blau</b> rechts, <b>weiß</b> geradeaus, <b>orange</b> links). „+3“ am Rand: so viele Autos warten noch auf die Einfahrt.</p>
 
 <h2>Durchsatz: wie viele kommen pro Minute durch?</h2>
 <div id="c-thr"></div>
@@ -34,18 +33,16 @@
 <div class="tablewrap card" style="padding:4px 6px"><table class="data" id="t-thr"></table></div>
 
 <h2>Wie viele kommen heil an?</h2>
+<p>Je Feld: Anteil der Autos, die heil ans Ziel kommen · Unfälle pro 1000 Autos, die die Kreuzung verlassen haben.
+  Als Unfall zählt hier (und oben) auch, wer von der Straße abkommt.</p>
 <div class="tablewrap card" style="padding:4px 6px"><table class="data" id="t-ok"></table></div>
-
-<h2>Wie viele verunglücken?</h2>
-<p>Unfälle und Abkommen von der Straße, gezählt pro 1000 Autos, die die Kreuzung verlassen haben.</p>
-<div class="tablewrap card" style="padding:4px 6px"><table class="data" id="t-bad"></table></div>
 <p class="muted small" id="bench-setup"></p>
 
 <h2>Ehrlich gesagt</h2>
 <div class="note warn">
   <p>Beim <b>Durchsatz</b> schlagen die gelernten Autos die Ampel ab mittlerem Verkehr: Bei viel Verkehr kommen pro Minute
-    deutlich mehr durch, und kaum jemand wartet. Aber: Bei mittlerem Verkehr verunglückt noch etwa <b>jedes sechste Auto</b> (rund 17 %),
-    bei wenig Verkehr etwa 5 %. Ampel und Verkehrsrechner schaffen das ohne einen einzigen Unfall – und der Verkehrsrechner ist auch beim Durchsatz weit vorn.</p>
+    deutlich mehr durch, und kaum jemand wartet. Aber: Bei mittlerem Verkehr verunglücken noch <b id="h-mid">viele</b> der Autos,
+    bei wenig Verkehr <span id="h-low">weniger</span> (siehe Tabelle). Ampel und Verkehrsrechner schaffen das ohne einen einzigen Unfall – und der Verkehrsrechner ist auch beim Durchsatz weit vorn.</p>
   <p style="margin:0">Fast alle Unfälle sind Zusammenstöße mit anderen Autos; ein Auto allein kommt immer an. Die Autos bremsen inzwischen öfter
     (die Reifen zwingen sie in Kurven dazu), lassen andere aber noch zu selten vor. Das ist der Stand eines Hobbyprojekts, kein Endergebnis.</p>
 </div>
