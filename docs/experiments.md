@@ -652,3 +652,29 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
   ones noisy); no qualitative check beyond that. A warm-start check was not possible locally (the
   committed checkpoints hold only the actor; full state.npz files were in the cloud runs/).
 - Limits: torch RNG streams differ from numpy (same distributions); graph-mode arm queue capped at 256.
+
+## Round 1 in the new world: wrecks, brake light, 1 lamp, right-half spawn, crash cost sweep (2026-10-11)
+- **Setup**: warm start from wide_s1ft2 2650 (`--init-policy`, actor transplanted by feature name,
+  brake-light/hazard weights 0, lamp-2 dropped; fresh critic, `--critic-warmup 20`, logstd-init -2).
+  GPU path, 2048 envs x 32, n_slots 40, curriculum ceiling 0.3 / lo 0.15. ~80 it/min, ~480k car-steps/s.
+- **Sweep** (crash+offroad cost x1 / x3 / x10, 5 min each; eval 6 envs x 90 s, 3 seeds; crash+off per
+  1000 / throughput per min): x1 164/26.6 @0.15, 391/39.7 @0.3; x3 190/25.6, 396/39.0; x10 201/24.7,
+  453/33.4; old brain 222/24.9, 495/33.0. Caveat: x1 ran 560 it (shell timeout failed on Windows),
+  x3/x10 300 it; at equal iterations x1 and x3 trained alike. Differences x1/x3 are within noise; x10
+  clearly worse. Chosen x3 (owner: clearly higher cost). Main run to it 1180 (~11 min).
+- **Result** (8 envs x 120 s, 3 seeds; throughput/min, crash+off per 1000, wreck hits, delay s;
+  results/round1_x3.npz, results/round1_x3_eval.jsonl):
+
+  | demand | round1 x3 | old brain (new world) | light | reservation |
+  |---|---|---|---|---|
+  | 0.05 | 11.5 / 25 / 0 / 1.7 | 11.3 / 44 / 0.3 / 1.0 | 11.0 / 0 / 0 / 7.1 | 11.8 / 0 / 0 / 1.6 |
+  | 0.15 | 28.8 / 127 / 8 / 3.9 | 26.2 / 230 / 33 / 1.8 | 24.5 / 0 / 0 / 16.1 | 33.8 / 0 / 0 / 2.1 |
+  | 0.3 | 38.6 / 275 / 47 / 5.5 | 32.5 / 508 / 247 / 2.6 | 28.4 / 0 / 0 / 20.8 | 64.2 / 0 / 0 / 3.5 |
+  | 0.5 | 39.5 / 320 / 78 / 5.9 | 31.2 / 721 / 782 / 2.8 | 29.8 / 0 / 0 / 21.9 | 87.5 / 0 / 0 / 5.4 |
+
+  Crashes roughly halved vs the old brain in the new world, wreck hits down strongly, delay up a bit
+  (slightly more careful). Still far from safe: cars cross the centre one after another without
+  visibly yielding; at 0.3 crashes in the box. Throughput above light only because crashes are accepted.
+- **Next**: longer runs with several seeds and paired sweeps at equal iterations; hard iteration caps
+  (not shell timeouts); curriculum weighted to 0.15-0.3; Roadmap B (attention over all neighbours)
+  for yielding.
