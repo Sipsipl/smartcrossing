@@ -1,5 +1,8 @@
 # Smart Crossing
 
+<p align="center"><a href="https://smartcrossing.pages.dev"><img src="results/readme/crossing.gif" width="420" alt="Selbst lernende Autos überqueren eine Kreuzung ohne Ampeln"></a></p>
+<p align="center"><em>Ein Netz steuert alle Autos, ohne Ampel und Spuren (Farbe = Abbiegerichtung, doppelte Geschwindigkeit) – <a href="https://smartcrossing.pages.dev">live im Browser ausprobieren</a>.</em></p>
+
 **Live ansehen: https://smartcrossing.pages.dev**
 
 Eine Kreuzung ohne Ampeln, ohne Spuren und ohne Vorfahrtsregeln, über die nur selbstfahrende
