@@ -238,6 +238,8 @@ class Worker:
             "own_rew": own_rew_sum,
             "queued": float(sim.queue.sum()) / B,
             "demand_mean": float(np.mean(sim.demand)),
+            "obstacles": float(sim.obstacle.sum()) / max(int(sim.obst_env.sum()), 1),  # standing, per obstacle env
+            "obstacle_hits": float(sim.stats.obstacle_hits.sum()),  # in the current episode
         }
 
 
@@ -323,8 +325,10 @@ RENDER_DEMAND, RENDER_SECONDS = 0.15, 60.0
 def eval_job(ckpt: str, out_path: str, it: int, demands, envs: int, seconds: float, render_dir: str | None,
              cfg_d: dict | None = None):
     """Bench metrics of the deterministic policy (cli bench settings) in the run's world (cfg_d: the
-    training SimConfig; fixed demand per bench, rewards do not matter); appends one JSON line."""
+    training SimConfig; fixed demand per bench, rewards do not matter) plus the stop gate (gates.py,
+    ~1 s); appends one JSON line."""
     from .cli import run
+    from .gates import stop_gate
     from .metrics import summarize
 
     world = {**(cfg_d or {}), "demand_range": None}
@@ -334,6 +338,8 @@ def eval_job(ckpt: str, out_path: str, it: int, demands, envs: int, seconds: flo
         s = summarize(sim, seconds)
         rec[f"d{d:g}"] = {k: round(s[k], 3) for k in ("throughput_per_min", "exit_ok_rate", "crash_cars_per_1000",
                                                       "crash_cars", "offroad_cars", "timeouts", "delay_mean_s", "queued_end")}
+    g, _ = stop_gate(f"policy:{ckpt}", world)
+    rec["gate"] = {k: g[k] for k in ("stop_rate_feasible", "safe_rate_feasible", "stop_rate", "crash", "offroad")}
     with open(out_path, "a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(rec) + "\n")
     if render_dir:
@@ -579,6 +585,8 @@ def train_loop(a, st: TrainState, out: Path, source, update, ctx, git: dict):
                     "rew_per_car_step": round(sum(r["own_rew"] for r in res) / max(car_steps, 1), 5),
                     "train": {k: round(v, 4) if isinstance(v, float) else v for k, v in tr.items()},
                     "queued_per_env": round(float(np.mean([r["queued"] for r in res])), 2),
+                    **({"obstacles_per_env": round(float(np.mean([r["obstacles"] for r in res])), 2),
+                        "obstacle_hits_ep": int(sum(r["obstacle_hits"] for r in res))} if st.cfg.obstacle_envs > 0 else {}),
                     "expl_var": explained_var(data),
                     "logstd": [round(float(x), 3) for x in logstd],
                     **upd,

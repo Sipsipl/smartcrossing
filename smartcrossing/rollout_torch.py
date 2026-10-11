@@ -191,8 +191,11 @@ class TorchRollout:
         def take(buf):
             return buf.reshape(T * self.B * self.N, *buf.shape[3:])[idx]
 
+        n_obst_env = max(int(sim.obst_env.sum()), 1)
         stats = torch.stack([self.own_rew.to(torch.float64), sim.queue.sum().to(torch.float64) / self.B,
-                             sim.demand.to(torch.float64).mean(), sim.fifo_overflow.to(torch.float64)]).tolist()
+                             sim.demand.to(torch.float64).mean(), sim.fifo_overflow.to(torch.float64),
+                             sim.obstacle.sum().to(torch.float64) / n_obst_env,
+                             sim.stats.obstacle_hits.sum().to(torch.float64)]).tolist()
         if stats[3]:
             print("warning: TorchSim arrival FIFO overflow (graph mode, capacity 256 per arm)", flush=True)
         return {
@@ -208,4 +211,6 @@ class TorchRollout:
             "own_rew": stats[0],
             "queued": stats[1],
             "demand_mean": stats[2],
+            "obstacles": stats[4],  # standing obstacles per obstacle env at the rollout end
+            "obstacle_hits": stats[5],  # cars that hit an obstacle in the current episode
         }

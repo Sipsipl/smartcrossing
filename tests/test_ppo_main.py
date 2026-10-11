@@ -96,4 +96,4 @@ def test_eval_job_uses_the_run_world(tmp_path, monkeypatch):
     assert [c.demand for c in seen] == [0.05, 0.15]
     assert all(c.n_slots == 8 and c.wreck_time == 1.0 and not c.spawn_right and c.demand_range is None for c in seen)
     rec = json.loads((tmp_path / "eval.jsonl").read_text(encoding="utf-8"))
-    assert set(rec) == {"iter", "ckpt", "d0.05", "d0.15"}
+    assert set(rec) == {"iter", "ckpt", "d0.05", "d0.15", "gate"} and 0 <= rec["gate"]["stop_rate"] <= 1

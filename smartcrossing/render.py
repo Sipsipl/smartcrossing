@@ -7,6 +7,7 @@ from .sim import BRAKE_ACC, CAR_LENGTH, CAR_WIDTH, LEFT, RIGHT, STRAIGHT, Sim, h
 
 MAN_COLOURS = {RIGHT: (66, 135, 245), STRAIGHT: (240, 240, 240), LEFT: (245, 166, 35)}
 GROUP_OUTLINE = [(20, 20, 20), (200, 30, 200), (30, 200, 120), (230, 60, 60)]
+OBSTACLE_BODY = (150, 150, 156)  # obstacles (cfg.obstacle_*): no route, drawn grey
 BG = (58, 110, 62)
 ROAD = (70, 70, 74)
 
@@ -77,11 +78,17 @@ def draw_frame(sim: Sim, b: int = 0, size: int = 512, view: float | None = None,
         corners = [(hl, hw), (hl, -hw), (-hl, -hw), (-hl, hw)]
         poly = [P(x + c * a - s * bb, y + s * a + c * bb) for a, bb in corners]
         wreck = bool(sim.wreck[b, n])
-        body = MAN_COLOURS[int(sim.man[b, n])]
-        if wreck:  # a wreck: dimmed body, blinking hazard lights at the four corners
+        parked = bool(sim.parked[b, n])  # an obstacle without hazard lights: a normal-looking standing car
+        body = OBSTACLE_BODY if sim.obstacle[b, n] else MAN_COLOURS[int(sim.man[b, n])]
+        if wreck and not parked:  # a wreck: dimmed body, blinking hazard lights at the four corners
             body = tuple(int(0.45 * v + 30) for v in body)
         d.polygon(poly, fill=body, outline=GROUP_OUTLINE[int(sim.group[b, n]) % 4])
         r = max(1.5, 0.35 * sc)
+        if parked:  # nose marker only (no lamps lit)
+            nx, ny = P(x + c * 2.0, y + s * 2.0)
+            rr = max(1.5, 0.3 * sc)
+            d.ellipse([nx - rr, ny - rr, nx + rr, ny + rr], fill=(0, 0, 0))
+            continue
         if wreck:
             if blink:
                 for a, bb in corners:
@@ -111,7 +118,8 @@ def draw_frame(sim: Sim, b: int = 0, size: int = 512, view: float | None = None,
     st = sim.stats
     font = ImageFont.load_default()
     txt = (f"{label} t={sim.t:5.1f}s  exits={st.exits[b]} crash={st.crashes[b]} off={st.offroad[b]} "
-           f"wrecks={sim.wreck[b].sum()} q={sim.queue[b].sum()}")
+           f"wrecks={(sim.wreck[b] & ~sim.obstacle[b]).sum()} q={sim.queue[b].sum()}"
+           + (f" obst={sim.obstacle[b].sum()}" if sim.obstacle[b].any() or st.obstacles[b] else ""))
     d.rectangle([0, 0, size, 18], fill=(30, 30, 34))
     d.text((6, 4), txt, fill=(255, 255, 255), font=font)
     if legend:
