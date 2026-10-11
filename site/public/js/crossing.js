@@ -366,63 +366,60 @@
     }
 
     /** Sensor overlay of car n, drawn from its observation vector (exactly what the
-     *  network gets). under=true: wide elements below the cars; false: markers on top. */
+     *  network gets; old-layout brains get the same vector, their weights are mapped onto
+     *  it). Indices and units come from the exported label metadata (SCX.obsMap).
+     *  under=true: wide elements below the cars; false: markers on top. */
     _drawSensors(n, under) {
       const sim = this.sim, ctx = this.ctx, cfg = sim.cfg;
-      const lay = (window.SC_DATA && window.SC_DATA.layout) || null;
+      const m = SCX.obsMap(cfg);
+      if (!m) return;
       const o = this.obsRow(n);
       const ip = this.ip || this._interp();
       const x = ip.x[n], y = ip.y[n], th = ip.th[n];
       const ct = Math.cos(th), st = Math.sin(th);
       const ego = (f, l) => [x + ct * f - st * l, y + st * f + ct * l];
-      const own = SC.OBS_DIM, K = SC.K_NEIGHBOURS, blk = 6 + cfg.n_signal;
-      const rayAngles = lay ? lay.ray_angles_deg : [-60, -30, 0, 30, 60];
-      const rayRange = SC.RAY_RANGE || 20;
-      const rayStart = SCX.keyIndex("ray_r60", 10);
-      const gi = SCX.keyIndex("exit_fwd", 8);
+      const rayEnd = (r) => {
+        const d = o[r.i] * r.scale, a = th + (r.deg * Math.PI) / 180;
+        return [x + Math.cos(a) * d, y + Math.sin(a) * d, d >= r.scale - 1e-6];
+      };
+      const nbPos = (nb) => ego(o[nb.fwd.i] * nb.fwd.scale, o[nb.left.i] * nb.left.scale);
       const lw = 1.6 / (this.px || 4) * (window.devicePixelRatio || 1);
       if (under) {
-        // neighbour range
+        // perception range (neighbours further away are not seen)
         ctx.strokeStyle = "rgba(255,255,255,0.25)"; ctx.lineWidth = lw; ctx.setLineDash([1, 1]);
-        ctx.beginPath(); ctx.arc(x, y, SC.NEIGHBOUR_RANGE, 0, 2 * Math.PI); ctx.stroke(); ctx.setLineDash([]);
+        ctx.beginPath(); ctx.arc(x, y, cfg.neighbour_vis, 0, 2 * Math.PI); ctx.stroke(); ctx.setLineDash([]);
         // goal vector (to the centre of the exit gate)
-        const [gx, gy] = ego(o[gi] * cfg.L, o[gi + 1] * cfg.L);
+        const [gx, gy] = ego(o[m.exit[0].i] * m.exit[0].scale, o[m.exit[1].i] * m.exit[1].scale);
         ctx.strokeStyle = OVL.goal; ctx.lineWidth = lw * 1.2; ctx.setLineDash([1.2, 0.9]);
         ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(gx, gy); ctx.stroke(); ctx.setLineDash([]);
         flag(ctx, gx, gy, OVL.goal, lw);
         // rays
         ctx.strokeStyle = OVL.ray; ctx.lineWidth = lw;
-        for (let r = 0; r < rayAngles.length; r++) {
-          const d = o[rayStart + r] * rayRange;
-          const a = (rayAngles[r] * Math.PI) / 180;
-          const ex = x + Math.cos(th + a) * d, ey = y + Math.sin(th + a) * d;
+        for (const r of m.rays) {
+          const [ex, ey] = rayEnd(r);
           ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(ex, ey); ctx.stroke();
         }
         // neighbour lines
         ctx.strokeStyle = OVL.nb; ctx.lineWidth = lw;
-        for (let k = 0; k < K; k++) {
-          const p = own + k * blk;
-          if (!o[p + 5]) continue;
-          const [nx, ny] = ego(o[p] * SC.NEIGHBOUR_RANGE, o[p + 1] * SC.NEIGHBOUR_RANGE);
+        for (const nb of m.nbs) {
+          if (o[nb.present.i] < 0.5) continue;
+          const [nx, ny] = nbPos(nb);
           ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(nx, ny); ctx.stroke();
         }
         return;
       }
       // ray end points: hit (red dot) or nothing within range (open circle)
-      for (let r = 0; r < rayAngles.length; r++) {
-        const d = o[rayStart + r] * rayRange;
-        const a = (rayAngles[r] * Math.PI) / 180;
-        const ex = x + Math.cos(th + a) * d, ey = y + Math.sin(th + a) * d;
+      for (const r of m.rays) {
+        const [ex, ey, free] = rayEnd(r);
         ctx.beginPath(); ctx.arc(ex, ey, 0.75, 0, 2 * Math.PI);
-        if (d < rayRange - 1e-6) { ctx.fillStyle = OVL.hit; ctx.fill(); }
+        if (!free) { ctx.fillStyle = OVL.hit; ctx.fill(); }
         else { ctx.strokeStyle = OVL.ray; ctx.lineWidth = lw; ctx.stroke(); }
       }
       // neighbours: numbered badge filled with the lamp colour the car *receives*
-      for (let k = 0; k < K; k++) {
-        const p = own + k * blk;
-        if (!o[p + 5]) continue;
-        const [nx, ny] = ego(o[p] * SC.NEIGHBOUR_RANGE, o[p + 1] * SC.NEIGHBOUR_RANGE);
-        const s0 = cfg.n_signal > 0 ? o[p + 6] : 0, s1 = cfg.n_signal > 1 ? o[p + 7] : 0;
+      m.nbs.forEach((nb, k) => {
+        if (o[nb.present.i] < 0.5) return;
+        const [nx, ny] = nbPos(nb);
+        const s0 = nb.lamps.length > 0 ? o[nb.lamps[0].i] : 0, s1 = nb.lamps.length > 1 ? o[nb.lamps[1].i] : 0;
         ctx.beginPath(); ctx.arc(nx, ny, 1.55, 0, 2 * Math.PI);
         ctx.fillStyle = cfg.signal_enabled ? SCX.lampRGB(s0, s1) : "rgb(90,90,96)";
         ctx.fill(); ctx.strokeStyle = "#fff"; ctx.lineWidth = lw; ctx.stroke();
@@ -431,7 +428,7 @@
         ctx.textAlign = "center"; ctx.textBaseline = "middle";
         ctx.fillText(String(k + 1), 0, 0.1);
         ctx.restore();
-      }
+      });
       // velocity arrow: where the car would be in one second
       const v = sim.v[n];
       if (v > 0.3) {
@@ -562,11 +559,45 @@
 
   SCX.Crossing = Crossing;
 
-  /** Index of an observation entry by key (from the exported label list). */
-  SCX.keyIndex = function (key, fallback) {
+  /** Observation entry {i, scale, unit, ...} by feature key, from the exported label
+   *  metadata (SC_DATA.layout), or null. */
+  SCX.obsItem = function (key) {
     const lay = window.SC_DATA && window.SC_DATA.layout;
-    const i = lay ? lay.keys.indexOf(key) : -1;
-    return i >= 0 ? i : fallback;
+    if (!lay) return null;
+    if (!lay._byKey) {
+      lay._byKey = new Map();
+      for (const g of lay.groups) for (const it of g.items) lay._byKey.set(it.key, it);
+    }
+    return lay._byKey.get(key) || null;
+  };
+
+  /** What the sensor overlay reads from the observation vector, by feature key (so a layout
+   *  change in sim.py moves the indices with it): exit-gate vector, edge rays with their angles,
+   *  and per neighbour its position, "present" flag and lamps. null (and an error) if the
+   *  labels do not match the simulator. */
+  let obsMapCache = null;
+  SCX.obsMap = function (cfg) {
+    if (obsMapCache && obsMapCache.ns === cfg.n_signal) return obsMapCache.m;
+    const lay = window.SC_DATA && window.SC_DATA.layout;
+    let m = null;
+    if (lay && !SCX.checkLayout()) {
+      const it = SCX.obsItem;
+      const rays = lay.keys.filter((k) => k.startsWith("ray_")).map((k, r) => Object.assign({ deg: lay.ray_angles_deg[r] }, it(k)));
+      const nbs = [];
+      for (let k = 1; k <= lay.k_neighbours; k++) {
+        const lamps = [];
+        for (let q = 1; q <= cfg.n_signal; q++) lamps.push(it(`n${k}_lamp${q}`));
+        nbs.push({ fwd: it(`n${k}_fwd`), left: it(`n${k}_left`), present: it(`n${k}_present`), lamps });
+      }
+      m = { exit: [it("exit_fwd"), it("exit_left")], rays, nbs };
+      const all = [...m.exit, ...rays.map((r) => r.i === undefined ? null : r), ...nbs.flatMap((nb) => [nb.fwd, nb.left, nb.present, ...nb.lamps])];
+      if (rays.length !== lay.ray_angles_deg.length || all.some((x) => !x)) {
+        console.error("sensor overlay: observation labels lack a feature it draws (site/obs_labels.py)");
+        m = null;
+      }
+    }
+    obsMapCache = { ns: cfg.n_signal, m };
+    return m;
   };
 
   /** The labels were exported for one sim layout; refuse to mislabel a different one. */

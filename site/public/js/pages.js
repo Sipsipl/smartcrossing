@@ -167,7 +167,7 @@
   // ------------------------------------------------------------------ obs panel ("Was sieht ein Auto?")
   function fmtObs(it, v, compact) {
     if (it.unit === "bool") return v > 0.5 ? "ja" : "nein";
-    if (compact) return it.unit === "m" || it.unit === "km/h" ? num(v * it.scale, 0) : num(v, 2);
+    if (compact) return it.unit === "m" || it.unit === "km/h" || it.unit === "%" ? num(v * it.scale, 0) : it.unit ? num(v * it.scale, 1) : num(v, 2);
     if (it.key.startsWith("ray_") && v >= 0.999) return `≥ ${num(it.scale, 0)} m`;
     const x = v * it.scale;
     if (it.unit === "m") return `${num(x)} m`;
@@ -182,17 +182,33 @@
     return `<span class="mini"><i style="left:${left}%;width:${w}%"></i></span>`;
   }
 
+  /** Inputs a brain ignores (all weights 0: trained before the sensor existed, see policy_compat). */
+  const unusedCache = new WeakMap();
+  function unusedInputs(raw) {
+    if (!raw) return new Set();
+    if (!unusedCache.has(raw)) {
+      const W = raw.layers[0].W, sc = raw.in_scale, off = new Set();
+      W.forEach((row, i) => { if ((sc && sc[i] === 0) || row.every((w) => w === 0)) off.add(i); });
+      unusedCache.set(raw, off);
+    }
+    return unusedCache.get(raw);
+  }
+  const UNUSED_TIP = "Dieses Gehirn nutzt den Wert nicht: es wurde trainiert, bevor es diesen Sensor gab.";
+
   function renderObsPanel(cx, el) {
     const n = cx.selIndex();
     if (n < 0) { el.innerHTML = ""; return; }
     const o = cx.obsRow(n), lay = D.layout;
+    const ty = cx.typeOf(n), off = unusedInputs(ty && ty.raw);
     const own = lay.groups.filter((g) => g.sub !== "neighbour");
     const nbs = lay.groups.filter((g) => g.sub === "neighbour");
     let h = `<div class="obs-grid">`;
     for (const g of own) {
       h += `<div class="obs-group"><div class="gname">${g.name}<span class="n">${g.items.length} ${g.items.length === 1 ? "Zahl" : "Zahlen"}</span></div>`;
       for (const it of g.items) {
-        h += `<div class="orow"><span class="lab">${it.label}</span><span class="val">${fmtObs(it, o[it.i])}</span>${miniBar(o[it.i])}</div>`;
+        h += off.has(it.i)
+          ? `<div class="orow unused" title="${UNUSED_TIP}"><span class="lab">${it.label}</span><span class="val">${fmtObs(it, o[it.i])}</span><span class="small">ungenutzt</span></div>`
+          : `<div class="orow"><span class="lab">${it.label}</span><span class="val">${fmtObs(it, o[it.i])}</span>${miniBar(o[it.i])}</div>`;
       }
       h += `</div>`;
     }
@@ -204,8 +220,9 @@
     const present = nbs.map((g) => o[g.items.find((it) => it.key.endsWith("_present")).i] > 0.5);
     for (let r = 0; r < nItems; r++) {
       const it0 = nbs[0].items[r];
-      const lab = { fwd: "vor mir (m)", left: "links von mir (m)", same: "gleiche Richtung", cross: "kreuzt nach links", speed: "Tempo (km/h)", present: "da?" }[it0.key.split("_").slice(1).join("_")] || it0.label;
-      h += `<tr><td>${lab}</td>` + nbs.map((g, k) => {
+      const lab = { fwd: "vor mir (m)", left: "links von mir (m)", same: "gleiche Richtung", cross: "kreuzt nach links", speed: "Tempo (km/h)", present: "da?", kappa: "lenkt links (%)", acc: "beschleunigt (m/s²)" }[it0.key.split("_").slice(1).join("_")] || it0.label;
+      const unused = off.has(it0.i);
+      h += `<tr${unused ? ` class="unused" title="${UNUSED_TIP}"` : ""}><td>${lab}${unused ? " (ungenutzt)" : ""}</td>` + nbs.map((g, k) => {
         const it = g.items[r];
         return present[k] ? `<td title="${it.label}">${fmtObs(it, o[it.i], true)}</td>` : `<td class="none">–</td>`;
       }).join("") + `</tr>`;
@@ -536,27 +553,42 @@
 
   function initVergleich() {
     initSideBySide($("side"));
-    const rows = [
-      { name: "Ampel", note: "Regeln + Spuren", b: D.baselines.light, color: "--c1" },
-      { name: "Verkehrsrechner", note: "Regeln + Spuren + Funk", b: D.baselines.reservation, color: "--c2" },
-    ];
-    const narrowTag = (e) => (isNarrow(e) && !isNarrow(pol(MAIN_ID)) ? " (alt, schmal)" : "");
-    if (MAIN_ID) rows.push({ name: "Gelernte Autos", note: "keine Regeln", b: pol(MAIN_ID).bench, color: "--c4" });
-    if (D.history && D.history !== MAIN_ID) rows.push({ name: "Gelernt" + narrowTag(pol(D.history)), note: "keine Regeln", b: pol(D.history).bench, color: "--c3" });
-    if (D.best.es && D.best.es !== MAIN_ID) rows.push({ name: "Evolution" + narrowTag(pol(D.best.es)), note: "keine Regeln", b: pol(D.best.es).bench, color: "--c5", noChart: true });
+    // every brain is compared with Ampel / Verkehrsrechner on the crossing it was trained on
+    const worldOf = (e) => (isNarrow(e) ? "narrow" : "wide");
+    const WORLD_NAMES = { wide: "Breite Kreuzung (14 m Straßen)", narrow: "Alte, schmale Kreuzung (7 m Straßen)" };
+    const byWorld = D.baselines_by_world || { [D.main_world || worldOf(pol(MAIN_ID))]: D.baselines };
+    const mainWorld = MAIN_ID ? worldOf(pol(MAIN_ID)) : D.main_world || "wide";
+    const brains = [];
+    if (MAIN_ID) brains.push({ name: "Gelernte Autos", e: pol(MAIN_ID), color: "--c4" });
+    if (D.history && D.history !== MAIN_ID) brains.push({ name: worldOf(pol(D.history)) === mainWorld ? "Gelernt (älter)" : "Gelernt (PPO)", e: pol(D.history), color: "--c3" });
+    if (D.best.es && D.best.es !== MAIN_ID) brains.push({ name: "Evolution", e: pol(D.best.es), color: "--c5" });
+    const worlds = [mainWorld, ...Object.keys(byWorld).filter((w) => w !== mainWorld)];
+    const groups = worlds.map((w) => {
+      const base = byWorld[w];
+      const rows = base ? [
+        { name: "Ampel", b: base.light, color: "--c1", base: true },
+        { name: "Verkehrsrechner", b: base.reservation, color: "--c2", base: true },
+      ] : [];
+      for (const r of brains) if (worldOf(r.e) === w) rows.push({ name: r.name, b: r.e.bench, color: r.color });
+      return { w, rows };
+    }).filter((g) => g.rows.some((r) => !r.base));
+    const rows = (groups.find((g) => g.w === mainWorld) || groups[0]).rows; // chart: main crossing only
     const dem = D.demands.map(String);
     const demPerMin = (d) => {
       const r = D.baselines.reservation[d];
       return r ? r.demand_per_min : +d * 240;
     };
     const head = `<thead><tr><th>Verkehr →</th>${dem.map((d) => `<th>${num(demPerMin(d), 0)}/min</th>`).join("")}</tr></thead>`;
-    $("t-thr").innerHTML = head + "<tbody>" + rows.map((r) => `<tr><td>${r.name}</td>${dem.map((d) => `<td>${r.b[d] ? num(r.b[d].throughput_per_min) : "–"}</td>`).join("")}</tr>`).join("") + "</tbody>";
-    $("t-ok").innerHTML = head + "<tbody>" + rows.map((r) => `<tr><td>${r.name}</td>${dem.map((d) => `<td>${r.b[d] ? pct(r.b[d].exit_ok_rate) : "–"}</td>`).join("")}</tr>`).join("") + "</tbody>";
-    if ($("t-bad")) $("t-bad").innerHTML = head + "<tbody>" + rows.map((r) => `<tr><td>${r.name}</td>${dem.map((d) => `<td>${r.b[d] ? num(r.b[d].crash_cars_per_1000, 0) : "–"}</td>`).join("")}</tr>`).join("") + "</tbody>";
+    const table = (fmt) => head + groups.map((g) => `<tbody>${groups.length > 1 ? `<tr class="grp"><th colspan="${dem.length + 1}">${WORLD_NAMES[g.w]}</th></tr>` : ""}`
+      + g.rows.map((r) => `<tr><td>${r.name}</td>${dem.map((d) => `<td>${r.b && r.b[d] ? fmt(r.b[d]) : "–"}</td>`).join("")}</tr>`).join("") + "</tbody>").join("");
+    $("t-thr").innerHTML = table((x) => num(x.throughput_per_min));
+    $("t-ok").innerHTML = table((x) => pct(x.exit_ok_rate));
+    if ($("t-bad")) $("t-bad").innerHTML = table((x) => num(x.crash_cars_per_1000, 0));
+    if ($("c-thr-note")) $("c-thr-note").textContent = groups.length > 1 ? `Diagramm: ${WORLD_NAMES[mainWorld].replace(/ \(.*/, "")}. In den Tabellen steht jedes Gehirn neben Ampel und Verkehrsrechner auf der Kreuzung, auf der es trainiert wurde.` : "";
     const draw = () => SCX.lineChart($("c-thr"), {
       series: [
         { name: "Nachfrage", color: SCX.cssVar("--c5"), dash: true, points: dem.map((d) => [demPerMin(d), demPerMin(d)]) },
-        ...rows.filter((r) => !r.noChart).map((r) => ({ name: r.name, color: SCX.cssVar(r.color), dots: true, points: dem.filter((d) => r.b[d]).map((d) => [demPerMin(d), r.b[d].throughput_per_min]) })),
+        ...rows.map((r) => ({ name: r.name, color: SCX.cssVar(r.color), dots: true, points: dem.filter((d) => r.b[d]).map((d) => [demPerMin(d), r.b[d].throughput_per_min]) })),
       ],
       xLabel: "ankommende Autos pro Minute (alle 4 Zufahrten)", yLabel: "durchgekommen pro Minute",
       yFmt: (v, tip) => (tip ? num(v) : String(Math.round(v))), xFmt: (v) => String(Math.round(v)), xTipFmt: (v) => `${Math.round(v)} Autos/min kommen an`,

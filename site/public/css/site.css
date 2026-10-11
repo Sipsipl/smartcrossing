@@ -139,6 +139,8 @@ button { font: inherit; cursor: pointer; }
 .ntable th:first-child, .ntable td:first-child { text-align: left; color: var(--muted); width: 44%; }
 .ntable td { font-family: var(--font-num); font-size: 11.5px; }
 .ntable td.none { color: var(--muted); }
+.orow.unused, .ntable tr.unused { opacity: 0.5; }
+.orow.unused .small { color: var(--muted); font-size: 11px; white-space: nowrap; }
 .unseen { display: grid; gap: 6px; font-size: 14px; }
 .unseen div { display: grid; grid-template-columns: 22px 1fr; gap: 6px; }
 .unseen .x { color: var(--warn); font-weight: 700; }
@@ -176,6 +178,7 @@ table.data { border-collapse: collapse; font-size: 14px; min-width: 100%; }
 table.data th, table.data td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 table.data th:first-child, table.data td:first-child { text-align: left; }
 table.data thead th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 600; }
+table.data tr.grp th { text-align: left; font-size: 13px; font-weight: 650; padding-top: 12px; }
 
 /* time travel */
 .tt { display: grid; gap: 8px; }

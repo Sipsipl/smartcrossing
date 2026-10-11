@@ -664,18 +664,30 @@ def main(argv=None):
     mix_id = cid_of(a.mix) if a.mix else None
     if mix_id:
         use(mix_id, DEMANDS)
-    # the rule-based drivers run in the same world (geometry, grip) as the main policy
-    world = {k: v for k, v in found[main_id]["physics"].items() if k in GEOMETRY_KEYS} if main_id else {}
-    base_phys = {**physics_of(cfg.__dict__), **world}
-    baselines = {}
-    for drv in ("light", "reservation"):
-        bench_entries.append((f"base:{drv}", "baseline", drv, base_phys, DEMANDS))
+    # the rule-based drivers run in the same world (geometry, grip) as the main policy, and also
+    # in the world of each other brain on "Vergleich" (old narrow crossing), so every brain is
+    # compared on its own crossing
+    def world_phys(cid):
+        return {**physics_of(cfg.__dict__), **{k: v for k, v in found[cid]["physics"].items() if k in GEOMETRY_KEYS}}
+
+    base_worlds = {}  # world name -> physics; the main brain's world first
+    for cid in (main_id, hist_id, picked.get("es")):
+        if cid:
+            base_worlds.setdefault(world_of(found[cid]["physics"]), world_phys(cid))
+    if not base_worlds:
+        base_worlds[world_of(physics_of(cfg.__dict__))] = physics_of(cfg.__dict__)
+    main_world = next(iter(base_worlds))
+    base_phys = base_worlds[main_world]
+    base_key = lambda drv, w: f"base:{drv}" if w == main_world else f"base:{drv}:{w}"  # noqa: E731
+    for w, phys in base_worlds.items():
+        for drv in ("light", "reservation"):
+            bench_entries.append((base_key(drv, w), "baseline", drv, phys, DEMANDS))
     bench = run_bench(bench_entries, a.bench, a.workers)
     for cid, p in policies.items():
         key = f"pol:{found[cid]['hash']}" if cid in found else "pol:random7"
         p["bench"] = bench[key]
-    for drv in ("light", "reservation"):
-        baselines[drv] = bench[f"base:{drv}"]
+    baselines_by_world = {w: {drv: bench[base_key(drv, w)] for drv in ("light", "reservation")} for w in base_worlds}
+    baselines = baselines_by_world[main_world]
 
     data = {
         "built": date.today().isoformat(),
@@ -691,7 +703,9 @@ def main(argv=None):
         "chains": chains,
         "curves": curves,
         "others": others,
-        "baselines": baselines,
+        "baselines": baselines,  # in the main brain's world
+        "baselines_by_world": baselines_by_world,  # world ("wide" / "narrow") -> {light, reservation}
+        "main_world": main_world,
         "demands": DEMANDS,
         "bench_setup": {"envs": BENCH_ENVS, "seconds": BENCH_SECONDS, "seed": BENCH_SEED},
     }
