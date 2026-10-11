@@ -588,3 +588,29 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
   vs 27.5 /min @0.15). A first variant (always uniform among the clear spots, no own spot) was
   worse at 0.15 (207). A fine-tune on the new spawn logic would likely recover it (not done: owner).
 - Site: demand slider 0 ... 1.0 /s/arm (240 cars/min); bench demands extended by 0.5 and 1.0.
+
+## Roadmap C feasibility: torch/CUDA sim (2026-10-11, local RTX 3070 Ti)
+- **Why**: decide with numbers whether a GPU port pays off before porting PPO.
+- **Profile** (`ppo.py`, 4 workers x 24 envs, 8 iterations): sparse traffic rollout 0.3 s vs update
+  0.95 s per iteration; dense traffic rollout 0.65 s vs update 3.6 s (numpy update single-threaded,
+  ~45 us/sample). Inside a worker rollout: sim.step 54 %, observe 21 %, actor+critic forward 17 %.
+- **Port**: `smartcrossing/sim_torch.py` (`TorchSim`, full `Sim` incl. arrivals/collisions/rewards/
+  observe, optional CUDA-graph capture). Not ported: per-car `Stats.travel` lists, `events`; graph
+  mode caps the arm queue at 256 (flag on overflow). `rng="torch"` gives different traffic streams
+  (same distributions); paired-traffic comparisons need `rng="numpy"` (slow).
+- **Parity** (`tests/test_sim_torch_parity.py`, skipped without torch): 2 configs x 300 steps, cpu +
+  cuda float64: discrete state and stats identical, floats within 1.4e-14; graph replay == eager.
+- **Throughput** (`scripts/bench_sim_torch.py`, env-steps/s incl. policy forward, one process;
+  numpy: 8.7k at B=64, flat in B, ~35k with 4 workers):
+
+  | B | cuda f32 graph | cuda f64 graph |
+  |---|---|---|
+  | 64 | 20.5k | 16.7k |
+  | 1024 | 130k | 62k |
+  | 4096 | 168k | 72k |
+  | 16384 | 184k | 74k |
+
+  Eager CUDA is launch-bound (~55 ms/step); torch on CPU is 3-5x slower than numpy.
+- **Conclusion**: worth it, but the PPO update dominates (~85 % of wall time in dense traffic): port
+  `ppo_update` to torch/GPU first, then roll out with `TorchSim` (graph, f32, B ~ 1024-4096, short
+  horizon 64-128, buffers/GAE on GPU). Expected ~5x end-to-end. torch not yet in pyproject (CI CPU only).
