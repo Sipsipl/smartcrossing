@@ -1,6 +1,6 @@
 /* Live intersection widget for the website: runs sim.js (window.SmartCrossing) with
  * the exported policies, draws the scene on a canvas, lets the viewer tap a car and
- * overlays what that car senses. Ported from viewer/app.js (rendering) and extended.
+ * overlays what that car senses.
  */
 (function () {
   "use strict";

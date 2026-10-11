@@ -14,12 +14,11 @@ networks are tiny, so a hand-written tanh-MLP backward pass is enough).
   trajectory on the dense (T, B, N) slot grid: a slot's chain is cut where the car was
   removed (Sim.done_kind) - a new car in the same slot (new uid) starts a new
   trajectory; at the rollout end / env reset alive cars are bootstrapped with V.
-- reward per car: own reward + alpha * mean reward of the other cars in the same env
-  (alpha = 0: egoist, alpha = 1: cooperative) - queue_coef * queued car-seconds of the env.
+- reward per car: its own reward (Sim.car_reward).
 - curriculum: per-env demand drawn from [demand_lo * ceiling, ceiling]; the ceiling rises
   when the training crash+offroad rate is low.
 
-  poetry run python -m smartcrossing.ppo --name ppo1 --iters 400 [--no-signal] [--alpha 0.0]
+  poetry run python -m smartcrossing.ppo --name ppo1 --iters 400 [--no-signal]
 """
 
 import os
@@ -136,13 +135,13 @@ def privileged(sim: Sim) -> np.ndarray:
 
 
 class Worker:
-    def __init__(self, cfg_d, n_envs, seed, horizon, episode_steps, gamma, lam, alpha, queue_coef, in_scale, act_mask):
+    def __init__(self, cfg_d, n_envs, seed, horizon, episode_steps, gamma, lam, in_scale, act_mask):
         self.cfg_d = cfg_d
         self.B = n_envs
         self.seed = seed
         self.T = horizon
         self.ep_steps = episode_steps
-        self.gamma, self.lam, self.alpha, self.queue_coef = gamma, lam, alpha, queue_coef
+        self.gamma, self.lam = gamma, lam
         self.in_scale = in_scale
         self.act_mask = act_mask
         self.rng = np.random.default_rng(seed + 12345)
@@ -197,12 +196,6 @@ class Worker:
             sim.step(act)
             r = np.where(al, sim.car_reward, 0.0)
             own_rew_sum += r.sum()
-            n_on = al.sum(1, keepdims=True)
-            if self.alpha:
-                others = (r.sum(1, keepdims=True) - r) / np.maximum(n_on - 1, 1)
-                r = r + self.alpha * np.where(n_on > 1, others, 0.0)
-            if self.queue_coef:
-                r = r - self.queue_coef * sim.cfg.dt * sim.queue.sum(1, keepdims=True) * al
             rew[t] = r
             done[t] = al & (sim.done_kind > 0)
             kinds += np.bincount(sim.done_kind[al].ravel(), minlength=6)
@@ -357,8 +350,6 @@ def main(argv=None):
     p.add_argument("--logstd-init", type=float, default=-0.5)
     p.add_argument("--logstd-min", type=float, default=-2.5)
     p.add_argument("--acc-init", type=float, default=0.3, help="initial mean accel action (random cars otherwise brake to a stop)")
-    p.add_argument("--alpha", type=float, default=0.0, help="altruism: weight of the mean reward of the other cars")
-    p.add_argument("--queue-coef", type=float, default=0.0, help="per car: -coef * queued car-seconds of its env")
     p.add_argument("--demand", type=float, default=0.3, help="final curriculum ceiling")
     p.add_argument("--demand-start", type=float, default=0.05)
     p.add_argument("--demand-lo", type=float, default=0.3, help="env demand ~ U(lo * ceiling, ceiling)")
@@ -421,7 +412,7 @@ def main(argv=None):
     conns, procs = [], []
     for w in range(a.workers):
         kw = dict(cfg_d=cfg_d, n_envs=a.envs, seed=a.seed * 1000 + w, horizon=a.horizon, episode_steps=ep_steps,
-                  gamma=a.gamma, lam=a.lam, alpha=a.alpha, queue_coef=a.queue_coef, in_scale=in_scale, act_mask=act_mask)
+                  gamma=a.gamma, lam=a.lam, in_scale=in_scale, act_mask=act_mask)
         c1, c2 = ctx.Pipe()
         pr = ctx.Process(target=_worker_main, args=(c2, kw), daemon=True)
         pr.start()
@@ -474,7 +465,7 @@ def main(argv=None):
             log.write(json.dumps(rec) + "\n")
             log.flush()
             print(json.dumps(rec), flush=True)
-            extra = dict(iter=it, ceiling=ceiling, logstd=logstd.tolist(), algo="ppo", alpha=a.alpha)
+            extra = dict(iter=it, ceiling=ceiling, logstd=logstd.tolist(), algo="ppo")
             save_npz(out / "current.npz", actor.p, a_sizes, cfg_d, in_scale, **extra)
             np.savez(out / "state.npz", actor=actor.p, critic=critic.p, logstd=logstd, ceiling=ceiling, iter=it,
                      total_steps=total_steps)

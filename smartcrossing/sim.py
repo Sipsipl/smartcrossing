@@ -30,6 +30,10 @@ DISC_OFFSETS = np.array([-1.4, 0.0, 1.4])
 DISC_R = 0.9
 
 SPAWN_LAT_MARGIN = 0.8  # lateral corridor (beyond car width) checked for closing traffic at spawn
+SPAWN_BACK = 2.5  # cars spawn this far inside the end of their entry arm
+SPAWN_CURB_GAP = 1.2  # lateral spawn offsets keep this distance to the road edge
+SPAWN_RIGHT_MIN = 1.0  # spawn_right: smallest offset right of the centre line
+SPEED_TAU = 0.5  # s, time constant of the legacy speed_control interface
 
 N_RAYS = 5
 RAY_ANGLES = np.radians([-60.0, -30.0, 0.0, 30.0, 60.0])
@@ -94,14 +98,14 @@ class SimConfig:
     demand_range: tuple | None = None
     turn_probs: tuple = (1 / 3, 1 / 3, 1 / 3)  # right, straight, left
     signal_noise: float = 0.0  # std of gaussian noise on received signals
-    # perception range (m) of the neighbour block (positions stay scaled by NEIGHBOUR_RANGE)
+    # Per-checkpoint interface settings, kept only so old checkpoints still run as trained
+    # (applied by PolicyDriver.load; experiments.md: neither gave a benefit).
+    # perception range (m) of the neighbour block (positions stay scaled by NEIGHBOUR_RANGE);
+    # 60 in ppo11 / ppo14 / ppo15
     neighbour_vis: float = 30.0
-    # longitudinal action interface: False = action[0] is the acceleration (+: acc_max,
-    # -: brake_max); True = action[0] is a target speed in [0, v_max] reached with
-    # acc = clip((v_target - v) / speed_tau, -brake_max, acc_max) (same physical limits,
-    # but no flat region of the action at v_max, so "slow down" stays explorable)
+    # ppo16 only: action[0] is a target speed in [0, v_max] reached with
+    # acc = clip((v_target - v) / SPEED_TAU, -brake_max, acc_max) (no reverse)
     speed_control: bool = False
-    speed_tau: float = 0.5
     signal_enabled: bool = True
     # reward weights. Per car (Sim.car_reward); the team reward returned by step() is
     # their sum over the cars of an environment minus the queue cost.
@@ -127,6 +131,22 @@ class SimConfig:
 # the neighbour blocks are appended below
 OBS_DIM = 4 + 1 + 3 + 2 + 2 + N_RAYS + 1 + 1
 OBS_RAYS = 12  # index of the first ray
+
+
+def js_constants() -> dict:
+    """Everything the browser port (site/src/js/sim.js) takes from this module: SimConfig
+    defaults and the geometry / observation constants. site/build.py writes it to
+    js/sim-config.js, so no number is duplicated in JavaScript."""
+    defaults = {k: (list(v) if isinstance(v, tuple) else v) for k, v in SimConfig().__dict__.items()}
+    return {
+        "defaults": defaults,
+        "RIGHT": RIGHT, "STRAIGHT": STRAIGHT, "LEFT": LEFT,
+        "DISC_OFFSETS": DISC_OFFSETS.tolist(), "DISC_R": DISC_R, "SPAWN_LAT_MARGIN": SPAWN_LAT_MARGIN,
+        "SPAWN_BACK": SPAWN_BACK, "SPAWN_CURB_GAP": SPAWN_CURB_GAP, "SPAWN_RIGHT_MIN": SPAWN_RIGHT_MIN, "SPEED_TAU": SPEED_TAU, "N_RAYS": N_RAYS, "RAY_ANGLES": RAY_ANGLES.tolist(), "RAY_RANGE": RAY_RANGE,
+        "K_NEIGHBOURS": K_NEIGHBOURS, "NEIGHBOUR_RANGE": NEIGHBOUR_RANGE, "POS_SCALE": POS_SCALE,
+        "GOAL_SCALE": GOAL_SCALE, "NB_FEATURES": NB_FEATURES, "LANE_WIDTH": LANE_WIDTH,
+        "OBS_DIM": OBS_DIM, "OBS_RAYS": OBS_RAYS, "DONE_NAMES": list(DONE_NAMES), "ARM_U": ARM_U.tolist(),
+    }
 
 
 def obs_dim(cfg: SimConfig) -> int:
@@ -230,9 +250,9 @@ def free_flow_time(cfg: SimConfig, manoeuvre):
     """Approximate travel time of an unobstructed car (for delay metrics): v_max on the
     arms, the turn arc (right: from the right lane, left: from the left lane) at the
     grip-limited speed min(v_max, sqrt(a_lat_max * r))."""
-    straight_len = 2 * cfg.L - 2.5
+    straight_len = 2 * cfg.L - SPAWN_BACK
     c = cfg.W + cfg.Rc
-    arm_len = 2 * (cfg.L - c) - 2.5
+    arm_len = 2 * (cfg.L - c) - SPAWN_BACK
     off_r, off_l = lane_offsets(cfg)
     r = np.where(manoeuvre == RIGHT, c - off_r, c + off_l)
     v_arc = np.minimum(cfg.v_max, np.sqrt(cfg.a_lat_max * r)) if cfg.a_lat_max > 0 else cfg.v_max
@@ -427,7 +447,7 @@ class Sim:
         alive = self.alive
         if cfg.speed_control:
             v_t = (a[..., 0] + 1.0) * 0.5 * cfg.v_max
-            acc = np.clip((v_t - self.v) / cfg.speed_tau, -cfg.brake_max, cfg.acc_max)
+            acc = np.clip((v_t - self.v) / SPEED_TAU, -cfg.brake_max, cfg.acc_max)
             v = np.clip(self.v + acc * cfg.dt, 0.0, cfg.v_max)  # (no reverse in this interface)
         else:
             # pedal: + accelerates forward (acc_max) / brakes a reversing car (brake_max);
@@ -513,7 +533,7 @@ class Sim:
         N = self.cfg.n_slots
         dcx = self.x[:, :, None] - self.x[:, None, :]
         dcy = self.y[:, :, None] - self.y[:, None, :]
-        near = (dcx**2 + dcy**2 < (2 * 1.4 + 2 * DISC_R) ** 2) & alive[:, :, None] & alive[:, None, :]
+        near = (dcx**2 + dcy**2 < (2 * DISC_OFFSETS[-1] + 2 * DISC_R) ** 2) & alive[:, :, None] & alive[:, None, :]
         near &= ~np.eye(N, dtype=bool)[None]
         vrel = np.zeros(alive.shape)
         if not near.any():
@@ -547,8 +567,8 @@ class Sim:
         # draw every random number unconditionally so streams stay aligned (CRN)
         dem = cfg.demand if self._stream_demand is None else self._stream_demand[:, None]
         arrive = self.rng.random((S, 4)) < dem * cfg.dt
-        lat_lo = 1.0 if cfg.spawn_right else -(cfg.W - 1.2)
-        lat = lat_lo + (cfg.W - 1.2 - lat_lo) * self.rng.random((S, 4))
+        lat_lo = SPAWN_RIGHT_MIN if cfg.spawn_right else -(cfg.W - SPAWN_CURB_GAP)
+        lat = lat_lo + (cfg.W - SPAWN_CURB_GAP - lat_lo) * self.rng.random((S, 4))
         man = self.rng.choice([RIGHT, STRAIGHT, LEFT], size=(S, 4), p=np.asarray(cfg.turn_probs) / sum(cfg.turn_probs))
         grp = self.rng.choice(len(self.group_probs), size=(S, 4), p=self.group_probs)
         arrive, lat, man, grp = arrive[self.scen], lat[self.scen], man[self.scen], grp[self.scen]
@@ -573,9 +593,9 @@ class Sim:
                 continue
             c, s = rot(k)
             u = self.queue_lat[:, k]
-            # canonical spawn point (u, -L + 2.5) rotated by k*90deg
-            sx = c * u - s * (-cfg.L + 2.5)
-            sy = s * u + c * (-cfg.L + 2.5)
+            # canonical spawn point (u, -L + SPAWN_BACK) rotated by k*90deg
+            sx = c * u - s * (-cfg.L + SPAWN_BACK)
+            sy = s * u + c * (-cfg.L + SPAWN_BACK)
             h = np.pi / 2 + k * np.pi / 2  # canonical heading (north) rotated by k*90deg
             dx, dy = self.x - sx[:, None], self.y - sy[:, None]
             dist = np.hypot(dx, dy)

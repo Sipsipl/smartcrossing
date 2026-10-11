@@ -1,53 +1,34 @@
 /* Smart Crossing: JS port of smartcrossing/sim.py (one environment, B = 1) and of
  * the MLP forward pass in smartcrossing/policy.py.
  *
- * Keep this file in lock-step with the Python code: tests/test_viewer_parity.py
+ * Keep this file in lock-step with the Python code: tests/test_sim_js_parity.py
  * runs observe()/step() on states exported from Python and compares the results.
  * Randomness (arrivals, signal noise) uses a seeded JS PRNG; it is not meant to
  * reproduce numpy's streams.
  *
+ * All numbers (SimConfig defaults, geometry and observation constants) come from
+ * js/sim-config.js (globalThis.SC_SIM_CONFIG), which site/build.py generates from
+ * sim.py (sim.js_constants); load it first.
+ *
  * Works as a browser script (global `SmartCrossing`) and as a CommonJS module.
  */
 (function (root, factory) {
-  const api = factory();
+  const api = factory(globalThis.SC_SIM_CONFIG);
   if (typeof module === "object" && module.exports) module.exports = api;
   else root.SmartCrossing = api;
-})(typeof self !== "undefined" ? self : this, function () {
+})(typeof self !== "undefined" ? self : this, function (C) {
   "use strict";
+  if (!C) throw new Error("SC_SIM_CONFIG missing: load js/sim-config.js before sim.js");
 
-  const RIGHT = 1, STRAIGHT = 2, LEFT = 3;
-  const DISC_OFFSETS = [-1.4, 0.0, 1.4];
-  const DISC_R = 0.9;
-  const SPAWN_LAT_MARGIN = 0.8;
-  const N_RAYS = 5;
-  const RAY_ANGLES = [-60.0, -30.0, 0.0, 30.0, 60.0].map((d) => d * (Math.PI / 180));
-  const RAY_RANGE = 20.0; // rays report the exact distance to the road edge, capped here
-  const K_NEIGHBOURS = 4;
-  const NEIGHBOUR_RANGE = 30.0;
-  const POS_SCALE = 10.0; // own canonical position in 10 m units (fixed, independent of L / W)
-  const GOAL_SCALE = 25.0; // goal vectors (exit gate, exit mouth) in 25 m units
-  const NB_FEATURES = 8; // per neighbour before its lamps: rel pos (2), rel heading (2), speed, present, kappa, accel
-  const LANE_WIDTH = 3.5;
-  // pos (2), heading (2), speed, manoeuvre (3), gate vector (2), mouth vector (2), rays, kappa, grip kappa
-  const OBS_DIM = 4 + 1 + 3 + 2 + 2 + N_RAYS + 1 + 1;
-  const OBS_RAYS = 12;
-  // why a slot was cleared in the last step (sim.doneKind)
-  const DONE = { none: 0, exit: 1, wrong_exit: 2, crash: 3, offroad: 4, timeout: 5 };
-  const ARM_U = [[0.0, -1.0], [1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]]; // outward unit vector of arm k
+  const { RIGHT, STRAIGHT, LEFT, DISC_OFFSETS, DISC_R, SPAWN_LAT_MARGIN, SPAWN_BACK, SPAWN_CURB_GAP, SPAWN_RIGHT_MIN } = C;
+  const { SPEED_TAU, N_RAYS, RAY_ANGLES, RAY_RANGE } = C;
+  const { K_NEIGHBOURS, NEIGHBOUR_RANGE, POS_SCALE, GOAL_SCALE, NB_FEATURES, LANE_WIDTH, OBS_DIM, OBS_RAYS, ARM_U } = C;
+  // why a slot was cleared in the last step (sim.doneKind): { none: 0, exit: 1, ... }
+  const DONE = Object.fromEntries(C.DONE_NAMES.map((name, i) => [name, i]));
 
-  // Mirrors the SimConfig dataclass defaults (checked by the parity test).
+  /** A fresh copy of the SimConfig dataclass defaults. */
   function defaultConfig() {
-    return {
-      L: 50.0, W: 7.0, Rc: 9.0, dt: 0.1,
-      v_max: 14.0, acc_max: 3.0, brake_max: 7.0, v_reverse: 2.0, kappa_max: 0.2, kappa_rate: 0.4, a_lat_max: 4.0,
-      spawn_right: false, spawn_speed: 8.0, spawn_clearance: 7.0, spawn_headway: 1.5,
-      max_age: 60.0, n_slots: 32, n_signal: 2, demand: 0.15, demand_range: null,
-      turn_probs: [1 / 3, 1 / 3, 1 / 3],
-      signal_noise: 0.0, signal_enabled: true, neighbour_vis: 30.0,
-      speed_control: false, speed_tau: 0.5,
-      r_exit: 1.0, r_wrong_exit: -1.0, r_crash: -1.5, r_crash_speed: 0.1, r_offroad: -1.5, r_offroad_speed: 0.1,
-      r_timeout: -1.0, r_progress: 0.01, r_time: 0.0, r_queue: 0.0,
-    };
+    return JSON.parse(JSON.stringify(C.defaults));
   }
 
   const obsDim = (cfg) => OBS_DIM + K_NEIGHBOURS * (NB_FEATURES + cfg.n_signal);
@@ -135,9 +116,9 @@
   }
 
   function freeFlowTime(cfg, man) {
-    if (man === STRAIGHT) return (2 * cfg.L - 2.5) / cfg.v_max;
+    if (man === STRAIGHT) return (2 * cfg.L - SPAWN_BACK) / cfg.v_max;
     const c = cfg.W + cfg.Rc;
-    const armLen = 2 * (cfg.L - c) - 2.5;
+    const armLen = 2 * (cfg.L - c) - SPAWN_BACK;
     const [offR, offL] = laneOffsets(cfg);
     const r = man === RIGHT ? c - offR : c + offL;
     const vArc = cfg.a_lat_max > 0 ? Math.min(cfg.v_max, Math.sqrt(cfg.a_lat_max * r)) : cfg.v_max;
@@ -324,7 +305,7 @@
         const v0 = this.v[n];
         let v;
         if (cfg.speed_control) {
-          const acc = Math.min(Math.max(((a0 + 1.0) * 0.5 * cfg.v_max - v0) / cfg.speed_tau, -cfg.brake_max), cfg.acc_max);
+          const acc = Math.min(Math.max(((a0 + 1.0) * 0.5 * cfg.v_max - v0) / SPEED_TAU, -cfg.brake_max), cfg.acc_max);
           v = Math.min(Math.max(v0 + acc * dt, 0.0), cfg.v_max); // no reverse in this interface
         } else {
           // pedal (sim.py): + accelerates forward / brakes a reversing car, - brakes a forward car /
@@ -393,7 +374,7 @@
         }
       }
       const off = new Uint8Array(N), col = new Uint8Array(N), vrel = new Float64Array(N);
-      const near2 = (2 * 1.4 + 2 * DISC_R) ** 2, hit2 = (2 * DISC_R) ** 2;
+      const near2 = (2 * DISC_OFFSETS[DISC_OFFSETS.length - 1] + 2 * DISC_R) ** 2, hit2 = (2 * DISC_R) ** 2;
       for (let i = 0; i < N; i++) {
         if (!this.alive[i]) continue;
         for (let k = 0; k < 3; k++) {
@@ -471,8 +452,8 @@
       if (demand > 0) {
         for (let k = 0; k < 4; k++) {
           const arrive = rng() < demand * cfg.dt;
-          const latLo = cfg.spawn_right ? 1.0 : -(cfg.W - 1.2);
-          const lat = latLo + (cfg.W - 1.2 - latLo) * rng();
+          const latLo = cfg.spawn_right ? SPAWN_RIGHT_MIN : -(cfg.W - SPAWN_CURB_GAP);
+          const lat = latLo + (cfg.W - SPAWN_CURB_GAP - latLo) * rng();
           const man = 1 + rng.choice(cfg.turn_probs);
           const grp = rng.choice(this.groupProbs);
           if (arrive) {
@@ -492,8 +473,8 @@
         if (!q.length) continue;
         const [c, s] = rot(k);
         const u = q[0].lat;
-        const sx = c * u - s * (-cfg.L + 2.5);
-        const sy = s * u + c * (-cfg.L + 2.5);
+        const sx = c * u - s * (-cfg.L + SPAWN_BACK);
+        const sy = s * u + c * (-cfg.L + SPAWN_BACK);
         const h = Math.PI / 2 + k * (Math.PI / 2);
         const ch = Math.cos(h), sh = Math.sin(h);
         let clear = true, free = -1;

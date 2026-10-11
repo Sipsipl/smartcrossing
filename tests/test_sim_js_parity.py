@@ -1,14 +1,17 @@
-"""Parity between the Python simulator/policy and the browser port in viewer/sim.js.
+"""Parity between the Python simulator/policy and the browser port in site/src/js/sim.js.
 
 Python builds a set of states (a random-traffic trajectory plus hand-made edge
 cases: near-collisions, cars at the curb, exits through right/wrong arms,
 timeouts, queued cars at blocked spawn points), runs ``observe`` and one
 ``step`` with fixed actions and arrivals disabled (demand 0, queued cars still
 spawn), and a node script does the same with sim.js. Everything must agree to 1e-6.
+sim.js gets its constants from js/sim-config.js, generated here by the site build's own
+``sim_config_js`` (test_generated_config checks it against sim.py).
 """
 
 import copy
 import dataclasses
+import importlib.util
 import json
 import shutil
 import subprocess
@@ -18,10 +21,11 @@ import numpy as np
 import pytest
 
 from smartcrossing.policy import PolicyDriver, default_in_scale, export_json, init_params, layer_sizes, save_npz
-from smartcrossing.sim import LEFT, NARROW, RIGHT, STRAIGHT, Sim, SimConfig, act_dim
+from smartcrossing import sim as simmod
+from smartcrossing.sim import LEFT, NARROW, RIGHT, STRAIGHT, Sim, SimConfig, act_dim, js_constants
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNNER = ROOT / "viewer" / "test" / "parity_runner.js"
+RUNNER = ROOT / "tests" / "sim_js_parity_runner.js"
 NODE = shutil.which("node")
 TOL = 1e-6
 
@@ -212,6 +216,14 @@ def edge_cases(cfg, tag=""):
     return cases
 
 
+def site_build():
+    """site/build.py as a module (it writes the js/sim-config.js the site loads)."""
+    spec = importlib.util.spec_from_file_location("site_build", ROOT / "site" / "build.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 @pytest.fixture(scope="module")
 def parity(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("parity")
@@ -219,7 +231,7 @@ def parity(tmp_path_factory):
     cases = trajectory_cases(0, dataclasses.replace(cfg, demand=0.5))
     cases += trajectory_cases(1, dataclasses.replace(cfg, demand=0.35, signal_enabled=False, turn_probs=(0.5, 0.2, 0.3)))
     cases += trajectory_cases(2, dataclasses.replace(cfg, demand=0.3, neighbour_vis=55.0), n_steps=80)
-    cases += trajectory_cases(3, dataclasses.replace(cfg, demand=0.3, speed_control=True, speed_tau=0.4), n_steps=80)
+    cases += trajectory_cases(3, dataclasses.replace(cfg, demand=0.3, speed_control=True), n_steps=80)
     # the old 7 m crossing without grip limit, and lane-disciplined arrivals with a strong grip limit
     cases += trajectory_cases(4, dataclasses.replace(cfg, demand=0.4, **NARROW), n_steps=80)
     cases += trajectory_cases(5, dataclasses.replace(cfg, demand=0.4, spawn_right=True, a_lat_max=1.5), n_steps=80)
@@ -259,7 +271,9 @@ def parity(tmp_path_factory):
         ],
     }
     (tmp / "cases.json").write_text(json.dumps(payload))
-    res = subprocess.run([NODE, str(RUNNER), str(tmp / "cases.json")], capture_output=True, text=True, timeout=120)
+    (tmp / "sim-config.js").write_text(site_build().sim_config_js())
+    res = subprocess.run([NODE, str(RUNNER), str(tmp / "cases.json"), str(tmp / "sim-config.js")],
+                         capture_output=True, text=True, timeout=120)
     assert res.returncode == 0, res.stderr
     js = json.loads(res.stdout)
     from smartcrossing.policy import forward
@@ -277,6 +291,23 @@ def test_defaults_match_simconfig(parity):
             np.testing.assert_allclose(js[k], v, atol=1e-12)
         else:
             assert js[k] == v, k
+
+
+def test_generated_config(parity):
+    """js/sim-config.js carries sim.py's constants, and sim.js uses them."""
+    cfg = parity["js"]["config"]
+    assert cfg == json.loads(json.dumps(js_constants()))
+    np.testing.assert_array_equal(cfg["RAY_ANGLES"], simmod.RAY_ANGLES)
+    np.testing.assert_array_equal(cfg["DISC_OFFSETS"], simmod.DISC_OFFSETS)
+    np.testing.assert_array_equal(cfg["ARM_U"], simmod.ARM_U)
+    ex = parity["js"]["exported"]
+    for k in ("RIGHT", "STRAIGHT", "LEFT", "DISC_R", "K_NEIGHBOURS", "NEIGHBOUR_RANGE", "OBS_DIM", "NB_FEATURES",
+              "POS_SCALE", "GOAL_SCALE", "RAY_RANGE"):
+        assert ex[k] == getattr(simmod, k), k
+    assert ex["DONE"] == {name: i for i, name in enumerate(simmod.DONE_NAMES)}
+    for k in ("SPAWN_LAT_MARGIN", "SPAWN_BACK", "SPAWN_CURB_GAP", "SPAWN_RIGHT_MIN", "SPEED_TAU", "N_RAYS",
+              "LANE_WIDTH", "OBS_RAYS"):
+        assert cfg[k] == getattr(simmod, k), k
 
 
 def test_case_coverage(parity):

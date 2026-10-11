@@ -26,16 +26,10 @@ from .sim import Sim, SimConfig
 STAT_KEYS = ("arrived", "spawned", "exits", "wrong_exits", "crashes", "offroad", "timeouts")
 
 
-def rollout(cfg_d: dict, members: np.ndarray, sizes, n_scen: int, seconds: float, seed: int, demand: float, in_scale=None, r_geo=0.0, r_queue=0.0):
+def rollout(cfg_d: dict, members: np.ndarray, sizes, n_scen: int, seconds: float, seed: int, demand: float, in_scale=None):
     """Evaluate members (P, D) on n_scen shared traffic streams.
     Returns fitness (P,) summed over streams and stats dict of (P,) arrays."""
-    # route-aware progress and the queue cost now live in the sim (r_progress, r_queue)
-    over = {"demand": demand}
-    if r_geo:
-        over["r_progress"] = r_geo
-    if r_queue:
-        over["r_queue"] = r_queue
-    cfg = SimConfig(**{**cfg_d, **over})
+    cfg = SimConfig(**{**cfg_d, "demand": demand})
     P = len(members)
     sim = Sim(cfg, P * n_scen, seed=seed, n_scenarios=n_scen)
     env_params = np.repeat(members, n_scen, axis=0)  # env b -> member b // n_scen
@@ -113,12 +107,10 @@ def main(argv=None):
     p.add_argument("--safe-exit", type=float, default=0.85, help="... and exit_ok above")
     p.add_argument("--signal", dest="signal", action="store_true", default=True)
     p.add_argument("--no-signal", dest="signal", action="store_false")
-    p.add_argument("--cfg", default="", help="JSON SimConfig overrides (reward weights etc.)")
+    p.add_argument("--cfg", default="", help="JSON SimConfig overrides (reward weights etc., e.g. r_progress, r_queue)")
     p.add_argument("--init", default="", help="start from this .npz")
     p.add_argument("--eval-every", type=int, default=10)
     p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--r-geo", type=float, default=0.0, help="overrides SimConfig.r_progress (route-aware progress per metre)")
-    p.add_argument("--r-queue", type=float, default=0.0, help="overrides SimConfig.r_queue (per queued car per second)")
     p.add_argument("--no-in-scale", dest="in_scale", action="store_false", default=True)
     a = p.parse_args(argv)
 
@@ -160,7 +152,7 @@ def main(argv=None):
             # worker 0 always at the ceiling, others spread below it (avoid forgetting)
             demands = [ceiling] + list(ceiling * rng.uniform(0.4, 1.0, a.workers - 1))
             seeds = rng.integers(1 << 30, size=a.workers)
-            jobs = [(cfg_d, members, sizes, a.scen, a.seconds, int(seeds[w]), float(demands[w]), in_scale, a.r_geo, a.r_queue) for w in range(a.workers)]
+            jobs = [(cfg_d, members, sizes, a.scen, a.seconds, int(seeds[w]), float(demands[w]), in_scale) for w in range(a.workers)]
             res = pool.map(_worker, jobs)
             fit = sum(r[0] for r in res)
             st = {k: sum(r[1][k] for r in res) for k in res[0][1]}
@@ -191,7 +183,7 @@ def main(argv=None):
                 "wall_s": round(time.time() - t0, 2),
             }
             if a.eval_every and (gen % a.eval_every == 0 or gen == a.gens - 1):
-                ev = evaluate(pool, cfg_d, theta, sizes, a.seconds, a.workers, a.demand, in_scale, a.r_geo, a.r_queue)
+                ev = evaluate(pool, cfg_d, theta, sizes, a.seconds, a.workers, a.demand, in_scale)
                 rec["eval"] = ev
                 if ev["score"] > best_eval:
                     best_eval = ev["score"]
@@ -208,11 +200,11 @@ def main(argv=None):
 EVAL_DEMANDS = (0.05, 0.15)
 
 
-def evaluate(pool, cfg_d, theta, sizes, seconds, workers, target, in_scale=None, r_geo=0.0, r_queue=0.0):
+def evaluate(pool, cfg_d, theta, sizes, seconds, workers, target, in_scale=None):
     """Fixed-seed evaluation of the centre on low and target demand.
     score = sum of team reward (comparable across generations)."""
     demands = sorted(set(EVAL_DEMANDS) | {target})
-    jobs = [(cfg_d, theta[None], sizes, 4, seconds, 777 + i, d, in_scale, r_geo, r_queue) for i, d in enumerate(demands)]
+    jobs = [(cfg_d, theta[None], sizes, 4, seconds, 777 + i, d, in_scale) for i, d in enumerate(demands)]
     res = pool.map(_worker, jobs)
     ev = {"score": round(float(sum(r[0][0] for r in res)), 3)}
     for d, (f, st) in zip(demands, res):

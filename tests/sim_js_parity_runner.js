@@ -1,12 +1,17 @@
-// Node driver for tests/test_viewer_parity.py.
-// Usage: node parity_runner.js cases.json  -> prints results JSON on stdout.
+// Node driver for tests/test_sim_js_parity.py.
+// Usage: node sim_js_parity_runner.js cases.json sim-config.js  -> prints results JSON on stdout.
+// sim-config.js is the file site/build.py writes (loaded first, as on the site).
 "use strict";
 const fs = require("fs");
 const path = require("path");
-const SC = require(path.join(__dirname, "..", "sim.js"));
+require(path.resolve(process.argv[3]));
+const SC = require(path.join(__dirname, "..", "site", "src", "js", "sim.js"));
 
 const input = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-const out = { defaults: SC.defaultConfig(), obs_dim: null, cases: [], policies: [] };
+const exported = {};
+for (const k of ["RIGHT", "STRAIGHT", "LEFT", "DISC_R", "K_NEIGHBOURS", "NEIGHBOUR_RANGE", "OBS_DIM", "NB_FEATURES",
+  "POS_SCALE", "GOAL_SCALE", "RAY_RANGE", "DONE"]) exported[k] = SC[k];
+const out = { defaults: SC.defaultConfig(), config: globalThis.SC_SIM_CONFIG, exported, cases: [], policies: [] };
 
 for (const c of input.cases) {
   const sim = new SC.Sim(c.cfg, 0);

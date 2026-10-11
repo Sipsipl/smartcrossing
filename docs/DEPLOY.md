@@ -8,7 +8,8 @@ läuft komplett im Browser der Besucher, es gibt keinen Server und keine Datenba
 | Ordner | Inhalt | ins Git? |
 |---|---|---|
 | `site/src/` | die handgeschriebenen Seiten (HTML/CSS/JS) | ja |
-| `site/build.py` | Build-Skript: kopiert `site/src/`, `viewer/sim.js`, wählt Gehirne aus `runs/`, misst sie, schreibt die Daten | ja |
+| `site/build.py` | Build-Skript: kopiert `site/src/` (inkl. Simulation `js/sim.js`), schreibt `js/sim-config.js` (Zahlen aus `smartcrossing/sim.py`), wählt Gehirne aus `runs/`, misst sie, schreibt die Daten | ja |
+| `site/obs_labels.py` | deutsche Beschriftungen der Sensorwerte | ja |
 | `site/data/bench_cache.json` | Zwischenspeicher der Messungen (damit ein Neubau schnell geht) | ja |
 | `site/public/` | **die fertige Website** – genau dieser Ordner wird veröffentlicht | **ja** |
 
@@ -92,7 +93,7 @@ cd site/public && python3 -m http.server 8000      # dann http://localhost:8000 
 ## Wenn etwas schiefgeht
 
 - **Build bricht mit „OWN_FEATURES has … labels but sim.OBS_DIM is …“ ab**: Die Sensoren der
-  Simulation haben sich geändert. Dann in `smartcrossing/export_viewer.py` die Liste
+  Simulation haben sich geändert. Dann in `site/obs_labels.py` die Liste
   `OWN_FEATURES` (deutsche Beschriftungen) anpassen – das ist Absicht, damit die Seite nie
   falsch beschriftet.
 - **„skip runs/…npz“** im Build: Diese Datei ist kein Gehirn (z. B. ein Trainingszustand)
