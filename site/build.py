@@ -65,8 +65,8 @@ DEMANDS = [0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 1.0]  # up to the start page slider m
 # shown before it (narrow crossing); override with --main / --history
 # Checkpoints are named <run>/<file stem> (found in runs/ or in the snapshot); a path to an
 # .npz anywhere (e.g. results/wide_s1ft2_ckpt2650.npz) works too if its weights match one.
-DEFAULT_MAIN = ["r1_main_x3/current"]  # = results/round1_x3.npz (round 1 in the world with wrecks / brake lights)
-DEFAULT_PREVIOUS = "wide_s1ft2/ckpt_2650"  # = results/wide_s1ft2_ckpt2650.npz, the main brain before round 1
+DEFAULT_MAIN = ["r2_B_s1/ckpt_0639"]  # = results/round2_best.npz (round 2: practised with obstacle scenarios)
+DEFAULT_PREVIOUS = "r1_main_x3/current"  # = results/round1_x3.npz, the main brain before round 2
 DEFAULT_HISTORY = "ppo17/ckpt_5250"
 # second brain for mixing on the start page; old brains (2 lamps, no brake light) cannot share a sim with the
 # main brain, so none for now (was wide_s0ft/ckpt_2850 = results/wide_s0ft_ckpt2850.npz)
@@ -133,7 +133,15 @@ RUN_INFO = {
     "r1_x3": ("R1", "Runde 1: neue Regeln, altes Gehirn lernt weiter",
               "Neue Regeln: Wracks mit Warnblinker, Bremslicht, eine Lampe, Einfahrt nur rechts. Das alte Gehirn lernt weiter, Unfälle kosten jetzt dreimal so viel."),
     "r1_main_x3": ("R1+", "Runde 1: länger weitergelernt",
-                   "Das aktuelle Gehirn: rund 40 % weniger Unfälle als das alte, bei dichtem Verkehr aber immer noch viele."),
+                   "Rund 40 % weniger Unfälle als das Gehirn davor, bei dichtem Verkehr aber noch viele – das Hauptgehirn vor Runde 2."),
+    "r2_B_s1": ("R2", "Runde 2: mit Hindernissen geübt",
+                "Das aktuelle Gehirn: im Training standen Wracks und parkende Autos im Weg. Es bremst viel öfter dahinter ab und reiht sich ein, statt hineinzufahren."),
+    "r2_A_s1": ("R2a", "Runde 2, Test: nur mehr Ausprobieren",
+                "Ohne Hindernisse im Training: schon deutlich weniger Unfälle als vorher, aber längst nicht so sicher vor Hindernissen."),
+    "r2_A_s2": ("R2a'", "Runde 2, Test: nur mehr Ausprobieren, zweiter Lauf",
+                "Anderer Zufallsstart, fast dasselbe Ergebnis."),
+    "r2_C_s1": ("R2c", "Runde 2, Test: Unfälle je nach eigenem Tempo bestraft",
+                "Mit Hindernissen und tempoabhängiger Strafe: etwas schlechter als ohne die Strafe (bei einem Lauf nicht sicher)."),
     "r1_x1": ("R1a", "Runde 1, Test: Unfälle so teuer wie bisher",
               "Kurzer Test: ähnlich gut wie mit dreifacher Strafe – der Unterschied ist Zufall."),
     "r1_x10": ("R1b", "Runde 1, Test: Unfälle zehnmal so teuer",
@@ -164,7 +172,8 @@ STEP_INFO = {
     "wide_s1ft": "Kleinere Lernschritte → weniger Unfälle",
     "wide_s1ft2": "Länger feinschleifen → nur noch wenig besser: das Hauptgehirn bis Runde 1",
     "r1_x3": "Neue Regeln: Wracks mit Warnblinker, Bremslicht, eine Lampe, Einfahrt nur rechts; Unfälle kosten dreimal so viel, geübt wird mit dichterem Verkehr → die Kurve fällt erst, dann lernt das alte Gehirn um",
-    "r1_main_x3": "Länger weitergelernt → rund 40 % weniger Unfälle als vorher: das aktuelle Gehirn",
+    "r1_main_x3": "Länger weitergelernt → rund 40 % weniger Unfälle als vorher: das Hauptgehirn bis Runde 2",
+    "r2_B_s1": "Dazu Hindernisse im Training (Wracks, parkende Autos) → bremst viel öfter dahinter ab und reiht sich ein; noch Unfälle mitten auf der Kreuzung bei dichtem Verkehr",
 }
 
 
@@ -582,8 +591,8 @@ def write_snapshot(found: dict, used: list[str], chain_runs: list[str]):
         path.parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(path, info=json.dumps(info, sort_keys=True), **arrays)
     for rel in old - keep:
-        if SOURCE["kind"] == "merge" and not from_runs(rel.split("/", 1)[0]):
-            continue  # merge: the snapshot only grows (brains of runs not in runs/ stay)
+        if SOURCE["kind"] == "merge":
+            continue  # merge: the snapshot only grows (nothing old is deleted)
         (brains / rel).unlink()
     for d in brains.iterdir():
         if d.is_dir() and not any(d.iterdir()):
