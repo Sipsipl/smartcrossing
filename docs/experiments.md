@@ -699,3 +699,29 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
   neighbour inputs (same reaction learned per slot).
 - **Consequences**: add a stop gate (solo car must stop for a wreck/standing car); scenario
   curriculum with obstacles on the path; more exploration / from-scratch comparison; Roadmap B.
+
+## Round 2: exploration (A), obstacle scenarios (B), own-speed crash cost (C) (2026-10-12)
+- **Setup**: warm start from round1_x3 (`--init-policy`, critic warm-up 20, logstd-init -0.7), GPU 2048 envs x 32,
+  640 iterations per run (hard cap), demand 0.15-0.3, crash/off-road cost x3, n_slots 40. B: obstacle_envs 0.5
+  (wrecks / parked cars on paths, only where braking in time is possible). C: B + crash_cost_speed "own".
+  Done: A_s1, B_s1, C_s1, A_s2; B_s2 and C_s2 skipped (time): ~13-18 min per run instead of the planned 8,
+  because iterations slow down from 0.5 to 1.4 s as more cars survive (and evals ran alongside).
+- **Result** (8 envs x 120 s, seeds 1000/2000/3000, obstacles off; crash+off per 1000 / throughput per min;
+  gate = stop gate, safe / stop rate on feasible cases; results/round2_eval.jsonl):
+
+  | brain | @0.15 | @0.3 | gate safe / stop |
+  |---|---|---|---|
+  | A s1 / s2 | 57 / 56, 29.8 / 29.0 | 188 / 186, 33.5 / 30.6 | 0.52 / 0.50, 0.64 / 0.50 |
+  | B s1 | 31, 29.6 | 105, 34.7 | 0.84 / 0.75 |
+  | C s1 | 52, 30.6 | 166, 37.0 | 0.71 / 0.67 |
+  | round1_x3 | 127, 28.8 | 275, 38.6 | 0.38 / 0.03 |
+  | light | 0, 24.5 | 0, 28.4 | - |
+  | reservation | 0, 33.8 | 0, 64.1 | - |
+
+  At 0.5: B 107 vs round1 320 per 1000.
+- **Reading**: exploration alone (A) halves crashes vs round 1 (seeds agree within 1-2 per 1000). Obstacle
+  scenarios (B) halve them again and lift the gate to 84% safe / 75% stop. Own-speed crash cost (C) is worse
+  than B on one seed each (not confirmed; needs B_s2/C_s2). Best brain: r2_B_s1 -> results/round2_best.npz.
+  Sheets (runs/round2_eval/B_s1_*): cars queue behind standing cars on the arms instead of driving into them;
+  remaining crashes are in the box (entering tightly one after another), long delay at 0.3 (mean 15 s).
+- **Next**: confirm B vs C with seed 2; longer B training; gate still < 95%; crashes in the box -> Roadmap B.
