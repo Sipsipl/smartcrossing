@@ -105,7 +105,7 @@ def forward(p: np.ndarray, arch, x: np.ndarray) -> np.ndarray:
     ego = np.concatenate([x[..., :E], x[..., E + K * F :]], -1)
     nb = x[..., E : E + K * F].reshape(*lead, K, F)
     mask = nb[..., arch["present"]] != 0  # (..., K)
-    h = nb
+    h = nb.reshape(-1, F)  # 2-D matmuls (numpy's broadcast 3-D matmul is much slower)
     for i in range(len(arch["phi"])):
         h = np.tanh(h @ P[f"phi{i}.W"] + P[f"phi{i}.b"])
     any_ = mask.any(-1, keepdims=True)
@@ -120,8 +120,10 @@ def forward(p: np.ndarray, arch, x: np.ndarray) -> np.ndarray:
         w = w / np.maximum(w.sum(-1, keepdims=True), 1e-30)
         pooled = np.einsum("...hk,...khd->...hd", w, v).reshape(*lead, H * dv)
     elif arch["pool"] == "mean":
+        h = h.reshape(*lead, K, -1)
         pooled = (h * mask[..., None]).sum(-2) / np.maximum(mask.sum(-1, keepdims=True), 1)
     else:
+        h = h.reshape(*lead, K, -1)
         pooled = np.where(any_, np.where(mask[..., None], h, -2.0).max(-2), 0.0)
     z = np.concatenate([ego, pooled], -1)
     n = len(arch["hidden"])
