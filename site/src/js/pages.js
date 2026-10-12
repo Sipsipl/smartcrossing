@@ -387,7 +387,60 @@
   }
 
   // ------------------------------------------------------------------ learning
+  // ------------------------------------------------------------------ reward scale (lernen)
+  /** Draws the reward rules of the main brain (D.reward, from its training cfg) as a point scale + two example trips. */
+  function drawReward() {
+    const R = D.reward, host = $("reward");
+    if (!R || !host) return;
+    const f = (v, d = 2) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(d).replace(".", ",");
+    const IMPACT = 6;                                   // example impact speed (m/s)
+    const crashAt = (v) => R.r_crash - R.r_crash_speed * v;
+    const offAt = (v) => R.r_offroad - R.r_offroad_speed * v;
+    const vTop = 10;
+    const route = 2 * R.L;                              // straight through the crossing, entry to exit (m)
+    const lo = Math.min(crashAt(vTop), offAt(vTop), R.r_wrong_exit, R.r_timeout), hi = Math.max(R.r_exit, R.r_progress * 100);
+    const span = hi - lo, zero = (-lo / span) * 100;
+    const x = (v) => (v / span) * 100;                  // value -> % of track width
+    const bar = (a, b, cls) => {                        // bar from a to b (values)
+      const l = Math.min(a, b), w = Math.abs(b - a);
+      return `<i class="rw-bar ${cls}" style="left:${zero + x(l)}%;width:${x(w)}%"></i>`;
+    };
+    const row = (label, sub, bars, valTxt, sign) =>
+      `<div class="rw-row"><div class="lbl">${label}${sub ? `<small>${sub}</small>` : ""}</div><div class="rw-track" style="--zero:${zero}%">${bars}</div><div class="val ${sign}">${valTxt}</div></div>`;
+    const crashSame = R.r_crash === R.r_offroad && R.r_crash_speed === R.r_offroad_speed;
+    const hard = (label, at) => row(label, `ab ${f(at(0), 1)}, bei Tempo ${vTop} m/s ${f(at(vTop), 1)}`,
+      bar(0, at(0), "neg") + bar(at(0), at(vTop), "neg soft"), f(at(IMPACT), 1) + "*", "neg");
+    const rows = [
+      row("Richtige Ausfahrt erreicht", "", bar(0, R.r_exit, "pos"), f(R.r_exit, 1), "pos"),
+      row("Dem Ziel näher kommen", `Lernhilfe: ${f(R.r_progress, 2)} je Meter`, bar(0, R.r_progress * 100, "help"), `${f(R.r_progress * 100, 1)} je 100 m`, "pos"),
+      row("Zeit auf der Straße", "kleine Strafe je Sekunde", bar(0, -R.r_time * 10, "neg"), `${f(-R.r_time * 10, 1)} je 10 s`, "neg"),
+      row("Falsche Ausfahrt", "", bar(0, R.r_wrong_exit, "neg"), f(R.r_wrong_exit, 1), "neg"),
+      row("Zu lange unterwegs", `länger als ${Math.round(R.max_age)} s`, bar(0, R.r_timeout, "neg"), f(R.r_timeout, 1), "neg"),
+      crashSame ? hard("Unfall oder von der Straße abgekommen", crashAt) : hard("Unfall", crashAt) + hard("Von der Straße abgekommen", offAt),
+    ];
+    // example trips (all numbers derived from the same rules)
+    const tSec = route / R.spawn_speed;
+    const trip = (title, lines) => {
+      const tot = lines.reduce((a, l) => a + l[1], 0);
+      return `<div class="card"><h3>${title}</h3>${lines.map((l) => `<div class="ln"><span>${l[0]}</span><span class="${l[1] >= 0 ? "pos" : "neg"}">${f(l[1])}</span></div>`).join("")}
+        <div class="ln tot"><span>Summe</span><span class="${tot >= 0 ? "pos" : "neg"}">${f(tot)}</span></div></div>`;
+    };
+    const half = 0.5;
+    const ex = trip("Eine normale Fahrt", [
+      ["Unterwegs dem Ziel näher gekommen", R.r_progress * route],
+      ["Richtige Ausfahrt erreicht", R.r_exit],
+      [`Zeit (ca. ${Math.round(tSec)} s)`, -R.r_time * tSec],
+    ]) + trip(`Unfall mit ${IMPACT} m/s`, [
+      ["Halbe Strecke geschafft", R.r_progress * route * half],
+      [`Unfall (Aufprall ${IMPACT} m/s)`, crashAt(IMPACT)],
+      [`Zeit (ca. ${Math.round(tSec * half)} s)`, -R.r_time * tSec * half],
+    ]);
+    host.innerHTML = `${rows.join("")}<div class="rw-ex">${ex}</div>`;
+    $("reward-note").innerHTML = `Grün = Pluspunkte, orange = Minuspunkte. *Beim Unfall zählt das Tempo des Aufpralls: je schneller, desto teurer (blasser Teil des Balkens). Bei einem Unfall zahlen <b>alle beteiligten Autos</b>. Die Zeitstrafe und die Strafe fürs Trödeln gibt es, weil Stehenbleiben sonst am sichersten wäre.`;
+  }
+
   function initLernen() {
+    drawReward();
     const methods = Object.keys(D.timelines).sort((a, b) => (a === "es" ? -1 : 1) - (b === "es" ? -1 : 1));
     let method = methods.includes(mainMethod) ? mainMethod : methods[0];
     let idx = 0, extra = null; // extra: a dead-end run shown instead of the timeline

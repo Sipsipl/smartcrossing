@@ -230,3 +230,30 @@ ol.phases .num { display: inline-grid; place-items: center; width: 19px; height:
 .chart .band { fill: var(--fg); opacity: 0.045; }
 .chart .band-label { font-size: 12px; font-weight: 600; }
 ol.phases li.world { display: block; font-weight: 650; margin-top: 6px; color: var(--muted); }
+
+/* reward scale (lernen.html) */
+.reward { max-width: 720px; }
+#reward-note { max-width: 70ch; }
+.rw-row { display: grid; grid-template-columns: minmax(0, 15em) 1fr 8em; gap: 4px 10px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.rw-row .lbl { font-size: 14px; }
+.rw-row .lbl small { display: block; color: var(--muted); font-size: 12px; }
+.rw-row .val { font-family: var(--font-num); font-size: 13px; text-align: right; white-space: nowrap; }
+.rw-track { position: relative; height: 16px; }
+.rw-track::before { content: ""; position: absolute; top: -3px; bottom: -3px; left: var(--zero); width: 1px; background: var(--muted); }
+.rw-bar { position: absolute; top: 2px; height: 12px; border-radius: 3px; }
+.rw-bar.pos { background: var(--good); } .rw-bar.neg { background: var(--warn); }
+.rw-bar.soft { opacity: 0.45; }
+.rw-bar.help { background: repeating-linear-gradient(45deg, var(--good) 0 3px, transparent 3px 6px); border: 1px solid var(--good); }
+.rw-row .val.pos { color: var(--good); } .rw-row .val.neg { color: var(--warn); }
+.rw-ex { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; margin-top: 14px; }
+.rw-ex .card { padding: 10px 14px; }
+.rw-ex h3 { margin: 0 0 6px; font-size: 15px; }
+.rw-ex .ln { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; padding: 2px 0; }
+.rw-ex .ln span:last-child { font-family: var(--font-num); }
+.rw-ex .ln.tot { border-top: 1px solid var(--fg); margin-top: 4px; padding-top: 4px; font-weight: 700; }
+.rw-ex .pos { color: var(--good); } .rw-ex .neg { color: var(--warn); }
+@media (max-width: 560px) {
+  .rw-row { grid-template-columns: 1fr 8em; }
+  .rw-row .rw-track { grid-column: 1 / -1; grid-row: 2; }
+  .rw-row .val { grid-row: 1; grid-column: 2; }
+}

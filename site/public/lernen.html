@@ -6,7 +6,7 @@
 <title>Wie lernen die Autos? – Smart Crossing</title>
 <meta name="description" content="Belohnung, Strafe, Wiederholung: wie selbstfahrende Autos durch Evolution und PPO lernen – mit Zeitreise durchs Training.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/site.css?v=fe709022">
+<link rel="stylesheet" href="css/site.css?v=aa922d2b">
 </head>
 <body data-page="lernen">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker></defs></svg>
@@ -51,13 +51,9 @@ Daraus wird nach und nach ein Gehirn, das fahren kann.</p>
 <path class="arrow" d="M272 397 H298 V52 H278" marker-end="url(#ah)"/></svg>
 
 <h2>Die Punkte (Belohnung)</h2>
-<p>Die Autos bekommen nur für das <b>Ergebnis</b> Punkte, nicht für einen bestimmten Fahrstil. Niemand sagt „fahr rechts“ oder „bremse vor der Kurve“:</p>
-<ul class="plain">
-  <li><b>Angekommen</b> an der richtigen Ausfahrt: Pluspunkt.</li>
-  <li><b>Unfall</b> oder <b>von der Straße abgekommen</b>: kräftiger Minuspunkt.</li>
-  <li><b>Zu lange unterwegs</b> oder Autos, die vor der Kreuzung <b>warten müssen</b>: Minuspunkte. Sonst lernen die Autos, dass Stehenbleiben am sichersten ist (ist wirklich passiert, siehe unten).</li>
-  <li>Als Lernhilfe gibt es ein paar kleine Punkte für jeden Meter, den ein Auto seiner Ausfahrt näher kommt.</li>
-</ul>
+<p>Die Autos bekommen nur für das <b>Ergebnis</b> Punkte, nie für einen Fahrstil. Niemand sagt „fahr rechts“ oder „bremse vor der Kurve“, es gibt keine Spuren und keine Regeln. Was funktioniert, finden die Autos selbst heraus.</p>
+<div id="reward" class="reward" aria-label="Punkteskala der Belohnung"></div>
+<p class="muted small" id="reward-note"></p>
 
 <h2>Zwei Lernmethoden</h2>
 <div class="two">
@@ -151,11 +147,11 @@ Daraus wird nach und nach ein Gehirn, das fahren kann.</p>
 <p><a href="vergleich.html">Weiter: Wie gut sind sie im Vergleich? →</a></p>
 <footer>Smart Crossing – ein Hobbyprojekt. Alles läuft direkt in deinem Browser, es werden keine Daten gesammelt. Stand: 2026-10-12. <a href="https://github.com/Sipsipl/smartcrossing">Code auf GitHub</a></footer>
 </div>
-<script src="data/site-data.js?v=fe709022"></script>
-<script src="js/sim-config.js?v=fe709022"></script>
-<script src="js/sim.js?v=fe709022"></script>
-<script src="js/crossing.js?v=fe709022"></script>
-<script src="js/charts.js?v=fe709022"></script>
-<script src="js/pages.js?v=fe709022"></script>
+<script src="data/site-data.js?v=aa922d2b"></script>
+<script src="js/sim-config.js?v=aa922d2b"></script>
+<script src="js/sim.js?v=aa922d2b"></script>
+<script src="js/crossing.js?v=aa922d2b"></script>
+<script src="js/charts.js?v=aa922d2b"></script>
+<script src="js/pages.js?v=aa922d2b"></script>
 </body>
 </html>

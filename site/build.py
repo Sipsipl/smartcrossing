@@ -611,6 +611,16 @@ def write_snapshot(found: dict, used: list[str], chain_runs: list[str]):
     print(f"  snapshot: {len(keep)} brains + manifest in {SNAPSHOT.relative_to(ROOT)}/ ({size / 1024:.0f} KiB)")
 
 
+REWARD_KEYS = ("r_exit", "r_wrong_exit", "r_crash", "r_crash_speed", "r_offroad", "r_offroad_speed", "r_timeout",
+               "r_progress", "r_time", "r_queue", "crash_cost_speed", "L", "v_max", "spawn_speed", "max_age")
+
+
+def reward_of(train_cfg: dict) -> dict:
+    """The reward rules (and the few world numbers an example trip needs) a policy was trained with."""
+    d = SimConfig()
+    return {k: train_cfg.get(k, getattr(d, k)) for k in REWARD_KEYS}
+
+
 def choose(found: dict, main: list[str], quick: dict) -> dict:
     """Best checkpoint per method by quick bench score (exit-weighted throughput at 0.15)."""
     best = {}
@@ -899,6 +909,8 @@ def main(argv=None):
         "baselines": baselines,  # in the main brain's world
         "baselines_by_world": baselines_by_world,  # world ("wide" / "narrow") -> {light, reservation}
         "main_world": main_world,
+        # reward rules the main brain was trained with (from its checkpoint's training cfg; drawn on /lernen)
+        "reward": reward_of(found[main_id]["policy"].get("cfg") or {}) if main_id else None,
         "demands": DEMANDS,
         "bench_setup": {"envs": BENCH_ENVS, "seconds": BENCH_SECONDS, "seed": BENCH_SEED},
     }
