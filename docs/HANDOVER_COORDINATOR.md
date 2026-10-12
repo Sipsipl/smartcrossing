@@ -91,6 +91,9 @@ Erledigt (2026-10-11): lokale Einrichtung, GPU-Training (Roadmap C), Runde 1 in 
 ## Bekannte Stolpersteine
 - Das monatliche Ausgabenlimit kann Subagents mitten in der Arbeit abbrechen; Zwischenstände
   deshalb oft committen und abgebrochene Agents mit Kontext fortsetzen.
+- Windows: ein lokaler Webserver (`python -m http.server` in `site/public`, z. B. von einem
+  Browser-Check) sperrt das Verzeichnis; `site/build.py` bricht dann mitten im Löschen ab. Vor dem
+  Build solche Server beenden und vor jedem Commit `git status` prüfen.
 - Mehrere CPU-lastige Jobs gleichzeitig (Training + Website-Build) überbuchen die Kerne.
 - Alte Checkpoints laufen über `smartcrossing/policy_compat.py`; bei Änderungen an
   Beobachtung/Aktion prüfen, dass die Website-Gehirne weiter laden (`site/build.py`, Tests).
