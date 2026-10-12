@@ -725,3 +725,20 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
   Sheets (runs/round2_eval/B_s1_*): cars queue behind standing cars on the arms instead of driving into them;
   remaining crashes are in the box (entering tightly one after another), long delay at 0.3 (mean 15 s).
 - **Next**: confirm B vs C with seed 2; longer B training; gate still < 95%; crashes in the box -> Roadmap B.
+
+## Round 3: second seeds for B and C, B continued (2026-10-12)
+- r2_B_s2, r2_C_s2: same configs as round 2 with seed 2 (640 it; ~30-35 min each, incl. a ~10 min stall
+  when other agents' pytest runs used the GPU). r3_B_long: r2_B_s1 continued to it 1099 (only 460 it,
+  6 min: the planned ~30 min were not used; --iters is an absolute cap with --init).
+- Result (same protocol as round 2; results/round3_eval.jsonl; crash+off per 1000 / throughput per min):
+
+  | | @0.15 | @0.3 | gate safe / stop |
+  |---|---|---|---|
+  | B (s1, s2) | 45 (31, 60), 29.0 | 116 (106, 126), 31.8 | 0.81 / 0.76 |
+  | C (s1, s2) | 56 (52, 59), 30.2 | 169 (166, 171), 35.1 | 0.78 / 0.73 |
+  | r3_B_long | 39, 31.2 | 122, 36.5 | 0.88 / 0.74 |
+
+- Reading: own-speed crash cost (C) gives more crashes at 0.3 on both seeds (169 vs 116), slightly more
+  throughput; not adopted (recommendation; owner decides). B's seed spread is large (31 vs 60 @0.15):
+  r2_B_s1 is partly a lucky seed. 460 more iterations did not lower crashes (gate slightly better).
+  Best brain stays r2_B_s1 (results/round2_best.npz). Remaining crashes are in the box at 0.3.
