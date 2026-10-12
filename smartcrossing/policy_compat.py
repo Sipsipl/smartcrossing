@@ -67,6 +67,8 @@ def adapt_inputs(d: dict, cfg: SimConfig) -> dict:
     n_in, want = d["sizes"][0], obs_dim(cfg)
     if n_in == want:
         return d
+    if "arch" in d:  # set encoders exist only with the current layout
+        raise ValueError(f"set-encoder policy has {n_in} inputs; the sim gives {want}")
     cur = obs_keys(cfg)
     for legacy in LEGACY_LAYOUTS:
         old = obs_keys(cfg, legacy["own"], legacy["nb"])

@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from smartcrossing import policy_set
 from smartcrossing.policy import PolicyDriver, default_in_scale, export_json, init_params, layer_sizes, save_npz
 from smartcrossing import sim as simmod
 from smartcrossing.sim import LEFT, NARROW, RIGHT, STRAIGHT, Sim, SimConfig, act_dim, js_constants
@@ -298,6 +299,10 @@ def parity(tmp_path_factory):
     # the old checkpoints' interface and world: two lamps, acceleration feature, full-width spawning, no wrecks
     legacy = dict(n_signal=2, brake_light=False, spawn_right=False, wreck_time=0.0)
     cases += trajectory_cases(8, dataclasses.replace(cfg, demand=0.4, **legacy), n_steps=80)
+    # more neighbour slots (set-encoder interface)
+    cfg8 = dataclasses.replace(cfg, demand=0.6, n_neighbours=8)
+    k8 = trajectory_cases(9, cfg8, n_steps=80)
+    cases += k8
     cases += edge_cases(cfg)
     cases += edge_cases(dataclasses.replace(cfg, **NARROW), tag="narrow_")
     cases += edge_cases(dataclasses.replace(cfg, **legacy), tag="legacy_")
@@ -320,6 +325,28 @@ def parity(tmp_path_factory):
     driver = PolicyDriver(dsim, params, sizes, mute=[False, True], in_scale=scale)
     expect_drv = driver.act()[0]
 
+    # set-encoder policies (policy_set.py), one per pooling, on K = 8 observations; a driver mixing
+    # a set brain (group 0) and an MLP of the same interface (group 1, muted)
+    scale8 = default_in_scale(cfg8)
+    sizes8 = layer_sizes(cfg8)
+    obs8 = np.concatenate([c["expect"]["obs"] for c in k8])
+    obs8 = np.concatenate([obs8[np.abs(obs8).sum(1) > 0], np.zeros((1, obs8.shape[1]))])
+    set_pols, expect_set = [], []
+    for i, pool in enumerate(policy_set.POOLS):
+        arch = policy_set.make_arch(cfg8, hidden=(16, 12), phi=(10, 8), pool=pool, heads=2, dk=4, dv=3)
+        p = policy_set.init_params(arch, 10 + i, out_scale=1.0)
+        save_npz(tmp / f"set{i}.npz", p, sizes8, cfg8, in_scale=scale8, arch=arch)
+        set_pols.append(export_json(tmp / f"set{i}.npz"))
+        expect_set.append(np.tanh(policy_set.forward(p, arch, obs8 * scale8)))
+    p_mlp8 = init_params(sizes8, 7, out_scale=1.0)
+    save_npz(tmp / "mlp8.npz", p_mlp8, sizes8, cfg8, in_scale=scale8)
+    dsim8 = Sim(cfg8, 1, seed=4, group_probs=[0.5, 0.5])
+    for _ in range(120):
+        dsim8.step(np.tile([0.4, 0.0, 0.5][: act_dim(cfg8)], (cfg8.n_slots, 1))[None])
+    drv8 = PolicyDriver.load(f"{tmp / 'set0.npz'}+{tmp / 'mlp8.npz'}", dsim8, mute=[False, True])
+    expect_drv8 = drv8.act()[0]
+    pols8 = [set_pols[0], export_json(tmp / "mlp8.npz")]
+
     payload = {
         "cases": [{k: c[k] for k in ("name", "cfg", "state", "action")} for c in cases],
         "policies": [
@@ -328,6 +355,13 @@ def parity(tmp_path_factory):
                 "policy": pols[1],
                 "obs": obs[:5].tolist(),
                 "driver": {"cfg": cfg_dict(dsim.cfg), "state": export_state(dsim), "policies": pols, "mute": [False, True]},
+            },
+            *[{"policy": sp, "obs": obs8.tolist()} for sp in set_pols[1:]],
+            {
+                "policy": set_pols[0],
+                "obs": obs8.tolist(),
+                "driver": {"cfg": cfg_dict(dsim8.cfg), "state": export_state(dsim8), "policies": pols8,
+                           "mute": [False, True]},
             },
         ],
     }
@@ -340,7 +374,9 @@ def parity(tmp_path_factory):
     from smartcrossing.policy import forward
 
     expect_pol = [forward(params[0], obs, sizes, scale), forward(params[1], obs[:5], sizes, scale)]
-    return {"cases": cases, "js": js, "expect_pol": expect_pol, "expect_drv": expect_drv, "dsim": dsim}
+    expect_pol += [*expect_set[1:], expect_set[0]]
+    return {"cases": cases, "js": js, "expect_pol": expect_pol, "expect_drv": expect_drv, "dsim": dsim,
+            "expect_drv8": expect_drv8, "dsim8": dsim8}
 
 
 def test_defaults_match_simconfig(parity):
@@ -440,3 +476,14 @@ def test_policy_parity(parity):
     np.testing.assert_allclose(acted[alive], parity["expect_drv"][alive], atol=TOL)
     muted = alive & (parity["dsim"].group[0] == 1)
     assert muted.any() and np.all(acted[muted, 2:] == 0)
+
+
+def test_set_policy_parity(parity):
+    """Set-encoder forward (all poolings) and a mixed set / MLP driver on K = 8 observations."""
+    js = parity["js"]["policies"]
+    assert len(js) == 2 + len(policy_set.POOLS) == len(parity["expect_pol"])
+    alive = parity["dsim8"].alive[0]
+    acted = np.array(js[-1]["acted"])
+    groups = parity["dsim8"].group[0][alive]
+    assert alive.sum() >= 4 and len(set(groups)) == 2
+    np.testing.assert_allclose(acted[alive], parity["expect_drv8"][alive], atol=TOL)

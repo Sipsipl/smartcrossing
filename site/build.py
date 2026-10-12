@@ -273,6 +273,9 @@ def discover(world: str = "any") -> dict:
             except Exception as e:  # incompatible / broken checkpoint: skip loudly
                 print(f"  skip {f.relative_to(ROOT)}: {e}")
                 continue
+            if "layers" not in pol:  # set encoder (policy_set.py): sim.js runs it, brain view / snapshot not yet
+                print(f"  skip {f.relative_to(ROOT)}: set-encoder brains are not published on the site yet")
+                continue
             meta = ckpt_meta(f)
             if world != "any" and world_of(physics_of(meta["cfg"])) != world:
                 continue
