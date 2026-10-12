@@ -38,7 +38,6 @@ from .sim import (
     DONE_TIMEOUT,
     DONE_WRONG,
     GOAL_SCALE,
-    K_NEIGHBOURS,
     LEFT,
     NEIGHBOUR_RANGE,
     POS_SCALE,
@@ -297,7 +296,7 @@ class TorchSim:
         d = torch.hypot(ddx, ddy)
         valid = (self.alive | self.wreck)[:, None, :] & (d < cfg.neighbour_vis) & ~self._eye
         d = torch.where(valid, d, math.inf)
-        K = min(K_NEIGHBOURS, N)
+        K = min(cfg.n_neighbours, N)
         idx = torch.topk(d, K, dim=-1, largest=False, sorted=True).indices  # (B, N, K)
 
         def g(a):  # gather neighbour attribute a (B, N) -> (B, N, K)
@@ -332,6 +331,8 @@ class TorchSim:
                 sg = torch.zeros(B, N, K, ns, dtype=self.dtype, device=self.device)
             f = torch.cat([f, sg], -1)
         f = f * present[..., None]
+        if K < cfg.n_neighbours:  # fewer slots than neighbour blocks: the rest stay empty
+            f = torch.cat([f, f.new_zeros(B, N, cfg.n_neighbours - K, f.shape[-1])], 2)
         obs = torch.cat([own, f.reshape(B, N, -1)], -1)
         return torch.where(self.alive[..., None], obs, 0.0)
 

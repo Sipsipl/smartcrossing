@@ -53,7 +53,7 @@ LEGACY_LAYOUTS = [
 
 def neighbour_keys(cfg: SimConfig, nb: list[str] | None = None) -> list[str]:
     keys = (nb or nb_keys(cfg)) + [f"lamp{q + 1}" for q in range(cfg.n_signal)]
-    return [f"n{k + 1}_{f}" for k in range(simmod.K_NEIGHBOURS) for f in keys]
+    return [f"n{k + 1}_{f}" for k in range(cfg.n_neighbours) for f in keys]
 
 
 def obs_keys(cfg: SimConfig, own: list[str] | None = None, nb: list[str] | None = None) -> list[str]:
@@ -67,6 +67,8 @@ def adapt_inputs(d: dict, cfg: SimConfig) -> dict:
     n_in, want = d["sizes"][0], obs_dim(cfg)
     if n_in == want:
         return d
+    if "arch" in d:  # set encoders exist only with the current layout
+        raise ValueError(f"set-encoder policy has {n_in} inputs; the sim gives {want}")
     cur = obs_keys(cfg)
     for legacy in LEGACY_LAYOUTS:
         old = obs_keys(cfg, legacy["own"], legacy["nb"])
@@ -119,8 +121,8 @@ def load_adapted_policy(path: str | Path) -> dict:
 # from before 2026-10-11 have 2 lamps and see the neighbours' acceleration. Traffic / world settings
 # that are not part of the interface (spawn_right, wreck_time, demand) are NOT taken from a checkpoint.
 LEGACY_INTERFACE = {"neighbour_vis": 30.0, "speed_control": False, "n_signal": 2, "brake_light": False,
-                    "L": 50.0, "W": 3.5, "Rc": 6.0, "a_lat_max": 0.0, "v_reverse": 0.0}
-INTERFACE_KEYS = ("n_signal", "brake_light")  # what changes the observation / action sizes
+                    "n_neighbours": simmod.K_NEIGHBOURS, "L": 50.0, "W": 3.5, "Rc": 6.0, "a_lat_max": 0.0, "v_reverse": 0.0}
+INTERFACE_KEYS = ("n_signal", "brake_light", "n_neighbours")  # what changes the observation / action sizes
 
 
 def interface_cfg(train_cfg: dict) -> SimConfig:
@@ -129,7 +131,7 @@ def interface_cfg(train_cfg: dict) -> SimConfig:
 
 
 PHYSICS_KEYS = ["v_max", "acc_max", "brake_max", "kappa_max", "kappa_rate", "neighbour_vis", "speed_control",
-                "a_lat_max", "v_reverse", "L", "W", "Rc", "n_signal", "brake_light"]
+                "a_lat_max", "v_reverse", "L", "W", "Rc", "n_signal", "brake_light", "n_neighbours"]
 # for the browser also kappa_rate: absent = trained before the steering-rate limit (steering acts instantly)
 LEGACY_PHYSICS = {**LEGACY_INTERFACE, "kappa_rate": 1e6}
 
@@ -143,7 +145,7 @@ def physics_of(train_cfg: dict) -> dict:
         if k not in fields:
             continue
         v = train_cfg[k] if k in train_cfg else LEGACY_PHYSICS.get(k, getattr(SimConfig, k))
-        out[k] = int(v) if k == "n_signal" else bool(v) if k == "brake_light" else float(v)
+        out[k] = int(v) if k in ("n_signal", "n_neighbours") else bool(v) if k == "brake_light" else float(v)
     return out
 
 

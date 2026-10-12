@@ -13,6 +13,10 @@ autograd, same Adam, same clipping, same minibatch permutation drawn from the nu
 so in float64 it matches the numpy update to rounding (tests/test_ppo_torch.py). float32 on
 cuda is the fast path. One host sync per minibatch (the target-KL early stop needs it).
 The batch may be numpy arrays (rollout workers) or device tensors (rollout_torch.py).
+
+Set-encoder networks (``--arch set``, policy_set.py): ``set_forward`` is the torch twin of
+``policy_set.forward``; their gradient comes from autograd (``net_forward`` / ``net_backward``
+give both architectures the same interface), everything else (losses, clipping, Adam) is shared.
 """
 
 import os
@@ -20,6 +24,7 @@ import os
 import numpy as np
 import torch
 
+from . import policy_set
 from .ppo_common import LOG2PI
 
 
@@ -58,6 +63,61 @@ def mlp_backward(p, sizes, hs, gout):
     for gW, gb in reversed(grads):
         flat += [gW.reshape(-1), gb]
     return torch.cat(flat)
+
+
+def set_forward(p, arch, x):
+    """Torch twin of policy_set.forward (linear output); graph-capturable (no host syncs)."""
+    P = policy_set.unpack(p, arch)
+    E, K, F = arch["n_ego"], arch["K"], arch["F"]
+    lead = x.shape[:-1]
+    ego = torch.cat([x[..., :E], x[..., E + K * F :]], -1)
+    nb = x[..., E : E + K * F].reshape(*lead, K, F)
+    mask = nb[..., arch["present"]] != 0
+    h = nb
+    for i in range(len(arch["phi"])):
+        h = torch.tanh(h @ P[f"phi{i}.W"] + P[f"phi{i}.b"])
+    if arch["pool"] == "attn":
+        H, dk, dv = arch["heads"], arch["dk"], arch["dv"]
+        q = (ego @ P["q.W"] + P["q.b"]).reshape(*lead, H, dk)
+        k = (h @ P["k.W"]).reshape(*lead, K, H, dk)
+        v = (h @ P["v.W"] + P["v.b"]).reshape(*lead, K, H, dv)
+        sc = torch.einsum("...hd,...khd->...hk", q, k) / float(np.sqrt(dk))
+        m = mask[..., None, :]
+        sc = torch.where(m, sc, policy_set.NEG)
+        w = torch.exp(sc - sc.amax(-1, keepdim=True).detach()) * m
+        w = w / torch.clamp(w.sum(-1, keepdim=True), min=1e-30)
+        pooled = torch.einsum("...hk,...khd->...hd", w, v).reshape(*lead, H * dv)
+    elif arch["pool"] == "mean":
+        mf = mask.to(h.dtype)
+        pooled = (h * mf[..., None]).sum(-2) / torch.clamp(mf.sum(-1, keepdim=True), min=1)
+    else:
+        mx = torch.where(mask[..., None], h, -2.0).amax(-2)
+        pooled = torch.where(mask.any(-1, keepdim=True), mx, 0.0)
+    z = torch.cat([ego, pooled], -1)
+    n = len(arch["hidden"])
+    for i in range(n + 1):
+        z = z @ P[f"trunk{i}.W"] + P[f"trunk{i}.b"]
+        if i < n:
+            z = torch.tanh(z)
+    return z
+
+
+def net_forward(p, sizes, x, arch=None):
+    """(output, context for net_backward) of an MLP (``sizes``) or a set encoder (``arch``)."""
+    if arch is None:
+        return mlp_forward(p, sizes, x)
+    leaf = p.detach().requires_grad_(True)
+    with torch.enable_grad():
+        out = set_forward(leaf, arch, x)
+    return out.detach(), (leaf, out)
+
+
+def net_backward(p, sizes, ctx, gout, arch=None):
+    """Gradient of sum(gout * output) wrt the flat params."""
+    if arch is None:
+        return mlp_backward(p, sizes, ctx, gout)
+    leaf, out = ctx
+    return torch.autograd.grad(out, leaf, gout)[0]
 
 
 class _Adam:
@@ -114,6 +174,7 @@ class TorchPPO:
         pa, pc, ls = T(actor.p), T(critic.p), T(logstd)
         oa, oc = _Adam(opt_a, self.dev, self.dt), _Adam(opt_c, self.dev, self.dt)
         sa, sc = actor.sizes, critic.sizes
+        arch_a, arch_c = getattr(actor, "arch", None), getattr(critic, "arch", None)
         clip_hi, clip_lo = 1 + a.clip, 1 - a.clip
         stats = {"kl": [], "clipfrac": [], "vloss": [], "pg": []}
         mb = int(np.ceil(n / a.minibatches))
@@ -125,7 +186,7 @@ class TorchPPO:
                 m = len(idx)
                 adv = adv_all[idx]
                 adv = (adv - adv.mean()) / (adv.std(correction=0) + 1e-8)
-                mu, hs = mlp_forward(pa, sa, obs[idx])
+                mu, hs = net_forward(pa, sa, obs[idx], arch_a)
                 std = torch.exp(ls)
                 z = (u[idx] - mu) / std
                 lp = (-0.5 * z**2 - ls - 0.5 * LOG2PI) @ mask
@@ -134,13 +195,13 @@ class TorchPPO:
                 g_lp = -(adv * ratio * active) / m
                 g_mu = g_lp[:, None] * (z / std) * mask
                 g_ls = (g_lp[:, None] * (z**2 - 1.0) * mask).sum(0) - a.ent * mask
-                ga = _clip_norm(mlp_backward(pa, sa, hs, g_mu), a.max_grad)
+                ga = _clip_norm(net_backward(pa, sa, hs, g_mu, arch_a), a.max_grad)
                 pa = pa - oa.step(ga)
                 ls = torch.clamp(ls - a.lr_std * torch.clamp(g_ls, -1, 1), a.logstd_min, 0.5)
                 # critic
-                v, hc = mlp_forward(pc, sc, cin[idx])
+                v, hc = net_forward(pc, sc, cin[idx], arch_c)
                 err = v[:, 0] - ret_all[idx]
-                gc = _clip_norm(mlp_backward(pc, sc, hc, (err / m)[:, None]), a.max_grad)
+                gc = _clip_norm(net_backward(pc, sc, hc, (err / m)[:, None], arch_c), a.max_grad)
                 pc = pc - oc.step(gc)
                 st = torch.stack([
                     torch.mean((ratio - 1) - torch.log(ratio)),

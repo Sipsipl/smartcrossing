@@ -610,7 +610,10 @@
   SCX.Crossing = Crossing;
 
   /** Name of an observation interface (site/obs_labels.py interface_key), e.g. "1L-brake". */
-  SCX.ifaceKey = (cfg) => `${cfg.n_signal}L-${cfg.brake_light ? "brake" : "acc"}`;
+  SCX.ifaceKey = (cfg) => {
+    const k = cfg.n_neighbours || SC.K_NEIGHBOURS;
+    return `${cfg.n_signal}L-${cfg.brake_light ? "brake" : "acc"}` + (k !== SC.K_NEIGHBOURS ? `-K${k}` : "");
+  };
 
   /** Label metadata (SC_DATA.layouts, one per observation interface) for a sim config; without
    *  cfg: the main brain's (SC_DATA.layout). */

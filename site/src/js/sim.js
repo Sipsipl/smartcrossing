@@ -33,7 +33,9 @@
 
   /** Features per neighbour before its lamps: brake light + hazard (cfg.brake_light) or the legacy acceleration. */
   const nbFeatures = (cfg) => (cfg.brake_light ? NB_FEATURES : NB_FEATURES_LEGACY);
-  const obsDim = (cfg) => OBS_DIM + K_NEIGHBOURS * (nbFeatures(cfg) + cfg.n_signal);
+  /** Neighbour slots in the observation (cfg.n_neighbours; 4 for every checkpoint before the set encoder). */
+  const nNeighbours = (cfg) => cfg.n_neighbours || K_NEIGHBOURS;
+  const obsDim = (cfg) => OBS_DIM + nNeighbours(cfg) * (nbFeatures(cfg) + cfg.n_signal);
   /** Steps a wreck stays (sim.wreck_steps). */
   const wreckSteps = (cfg) => Math.round(cfg.wreck_time / cfg.dt);
 
@@ -270,7 +272,7 @@
           if (d < cfg.neighbour_vis) cand.push([d, j, nx, ny]);
         }
         cand.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-        for (let k = 0; k < Math.min(K_NEIGHBOURS, cand.length); k++) {
+        for (let k = 0; k < Math.min(nNeighbours(cfg), cand.length); k++) {
           const [, j, nx, ny] = cand[k];
           const p = o + OBS_DIM + k * blk;
           const nth = this.th[j] - th;
@@ -610,8 +612,118 @@
   }
 
   // ------------------------------------------------------------------ policy
+  /** (name, shape) of the parameter blocks of a set encoder, in flat order (policy_set.param_shapes). */
+  function setParamShapes(ar) {
+    const out = [], dims = [ar.F, ...ar.phi];
+    for (let i = 0; i + 1 < dims.length; i++) out.push([`phi${i}.W`, [dims[i], dims[i + 1]]], [`phi${i}.b`, [dims[i + 1]]]);
+    const e = ar.phi[ar.phi.length - 1];
+    if (ar.pool === "attn") {
+      const H = ar.heads, qin = ar.n_ego + ar.n_extra;
+      out.push(["q.W", [qin, H * ar.dk]], ["q.b", [H * ar.dk]], ["k.W", [e, H * ar.dk]], ["v.W", [e, H * ar.dv]],
+        ["v.b", [H * ar.dv]]);
+    }
+    const pooled = ar.pool === "attn" ? ar.heads * ar.dv : e;
+    const ts = [ar.n_ego + ar.n_extra + pooled, ...ar.hidden, ar.n_out];
+    for (let i = 0; i + 1 < ts.length; i++) out.push([`trunk${i}.W`, [ts[i], ts[i + 1]]], [`trunk${i}.b`, [ts[i + 1]]]);
+    return out;
+  }
+
+  /** Set-encoder policy (policy_set.py; export_json gives its arch + flat params). */
+  function loadSetPolicy(d) {
+    const ar = d.arch, flat = Float64Array.from(d.params), P = {};
+    let i = 0;
+    for (const [name, shape] of setParamShapes(ar)) {
+      const n = shape.reduce((a, b) => a * b, 1);
+      P[name] = flat.subarray(i, i + n);
+      i += n;
+    }
+    if (i !== flat.length) throw new Error(`set policy: ${flat.length} params, arch needs ${i}`);
+    const nin = ar.n_ego + ar.K * ar.F + ar.n_extra;
+    const inScale = d.in_scale ? Float64Array.from(d.in_scale) : null;
+    if (inScale && inScale.length !== nin) throw new Error("in_scale length mismatch");
+    return { kind: "set", arch: ar, P, nin, sizes: d.sizes || [nin, ...ar.hidden, ar.n_out], inScale, cfg: d.cfg || {} };
+  }
+
+  /** y = x W + b for a row-major W (nin x nout); x is a plain array / typed array of length nin. */
+  function affine(x, W, b, nin, nout) {
+    const y = new Float64Array(nout);
+    for (let o = 0; o < nout; o++) {
+      let acc = 0.0;
+      for (let i = 0; i < nin; i++) acc += x[i] * W[i * nout + o];
+      y[o] = acc + (b ? b[o] : 0.0);
+    }
+    return y;
+  }
+
+  /** Set-encoder forward on one (scaled) input row x: linear output (policy_set.forward). */
+  function setForwardRow(pol, x) {
+    const ar = pol.arch, P = pol.P, E = ar.n_ego, K = ar.K, F = ar.F;
+    const ego = new Float64Array(E + ar.n_extra);
+    for (let i = 0; i < E; i++) ego[i] = x[i];
+    for (let i = 0; i < ar.n_extra; i++) ego[E + i] = x[E + K * F + i];
+    const hs = [], present = [];
+    for (let k = 0; k < K; k++) {
+      let h = x.subarray(E + k * F, E + (k + 1) * F);
+      present.push(h[ar.present] !== 0);
+      let nin = F;
+      for (let l = 0; l < ar.phi.length; l++) {
+        h = affine(h, P[`phi${l}.W`], P[`phi${l}.b`], nin, ar.phi[l]).map(Math.tanh);
+        nin = ar.phi[l];
+      }
+      hs.push(h);
+    }
+    const e = ar.phi[ar.phi.length - 1];
+    let pooled;
+    if (ar.pool === "attn") {
+      const H = ar.heads, dk = ar.dk, dv = ar.dv;
+      const q = affine(ego, P["q.W"], P["q.b"], ego.length, H * dk);
+      const ks = hs.map((h) => affine(h, P["k.W"], null, e, H * dk));
+      const vs = hs.map((h) => affine(h, P["v.W"], P["v.b"], e, H * dv));
+      pooled = new Float64Array(H * dv);
+      const sc = 1 / Math.sqrt(dk);
+      for (let hd = 0; hd < H; hd++) {
+        const s = new Float64Array(K);
+        let mx = -Infinity;
+        for (let k = 0; k < K; k++) {
+          let acc = 0.0;
+          for (let d = 0; d < dk; d++) acc += q[hd * dk + d] * ks[k][hd * dk + d];
+          s[k] = present[k] ? acc * sc : -1e9;
+          mx = Math.max(mx, s[k]);
+        }
+        let sum = 0.0;
+        for (let k = 0; k < K; k++) { s[k] = present[k] ? Math.exp(s[k] - mx) : 0.0; sum += s[k]; }
+        sum = Math.max(sum, 1e-30);
+        for (let k = 0; k < K; k++) {
+          if (!s[k]) continue;
+          const w = s[k] / sum;
+          for (let d = 0; d < dv; d++) pooled[hd * dv + d] += w * vs[k][hd * dv + d];
+        }
+      }
+    } else {
+      pooled = new Float64Array(e);
+      let n = 0;
+      if (ar.pool === "max") pooled.fill(-2.0);
+      for (let k = 0; k < K; k++) {
+        if (!present[k]) continue;
+        n++;
+        for (let d = 0; d < e; d++) pooled[d] = ar.pool === "max" ? Math.max(pooled[d], hs[k][d]) : pooled[d] + hs[k][d];
+      }
+      if (ar.pool === "max") { if (!n) pooled.fill(0.0); } else for (let d = 0; d < e; d++) pooled[d] /= Math.max(n, 1);
+    }
+    let z = new Float64Array(ego.length + pooled.length);
+    z.set(ego, 0);
+    z.set(pooled, ego.length);
+    const ts = [z.length, ...ar.hidden, ar.n_out];
+    for (let l = 0; l + 1 < ts.length; l++) {
+      z = affine(z, P[`trunk${l}.W`], P[`trunk${l}.b`], ts[l], ts[l + 1]);
+      if (l + 2 < ts.length) z = z.map(Math.tanh);
+    }
+    return z;
+  }
+
   /** Normalises a policy JSON (policy.export_json format) for fast evaluation. */
   function loadPolicy(d) {
+    if (d && d.arch && d.arch.type === "set") return loadSetPolicy(d);
     if (!d || !Array.isArray(d.layers) || !d.layers.length) throw new Error("policy JSON has no layers");
     const layers = d.layers.map((l) => {
       const nin = l.W.length, nout = l.b.length;
@@ -631,8 +743,13 @@
     return { sizes, layers, inScale, cfg: d.cfg || {} };
   }
 
-  /** tanh MLP on one observation row (obs[off .. off + nin)). */
+  /** Policy (tanh MLP, or set encoder + tanh) on one observation row (obs[off .. off + nin)). */
   function forward(pol, obs, off = 0) {
+    if (pol.kind === "set") {
+      const x = new Float64Array(pol.nin);
+      for (let i = 0; i < pol.nin; i++) x[i] = pol.inScale ? obs[off + i] * pol.inScale[i] : obs[off + i];
+      return setForwardRow(pol, x).map(Math.tanh);
+    }
     const l0 = pol.layers[0];
     let h = new Float64Array(l0.nin);
     for (let i = 0; i < l0.nin; i++) h[i] = pol.inScale ? obs[off + i] * pol.inScale[i] : obs[off + i];
@@ -667,7 +784,7 @@
   return {
     RIGHT, STRAIGHT, LEFT, DISC_R, K_NEIGHBOURS, NEIGHBOUR_RANGE, OBS_DIM, NB_FEATURES, NB_FEATURES_LEGACY, BRAKE_ACC,
     POS_SCALE, GOAL_SCALE, RAY_RANGE, CAR_LENGTH, CAR_WIDTH, HAZARD_PERIOD,
-    DONE, defaultConfig, obsDim, actDim, nbFeatures, wreckSteps, rot, cornerDist, rayEdgeDist, routeDist, freeFlowTime,
+    DONE, defaultConfig, obsDim, actDim, nbFeatures, nNeighbours, wreckSteps, rot, cornerDist, rayEdgeDist, routeDist, freeFlowTime,
     gripKappa, laneOffsets, makeRng,
     Sim, loadPolicy, forward, act,
   };

@@ -61,7 +61,8 @@ def interface_key(cfg) -> str:
     "2L-acc" (the old checkpoints); the pages pick the labels for a sim by this key."""
     n_signal = cfg["n_signal"] if isinstance(cfg, dict) else cfg.n_signal
     brake = cfg["brake_light"] if isinstance(cfg, dict) else cfg.brake_light
-    return f"{int(n_signal)}L-{'brake' if brake else 'acc'}"
+    k = int((cfg.get("n_neighbours") if isinstance(cfg, dict) else cfg.n_neighbours) or simmod.K_NEIGHBOURS)
+    return f"{int(n_signal)}L-{'brake' if brake else 'acc'}" + (f"-K{k}" if k != simmod.K_NEIGHBOURS else "")
 
 
 def _scale(s, cfg):
@@ -78,7 +79,7 @@ def obs_layout(cfg: SimConfig) -> dict:
     nb_feats = NEIGHBOUR_FEATURES if cfg.brake_light else NEIGHBOUR_FEATURES_LEGACY
     blk = nb_features(cfg) + cfg.n_signal
     if ([k for k, *_ in nb_feats] != nb_keys(cfg) or len(nb_feats) + cfg.n_signal != blk
-            or simmod.OBS_DIM + simmod.K_NEIGHBOURS * blk != obs_dim(cfg)):
+            or simmod.OBS_DIM + cfg.n_neighbours * blk != obs_dim(cfg)):
         raise RuntimeError("neighbour block layout changed: update NEIGHBOUR_FEATURES in site/obs_labels.py")
     groups, i = [], 0
 
@@ -91,7 +92,7 @@ def obs_layout(cfg: SimConfig) -> dict:
 
     for key, group, label, scale, unit in OWN_FEATURES:
         add(group, label, key, _scale(scale, cfg), unit)
-    for k in range(simmod.K_NEIGHBOURS):
+    for k in range(cfg.n_neighbours):
         for key, label, scale, unit in nb_feats:
             add(f"Nachbar {k + 1}", label, f"n{k + 1}_{key}", _scale(scale, cfg), unit, sub="neighbour")
         for q in range(cfg.n_signal):
@@ -105,7 +106,7 @@ def obs_layout(cfg: SimConfig) -> dict:
         "dim": i,
         "own_dim": simmod.OBS_DIM,
         "neighbour_block": blk,
-        "k_neighbours": simmod.K_NEIGHBOURS,
+        "k_neighbours": cfg.n_neighbours,
         "ray_angles_deg": [round(float(a), 3) for a in np.degrees(simmod.RAY_ANGLES)],
         "ray_range": float(simmod.RAY_RANGE),
         "neighbour_range": float(simmod.NEIGHBOUR_RANGE),

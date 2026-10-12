@@ -63,6 +63,15 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
   against `sim.py`), `rollout_torch.py` (rollouts on the device, CUDA graph), `ppo_torch.py` (update);
   enabled by `ppo.py --update-device cuda --rollout-device cuda`. Warm start: `--init-policy`
   (actor from an older-interface checkpoint) + `--critic-warmup N` (first N iterations critic only).
+- `smartcrossing/policy_set.py` (Roadmap B, optional `ppo --arch set`): neighbour set encoder, same
+  observation (no new information): shared per-neighbour MLP phi, pooling over the present neighbours
+  (attention with the ego features as query, or DeepSets mean / max), MLP trunk on [ego, pooled].
+  Permutation-invariant over the slots, so `SimConfig.n_neighbours` (default 4 = all older checkpoints;
+  an interface value like n_signal) can grow without new weights. numpy (PolicyDriver, workers), torch
+  (rollout_torch, ppo_torch via autograd) and JS (sim.js) forwards, parity-tested
+  (tests/test_policy_set.py, test_sim_js_parity.py). Checkpoints carry an `arch` field (absent = MLP,
+  older files unchanged). Site: sim.js runs set brains; build.py skips them for now (brain view and
+  snapshot format assume MLP layers).
 - `smartcrossing/policy.py` (shared MLP, numpy, `PolicyDriver`). The old ES trainer was removed
   (history only); ES checkpoints still load via `policy_compat.py`.
   `smartcrossing/policy_compat.py`: running old checkpoints (observation-layout remap by

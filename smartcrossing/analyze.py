@@ -22,7 +22,7 @@ import numpy as np
 
 from .cli import make_driver
 from .metrics import summarize
-from .sim import ARM_U, DONE_NAMES, K_NEIGHBOURS, OBS_DIM, Sim, SimConfig, nb_features
+from .sim import ARM_U, DONE_NAMES, OBS_DIM, Sim, SimConfig, nb_features
 
 MODES = ("normal", "zero", "shuffle")
 KIND_NAMES = DONE_NAMES[1:]  # outcome kinds of finished cars (DONE_NAMES[0] is "none")
@@ -38,8 +38,9 @@ def _intervene(sim: Sim, mode: str, rng):
     S = sim.cfg.n_signal
     nbf = nb_features(sim.cfg)
     blk = nbf + S
-    cols = np.array([OBS_DIM + k * blk + nbf + q for k in range(K_NEIGHBOURS) for q in range(S)]).reshape(K_NEIGHBOURS, S)
-    pres = np.array([OBS_DIM + k * blk + NB_PRESENT for k in range(K_NEIGHBOURS)])
+    K = sim.cfg.n_neighbours
+    cols = np.array([OBS_DIM + k * blk + nbf + q for k in range(K) for q in range(S)]).reshape(K, S)
+    pres = np.array([OBS_DIM + k * blk + NB_PRESENT for k in range(K)])
 
     def observe():
         obs = orig()
@@ -48,7 +49,7 @@ def _intervene(sim: Sim, mode: str, rng):
         else:
             flat = obs.reshape(-1, obs.shape[-1])
             lamps = []
-            for k in range(K_NEIGHBOURS):
+            for k in range(K):
                 rows = np.nonzero(flat[:, pres[k]] > 0.5)[0]
                 lamps.append((k, rows, flat[rows][:, cols[k]]))
             pool = np.concatenate([lv for _, _, lv in lamps]) if lamps else np.zeros((0, S))
