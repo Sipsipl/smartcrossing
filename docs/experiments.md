@@ -725,3 +725,39 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
   Sheets (runs/round2_eval/B_s1_*): cars queue behind standing cars on the arms instead of driving into them;
   remaining crashes are in the box (entering tightly one after another), long delay at 0.3 (mean 15 s).
 - **Next**: confirm B vs C with seed 2; longer B training; gate still < 95%; crashes in the box -> Roadmap B.
+
+## Roadmap B: neighbour set encoder (2026-10-12, branch coordinator/attention)
+- **Design** (`smartcrossing/policy_set.py`, `ppo --arch set`): same observation, no new information. Each
+  neighbour block (10 features incl. brake light, hazard, lamp) goes through a shared tanh MLP phi (32, 32);
+  pooling over the present neighbours (presence = the `present` feature): multi-head attention with the ego
+  features as query (4 heads x 8 dims, default), or DeepSets mean / max (`--set-pool`); trunk MLP (64, 64)
+  on [ego, pooled]. Permutation-invariant over the slots; `SimConfig.n_neighbours` (default 4, an interface
+  value stored in the checkpoint) can grow without new weights. Critic: same architecture with the
+  privileged features appended to the ego part (`--critic-arch same|mlp|set`).
+- **Parameters** (actor / critic): MLP 64x64 8195 / 8321 at K=4 (10755 at K=8, 13315 at K=12); MLP 128x128
+  24579 (K=4); set attn 11811 / 12065, set mean / max 9091 / 9217, independent of K.
+- **Implementation**: numpy forward (PolicyDriver, cli bench / gate, numpy workers), torch forward
+  (rollout_torch incl. CUDA graph; ppo_torch update via autograd, same losses / Adam), JS forward (sim.js).
+  The numpy update stays MLP-only (`--arch set` needs `--update-device` or `--rollout-device` cpu|cuda).
+  Checkpoints: `.npz` field `arch` (JSON) + flat params, `sizes = [obs_dim, *trunk hidden, act_dim]`; MLP
+  files are unchanged (no field). The site build skips set brains for now (brain view / snapshot need layers).
+- **Tests** (tests/test_policy_set.py, test_sim_js_parity.py, test_sim_torch_parity.py): numpy = torch (1e-12,
+  all poolings, with / without critic extras), autograd = finite differences, slot shuffling and junk in absent
+  slots leave the output unchanged, K=4 and K=8 nets share weights, checkpoint round trip incl. a mixed
+  set / MLP driver, committed checkpoints load as before, Worker = TorchRollout with set networks (float64),
+  JS = numpy (all poolings, mixed driver, K=8 observations), sim / TorchSim (cpu + cuda) observation parity at K=10.
+- **Behaviour cloning** (optional, `--init-bc TEACHER.npz`, bc.py): the MLP teacher drives in the training
+  world, the set actor's pre-squash output is fitted by MSE. round2_best -> set attn K=4, 3000 Adam steps on
+  CPU (92 s, 253k car-steps): MSE 0.147 (teacher output variance ~1.2, R^2 ~0.87). Stop gate 0.977 safe /
+  stop on feasible cases (teacher 0.841 / 0.75); bench @0.15 seed 1000 (8 x 120 s): 62 crash+off per 1000,
+  30.1 per min (teacher 12, 30.1 on this seed). Not trained further (runs/bc/bc_k4.npz).
+- **GPU smoke** (round-2 B world: obstacle_envs 0.5, crash/off-road cost x3, n_slots 40; from scratch, 2048 envs
+  x 32, curriculum 0.15-0.3, eval off; runs/smoke_set, runs/smoke_mlp): set 45 it/min over it 2-59 (rollout
+  0.77 s + update 0.56 s; 280k car-steps/s), 36 it/min over it 2-99 as batches grow; MLP 80 it/min (0.55 + 0.20 s;
+  580k car-steps/s). CUDA graph capture works with the set forward. Like every from-scratch smoke run, both
+  settle into "stand and wait" within ~100 it (set: bench @0.15 throughput 0, gate "stops" trivially 0.94);
+  no learning comparison possible from 3 min.
+- **Open for the comparison** (equal wall time, 2 seeds): from scratch vs BC warm start for the set encoder
+  (the MLP baselines were warm-started); K=4 vs K=8 for the set encoder; attn vs mean / max; a wider MLP
+  (128x128) as the "more parameters" control. The set encoder costs ~1.8x per iteration (update ~2.8x), so equal
+  time means ~55 % of the MLP's iterations.
