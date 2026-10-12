@@ -128,6 +128,8 @@ Next: round 2 (A/B/C, see Roadmap (E)), then (B), (C), (D).
   in every run's args.json, full state.npz of important runs kept under results/ (cloud runs were
   lost), a small script listing runs/ (name, commit, settings, key metrics). The owner needs no
   tracking UI (the /lernen curve is enough); tooling is for the coordinator and agents, their call.
+- Site bench over several traffic seeds (mean) instead of one (BENCH_SEED): single-seed numbers are
+  noisy (round 2 best at 0.15: 12 on the site's seed vs 31 averaged over 3 seeds).
 - Quick wins: small GIF of the crossing at the top of README.md (rendered from the main brain);
   short, plain explanation on /lernen of how training with many cars works (PPO: all cars share one
   brain, each learns from its own reward; ES: each mutation drives in its own environments, all

@@ -174,9 +174,9 @@
   function prevNote() {
     const a = D.previous && pol(D.previous) && pol(D.previous).bench["0.15"], b = pol(MAIN_ID) && pol(MAIN_ID).bench["0.15"];
     if (!a || !b || !(a.crash_cars_per_1000 > 0)) return "";
-    const less = Math.round((1 - b.crash_cars_per_1000 / a.crash_cars_per_1000) * 10) * 10;
+    // one traffic seed only: the comparison is noisy, so no exact percentage here
     return ` Neu beim aktuellen Gehirn: Im Training standen Wracks und parkende Autos im Weg – es bremst viel öfter dahinter ab und reiht sich ein, statt hineinzufahren.
-      Bei mittlerem Verkehr baut es rund ${less} % weniger Unfälle als das vorherige (${num(b.crash_cars_per_1000, 0)} statt ${num(a.crash_cars_per_1000, 0)} pro 1000 Autos) – bei dichtem Verkehr kracht es mitten auf der Kreuzung aber noch.`;
+      Bei mittlerem Verkehr baut es deutlich weniger Unfälle als das vorherige (in unserer Messung ${num(b.crash_cars_per_1000, 0)} statt ${num(a.crash_cars_per_1000, 0)} pro 1000 Autos) – bei dichtem Verkehr kracht es mitten auf der Kreuzung aber noch.`;
   }
 
   // ------------------------------------------------------------------ obs panel ("Was sieht ein Auto?")
