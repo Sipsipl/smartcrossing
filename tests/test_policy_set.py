@@ -233,7 +233,10 @@ def test_ppo_main_arch_set(tmp_path):
         ppo.main(["--name", "bad", "--iters", "1", "--runs-dir", str(runs), *common])
     ppo.main(["--name", "s", "--iters", "3", "--runs-dir", str(runs), "--update-device", "cpu", *common])
     ppo.main(["--name", "t", "--iters", "2", "--runs-dir", str(runs), "--rollout-device", "cpu", *common])
-    for name in ("s", "t"):
+    # behaviour-cloning warm start from the MLP brain (K 4 -> 6)
+    ppo.main(["--name", "b", "--iters", "1", "--runs-dir", str(runs), "--rollout-device", "cpu", "--init-bc",
+              str(ROOT / "results" / "round2_best.npz"), "--bc-steps", "5", "--bc-seconds", "3", *common])
+    for name in ("s", "t", "b"):
         run = runs / name
         arch = load_arch(run / "current.npz")
         assert arch["type"] == "set" and arch["K"] == 6 and arch["phi"] == [8]
@@ -247,3 +250,26 @@ def test_ppo_main_arch_set(tmp_path):
 
     g, _ = stop_gate(f"policy:{runs / 's' / 'current.npz'}", {})
     assert 0.0 <= g["safe_rate_feasible"] <= 1.0
+
+
+def test_behaviour_cloning_into_set_actor():
+    """bc.py: the teacher's states and pre-tanh outputs are recorded (student K > teacher K works),
+    and fitting reduces the imitation error."""
+    pytest.importorskip("torch")
+    from smartcrossing.bc import collect, fit, teacher_mu
+    from smartcrossing.policy import load_in_scale, load_npz
+
+    teacher = ROOT / "results" / "round2_best.npz"
+    cfg = SimConfig(n_slots=16, n_neighbours=6)
+    x, y = collect(str(teacher), cfg, envs=4, seconds=15.0, demand=(0.3, 0.4))
+    assert x.shape[1] == obs_dim(cfg) and len(x) == len(y) > 100
+    params, sizes, _ = load_npz(teacher)
+    n_t = sizes[0]
+    np.testing.assert_allclose(teacher_mu(params, sizes, x[:, :n_t] * load_in_scale(teacher)), y, atol=1e-12)
+    arch = _arch(cfg, "attn")
+    p0 = policy_set.init_params(arch, 0, 0.01)
+    scale = default_in_scale(cfg)
+    mse0 = float(np.mean((policy_set.forward(p0, arch, x * scale) - y) ** 2))
+    p, mse = fit(arch, p0, x * scale, y, steps=150, batch=512, lr=3e-3)
+    assert mse < 0.6 * mse0
+    assert float(np.mean((policy_set.forward(p, arch, x * scale) - y) ** 2)) == pytest.approx(mse, rel=1e-3)

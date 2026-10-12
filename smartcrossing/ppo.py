@@ -419,6 +419,10 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--init", default="", help="resume from a full checkpoint (state.npz)")
     p.add_argument("--init-policy", default="", help="warm-start the actor from a policy .npz of an older interface "
                    "(policy_compat.transplant_actor); critic fresh")
+    p.add_argument("--init-bc", default="", help="--arch set: start the actor by behaviour cloning this MLP "
+                   "checkpoint (bc.py); critic fresh")
+    p.add_argument("--bc-steps", type=int, default=3000, help="Adam steps of the behaviour cloning")
+    p.add_argument("--bc-seconds", type=float, default=120.0, help="behaviour cloning: teacher drive (32 envs)")
     p.add_argument("--critic-warmup", type=int, default=0, help="first N iterations of this run train only the critic")
     p.add_argument("--reset-logstd", action="store_true", help="with --init: restart log-std at --logstd-init")
     p.add_argument("--set-ceiling", type=float, default=0.0, help="with --init: override the stored curriculum ceiling")
@@ -496,7 +500,15 @@ def build_state(a) -> TrainState:
                     Adam(len(actor.p), a.lr), Adam(len(critic.p), a.lr_critic), a.demand_start, a_arch=a_arch,
                     c_arch=c_arch_d)
     if a.init_policy and a_arch:
-        raise ValueError("--init-policy transplants an MLP actor; it cannot start a set-encoder actor")
+        raise ValueError("--init-policy transplants an MLP actor; it cannot start a set-encoder actor (--init-bc)")
+    if getattr(a, "init_bc", ""):
+        if not a_arch:
+            raise ValueError("--init-bc clones into a set-encoder actor (--arch set)")
+        from .bc import bc_actor
+
+        dev = a.rollout_device if a.rollout_device != "numpy" else a.update_device
+        actor.p = bc_actor(a.init_bc, cfg, a_arch, in_scale, actor.p, steps=a.bc_steps, seconds=a.bc_seconds,
+                           device="cpu" if dev == "numpy" else dev, seed=a.seed)
     if a.init_policy:
         from .policy_compat import transplant_actor
 
