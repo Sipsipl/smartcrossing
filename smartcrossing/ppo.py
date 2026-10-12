@@ -15,6 +15,10 @@ checkpoints' extra carry the commit; scripts/runs_index.py lists the runs.
   state-independent log-std; the car executes tanh(u). The deterministic policy
   tanh(mu) is exactly the existing policy.py / viewer format (tanh output layer,
   same in_scale), so checkpoints load with PolicyDriver, cli bench/render, export_json.
+- `--arch set`: actor (and with `--critic-arch` same/set the critic) is the neighbour set
+  encoder of policy_set.py (shared per-neighbour MLP, attention / mean / max pooling, MLP trunk);
+  needs the torch update (`--update-device cpu|cuda`, autograd); numpy rollout workers and
+  checkpoints (arch field, policy.save_npz) handle both architectures.
 - critic: separate tanh MLP on the scaled obs plus a few privileged features (car age,
   queue length, cars on the road, demand of the env); not exported.
 - rollouts: persistent worker processes, each with its own vectorised Sim; GAE per car
@@ -43,6 +47,7 @@ from pathlib import Path
 
 import numpy as np
 
+from . import policy_set
 from .policy import default_in_scale, layer_sizes, n_params, save_npz
 from .ppo_common import LOG2PI, N_DONE, N_PRIV, PRIV_DEMAND_SCALE, PRIV_QUEUE_SCALE, git_info
 from .sim import DONE_CRASH, DONE_EXIT, DONE_OFFROAD, DONE_TIMEOUT, DONE_WRONG, Sim, SimConfig, act_dim, obs_dim
@@ -114,6 +119,24 @@ class Adam:
         return self.lr * mh / (np.sqrt(vh) + self.eps)
 
 
+class SetNet:
+    """Set-encoder network (policy_set.py) with the MLP's interface for the training loop: flat
+    params ``p``, ``sizes`` (checkpoint sizes [in, *hidden, out]) and ``arch``. No numpy backward:
+    ppo_torch differentiates it with autograd."""
+
+    def __init__(self, arch, sizes, rng=None, out_scale=1.0):
+        self.arch, self.sizes = arch, list(sizes)
+        self.p = policy_set.init_params(arch, rng, out_scale)
+
+    def forward(self, x):
+        return policy_set.forward(self.p, self.arch, x)
+
+
+def net_forward(p, sizes, x, arch=None):
+    """Stateless forward (workers) of an MLP (sizes) or a set encoder (arch)."""
+    return policy_set.forward(p, arch, x) if arch else mlp_forward(p, sizes, x)
+
+
 def mlp_forward(p, sizes, x):
     """Stateless forward (workers): tanh hidden, linear output."""
     i = 0
@@ -143,8 +166,10 @@ def privileged(sim: Sim) -> np.ndarray:
 
 
 class Worker:
-    def __init__(self, cfg_d, n_envs, seed, horizon, episode_steps, gamma, lam, in_scale, act_mask):
+    def __init__(self, cfg_d, n_envs, seed, horizon, episode_steps, gamma, lam, in_scale, act_mask, actor_arch=None,
+                 critic_arch=None):
         self.cfg_d = cfg_d
+        self.a_arch, self.c_arch = actor_arch, critic_arch
         self.B = n_envs
         self.seed = seed
         self.T = horizon
@@ -188,10 +213,10 @@ class Worker:
             pr = privileged(sim)
             if len(bi):
                 o = obs[bi, ni] * self.in_scale
-                mu = mlp_forward(actor_p, actor_sizes, o)
+                mu = net_forward(actor_p, actor_sizes, o, self.a_arch)
                 u = mu + std * self.rng.standard_normal(mu.shape)
                 lp = (-0.5 * ((u - mu) / std) ** 2 - logstd - 0.5 * LOG2PI) @ self.act_mask
-                v = mlp_forward(critic_p, critic_sizes, np.concatenate([o, pr[bi, ni]], 1))[:, 0]
+                v = net_forward(critic_p, critic_sizes, np.concatenate([o, pr[bi, ni]], 1), self.c_arch)[:, 0]
                 obs_buf[t, bi, ni] = obs[bi, ni]
                 priv_buf[t, bi, ni] = pr[bi, ni]
                 u_buf[t, bi, ni] = u
@@ -213,7 +238,8 @@ class Worker:
         bi, ni = np.nonzero(sim.alive)
         if len(bi):
             o = obs[bi, ni] * self.in_scale
-            val[T, bi, ni] = mlp_forward(critic_p, critic_sizes, np.concatenate([o, privileged(sim)[bi, ni]], 1))[:, 0]
+            val[T, bi, ni] = net_forward(critic_p, critic_sizes, np.concatenate([o, privileged(sim)[bi, ni]], 1),
+                                         self.c_arch)[:, 0]
         # GAE per slot chain (chain cut at removals)
         adv = np.zeros((T, B, N))
         last = np.zeros((B, N))
@@ -358,7 +384,15 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--envs", type=int, default=24, help="envs per worker")
     p.add_argument("--horizon", type=int, default=128, help="steps per rollout")
     p.add_argument("--episode", type=float, default=90.0, help="seconds between env resets")
-    p.add_argument("--hidden", default="64,64")
+    p.add_argument("--hidden", default="64,64", help="hidden layers of the MLP (--arch set: of the trunk)")
+    p.add_argument("--arch", choices=("mlp", "set"), default="mlp",
+                   help="actor: MLP on the flat obs (default) or the neighbour set encoder (policy_set.py; needs "
+                        "--update-device cpu|cuda)")
+    p.add_argument("--critic-arch", choices=("same", "mlp", "set"), default="same", help="critic architecture")
+    p.add_argument("--set-phi", default="32,32", help="set encoder: per-neighbour MLP layers")
+    p.add_argument("--set-pool", choices=policy_set.POOLS, default="attn", help="set encoder: pooling")
+    p.add_argument("--set-heads", type=int, default=4, help="set encoder (attn): heads")
+    p.add_argument("--set-dk", type=int, default=8, help="set encoder (attn): key / value dims per head")
     p.add_argument("--gamma", type=float, default=0.99)
     p.add_argument("--lam", type=float, default=0.95)
     p.add_argument("--lr", type=float, default=3e-4)
@@ -423,6 +457,8 @@ class TrainState:
     ceiling: float
     it0: int = 0
     total_steps: int = 0
+    a_arch: dict | None = None  # policy_set arch of a set-encoder actor / critic (None = MLP)
+    c_arch: dict | None = None
 
     @property
     def cfg_d(self) -> dict:
@@ -445,11 +481,22 @@ def build_state(a) -> TrainState:
     a_sizes = layer_sizes(cfg, hidden)
     c_sizes = [obs_dim(cfg) + N_PRIV, *hidden, 1]
     rng = np.random.default_rng(a.seed)
-    actor = MLP(a_sizes, rng, out_scale=0.01)
-    critic = MLP(c_sizes, rng, out_scale=1.0)
-    actor.p[-A] = np.arctanh(a.acc_init)  # output bias: initial mean acceleration action
+    arch = getattr(a, "arch", "mlp")
+    c_arch = arch if getattr(a, "critic_arch", "same") == "same" else a.critic_arch
+    a_arch = c_arch_d = None
+    if arch == "set" or c_arch == "set":
+        kw = dict(hidden=hidden, phi=tuple(int(h) for h in a.set_phi.split(",")), pool=a.set_pool, heads=a.set_heads,
+                  dk=a.set_dk, dv=a.set_dk)
+        a_arch = policy_set.make_arch(cfg, **kw) if arch == "set" else None
+        c_arch_d = policy_set.make_arch(cfg, n_extra=N_PRIV, n_out=1, **kw) if c_arch == "set" else None
+    actor = SetNet(a_arch, a_sizes, rng, out_scale=0.01) if a_arch else MLP(a_sizes, rng, out_scale=0.01)
+    critic = SetNet(c_arch_d, c_sizes, rng, out_scale=1.0) if c_arch_d else MLP(c_sizes, rng, out_scale=1.0)
+    actor.p[-A] = np.arctanh(a.acc_init)  # output bias: initial mean acceleration action (last block in both layouts)
     st = TrainState(cfg, in_scale, act_mask, a_sizes, c_sizes, rng, actor, critic, np.full(A, a.logstd_init),
-                    Adam(len(actor.p), a.lr), Adam(len(critic.p), a.lr_critic), a.demand_start)
+                    Adam(len(actor.p), a.lr), Adam(len(critic.p), a.lr_critic), a.demand_start, a_arch=a_arch,
+                    c_arch=c_arch_d)
+    if a.init_policy and a_arch:
+        raise ValueError("--init-policy transplants an MLP actor; it cannot start a set-encoder actor")
     if a.init_policy:
         from .policy_compat import transplant_actor
 
@@ -476,7 +523,8 @@ def write_args(out: Path, a, st: TrainState, git: dict) -> Path:
         while (out / f"args.{n}.json").exists():
             n += 1
         path = out / f"args.{n}.json"
-    rec = {**vars(a), "actor_sizes": st.a_sizes, "critic_sizes": st.c_sizes, "cfg": st.cfg_d, "git": git}
+    rec = {**vars(a), "actor_sizes": st.a_sizes, "critic_sizes": st.c_sizes, "actor_arch": st.a_arch,
+           "critic_arch": st.c_arch, "cfg": st.cfg_d, "git": git}
     path.write_text(json.dumps(rec, indent=1), encoding="utf-8", newline="\n")
     return path
 
@@ -490,7 +538,8 @@ class WorkerRollouts:
         self.conns = []
         for w in range(a.workers):
             kw = dict(cfg_d=st.cfg_d, n_envs=a.envs, seed=a.seed * 1000 + w, horizon=a.horizon, episode_steps=ep_steps,
-                      gamma=a.gamma, lam=a.lam, in_scale=st.in_scale, act_mask=st.act_mask)
+                      gamma=a.gamma, lam=a.lam, in_scale=st.in_scale, act_mask=st.act_mask, actor_arch=st.a_arch,
+                      critic_arch=st.c_arch)
             c1, c2 = ctx.Pipe()
             ctx.Process(target=_worker_main, args=(c2, kw), daemon=True).start()
             self.conns.append(c1)
@@ -518,7 +567,8 @@ class TorchRollouts:
 
         self.ro = TorchRollout(st.cfg_d, a.rollout_envs or a.workers * a.envs, a.seed * 1000, a.horizon, ep_steps,
                                a.gamma, a.lam, st.in_scale, st.act_mask, st.a_sizes, st.c_sizes,
-                               device=a.rollout_device, dtype=a.rollout_dtype)
+                               device=a.rollout_device, dtype=a.rollout_dtype, actor_arch=st.a_arch,
+                               critic_arch=st.c_arch)
 
     def rollout(self, actor_p, logstd, critic_p, d_lo, d_hi):
         """-> ([result], batch {BATCH_KEYS: device tensors})."""
@@ -597,12 +647,12 @@ def train_loop(a, st: TrainState, out: Path, source, update, ctx, git: dict):
                 log.flush()
                 print(json.dumps(rec), flush=True)
                 extra = dict(iter=it, ceiling=st.ceiling, logstd=logstd.tolist(), algo="ppo", **git)
-                save_npz(out / "current.npz", actor.p, st.a_sizes, cfg_d, st.in_scale, **extra)
+                save_npz(out / "current.npz", actor.p, st.a_sizes, cfg_d, st.in_scale, arch=st.a_arch, **extra)
                 np.savez(out / "state.npz", actor=actor.p, critic=critic.p, logstd=logstd, ceiling=st.ceiling, iter=it,
                          total_steps=st.total_steps)
                 if a.eval_every and (it % a.eval_every == 0 or it == a.iters - 1):
                     ck = out / f"ckpt_{it:04d}.npz"
-                    save_npz(ck, actor.p, st.a_sizes, cfg_d, st.in_scale, **extra)
+                    save_npz(ck, actor.p, st.a_sizes, cfg_d, st.in_scale, arch=st.a_arch, **extra)
                     if it == a.iters - 1 and eval_proc is not None:
                         eval_proc.join()  # always evaluate the final policy
                     if eval_proc is None or not eval_proc.is_alive():
@@ -624,11 +674,16 @@ def main(argv=None):
     st = build_state(a)
     git = git_info()
     write_args(out, a, st, git)
-    print(f"actor {st.a_sizes} ({n_params(st.a_sizes)} params), critic {st.c_sizes}", flush=True)
+    n_a = policy_set.n_params(st.a_arch) if st.a_arch else n_params(st.a_sizes)
+    n_c = policy_set.n_params(st.c_arch) if st.c_arch else n_params(st.c_sizes)
+    print(f"actor {'set ' + json.dumps(st.a_arch) if st.a_arch else st.a_sizes} ({n_a} params), "
+          f"critic {'set' if st.c_arch else st.c_sizes} ({n_c} params)", flush=True)
 
     update = ppo_update
     if a.rollout_device != "numpy" and a.update_device == "numpy":
         a.update_device = a.rollout_device  # the batch stays on the rollout device
+    if (st.a_arch or st.c_arch) and a.update_device == "numpy":
+        raise SystemExit("--arch set needs the torch update: --update-device cpu|cuda (or --rollout-device cpu|cuda)")
     if a.update_device != "numpy":
         from .ppo_torch import TorchPPO
 

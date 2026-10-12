@@ -21,7 +21,8 @@ import numpy as np
 import torch
 
 from .ppo_common import LOG2PI, N_DONE, N_PRIV, PRIV_DEMAND_SCALE, PRIV_QUEUE_SCALE
-from .ppo_torch import mlp_forward
+from . import policy_set
+from .ppo_torch import mlp_forward, set_forward
 from .sim import SimConfig, act_dim, obs_dim
 from .sim_torch import TorchSim
 
@@ -42,7 +43,7 @@ def privileged_t(sim: TorchSim) -> torch.Tensor:
 class TorchRollout:
     def __init__(self, cfg_d, n_envs, seed, horizon, episode_steps, gamma, lam, in_scale, act_mask,
                  actor_sizes, critic_sizes, device="cuda", dtype=torch.float32, rng="torch", noise="torch",
-                 graph=None, warmup=3):
+                 graph=None, warmup=3, actor_arch=None, critic_arch=None):
         self.cfg_d = dict(cfg_d)
         self.B, self.seed, self.T, self.ep_steps = n_envs, seed, horizon, episode_steps
         self.gamma, self.lam = gamma, lam
@@ -53,6 +54,7 @@ class TorchRollout:
         assert not self.graph or (self.dev.type == "cuda" and rng == "torch" and noise == "torch")
         self.warmup = warmup
         self.a_sizes, self.c_sizes = list(actor_sizes), list(critic_sizes)
+        self.a_arch, self.c_arch = actor_arch, critic_arch  # None = MLP, else a policy_set arch
         self.np_rng = np.random.default_rng(seed + 12345)  # Worker's action-noise generator
         self.sim = None
         self.n_resets = 0
@@ -64,8 +66,11 @@ class TorchRollout:
         f, kw = self.dt, dict(device=self.dev)
         self.in_scale = torch.as_tensor(np.asarray(in_scale), **kw).to(f)
         self.mask = torch.as_tensor(np.asarray(act_mask), **kw).to(f)
-        self.pa = torch.zeros(sum(a * b + b for a, b in zip(self.a_sizes[:-1], self.a_sizes[1:])), dtype=f, **kw)
-        self.pc = torch.zeros(sum(a * b + b for a, b in zip(self.c_sizes[:-1], self.c_sizes[1:])), dtype=f, **kw)
+        def n_par(sizes, arch):
+            return policy_set.n_params(arch) if arch else sum(a * b + b for a, b in zip(sizes[:-1], sizes[1:]))
+
+        self.pa = torch.zeros(n_par(self.a_sizes, actor_arch), dtype=f, **kw)
+        self.pc = torch.zeros(n_par(self.c_sizes, critic_arch), dtype=f, **kw)
         self.ls = torch.zeros(A, dtype=f, **kw)
         T, B = horizon, n_envs
         f32 = torch.float32
@@ -104,6 +109,12 @@ class TorchRollout:
         self.n_resets += 1
         self.steps_in_ep = 0
 
+    def _actor(self, o):
+        return set_forward(self.pa, self.a_arch, o) if self.a_arch else mlp_forward(self.pa, self.a_sizes, o)[0]
+
+    def _critic(self, x):
+        return set_forward(self.pc, self.c_arch, x) if self.c_arch else mlp_forward(self.pc, self.c_sizes, x)[0]
+
     def _noise(self, al):
         B, N, A = self.B, self.N, self.A
         if self.noise_mode == "numpy":  # Worker's draws: (n_alive, A) in row-major slot order
@@ -121,11 +132,11 @@ class TorchRollout:
         al = sim.alive.clone()
         pr = privileged_t(sim)
         o = obs * self.in_scale
-        mu, _ = mlp_forward(self.pa, self.a_sizes, o)
+        mu = self._actor(o)
         std = torch.exp(self.ls)
         u = mu + std * self._noise(al)
         lp = (-0.5 * ((u - mu) / std) ** 2 - self.ls - 0.5 * LOG2PI) @ self.mask
-        v, _ = mlp_forward(self.pc, self.c_sizes, torch.cat([o, pr], -1))
+        v = self._critic(torch.cat([o, pr], -1))
         v = torch.where(al, v[..., 0], 0.0)
         act = torch.where(al[..., None], torch.tanh(u), 0.0)
         t = self.tidx
@@ -172,7 +183,7 @@ class TorchRollout:
         self.steps_in_ep += T
         # bootstrap values for cars still on the road
         o = sim.observe() * self.in_scale
-        v, _ = mlp_forward(self.pc, self.c_sizes, torch.cat([o, privileged_t(sim)], -1))
+        v = self._critic(torch.cat([o, privileged_t(sim)], -1))
         self.val[T] = torch.where(sim.alive, v[..., 0], 0.0)
         # GAE per slot chain (chain cut at removals)
         val, rew, valid = self.val, self.rew, self.valid

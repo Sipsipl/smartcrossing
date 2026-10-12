@@ -122,6 +122,10 @@ class SimConfig:
     # perception range (m) of the neighbour block (positions stay scaled by NEIGHBOUR_RANGE);
     # 60 in ppo11 / ppo14 / ppo15
     neighbour_vis: float = 30.0
+    # number of neighbour slots in the observation (the nearest cars within neighbour_vis, sorted by
+    # distance; absent slots are zero with present = 0). 4 = every checkpoint so far; set-encoder
+    # policies (policy_set.py) are permutation-invariant over the slots and may use more.
+    n_neighbours: int = K_NEIGHBOURS
     # ppo16 only: action[0] is a target speed in [0, v_max] reached with
     # acc = clip((v_target - v) / SPEED_TAU, -brake_max, acc_max) (no reverse)
     speed_control: bool = False
@@ -199,7 +203,7 @@ def nb_features(cfg: SimConfig) -> int:
 
 
 def obs_dim(cfg: SimConfig) -> int:
-    return OBS_DIM + K_NEIGHBOURS * (nb_features(cfg) + cfg.n_signal)
+    return OBS_DIM + cfg.n_neighbours * (nb_features(cfg) + cfg.n_signal)
 
 
 def wreck_steps(cfg: SimConfig) -> int:
@@ -531,7 +535,7 @@ class Sim:
         valid = (self.alive | self.wreck)[bi] & (d < cfg.neighbour_vis)
         valid[np.arange(len(bi)), ni] = False
         d = np.where(valid, d, np.inf)
-        K = min(K_NEIGHBOURS, N)
+        K = min(cfg.n_neighbours, N)
         if N > K:
             idx = np.argpartition(d, K - 1, axis=-1)[:, :K]
             idx = np.take_along_axis(idx, np.argsort(np.take_along_axis(d, idx, -1), axis=-1), -1)
