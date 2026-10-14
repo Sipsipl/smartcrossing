@@ -72,7 +72,8 @@ DEFAULT_HISTORY = "ppo17/ckpt_5250"
 # main brain, so none for now (was wide_s0ft/ckpt_2850 = results/wide_s0ft_ckpt2850.npz)
 DEFAULT_MIX = ""
 TIMELINE_DEMANDS = [0.05, 0.15]
-BENCH_ENVS, BENCH_SECONDS, BENCH_SEED = 8, 120.0, 1000
+BENCH_ENVS, BENCH_SECONDS = 8, 120.0
+BENCH_SEEDS = (1000, 2000, 3000)  # traffic seeds, the same for all drivers (paired); results are averaged
 # Plain German names for known runs: run id -> (short label for chart markers, label, one-line
 # explanation). Shown on "Wie lernen sie?" instead of the raw ids; unmapped runs fall back to the id.
 RUN_INFO = {
@@ -330,14 +331,14 @@ def chain_of(run: str) -> list[tuple[str, int]]:
 
 # ------------------------------------------------------------------ bench
 def _bench_job(job):
-    kind, payload, physics, demand = job
+    kind, payload, physics, demand, seed = job
     from smartcrossing.baselines import LaneDriver
     from smartcrossing.metrics import summarize
     from smartcrossing.policy import PolicyDriver
     from smartcrossing.sim import Sim
 
     cfg = SimConfig(**{**physics, "demand": demand})
-    sim = Sim(cfg, BENCH_ENVS, seed=BENCH_SEED)
+    sim = Sim(cfg, BENCH_ENVS, seed=seed)
     if kind == "baseline":
         drv = LaneDriver(sim, payload)
     else:
@@ -349,6 +350,19 @@ def _bench_job(job):
     keep = ("throughput_per_min", "demand_per_min", "exit_ok_rate", "crash_cars_per_1000", "crash_cars",
             "offroad_cars", "timeouts", "delay_mean_s")
     return {k: (round(float(r[k]), 3) if r[k] == r[k] else None) for k in keep}
+
+
+def _bench_ck(key, physics, d, seed, sim_src):
+    return f"{key}|{json.dumps(physics, sort_keys=True)}|{d}|{BENCH_ENVS}x{BENCH_SECONDS}@{seed}|{sim_src}"
+
+
+def _mean_results(rs: list[dict]) -> dict:
+    """Mean over the traffic seeds, field by field (None if a seed has no value)."""
+    out = {}
+    for k in rs[0]:
+        v = [r[k] for r in rs if r[k] is not None]
+        out[k] = round(sum(v) / len(v), 3) if v else None
+    return out
 
 
 def run_bench(entries: list[tuple[str, str, object, dict, list]], force: bool, workers: int) -> dict:
@@ -365,13 +379,14 @@ def run_bench(entries: list[tuple[str, str, object, dict, list]], force: bool, w
     jobs, keys = [], []
     for key, kind, payload, physics, demands in entries:
         for d in demands:
-            ck = f"{key}|{json.dumps(physics, sort_keys=True)}|{d}|{BENCH_ENVS}x{BENCH_SECONDS}@{BENCH_SEED}|{sim_src}"
-            if ck in cache:
-                continue
-            jobs.append((kind, payload, physics, d))
-            keys.append(ck)
+            for seed in BENCH_SEEDS:
+                ck = _bench_ck(key, physics, d, seed, sim_src)
+                if ck in cache:
+                    continue
+                jobs.append((kind, payload, physics, d, seed))
+                keys.append(ck)
     if jobs:
-        print(f"  benchmarking {len(jobs)} runs ({BENCH_ENVS} envs x {BENCH_SECONDS:.0f} s each) ...")
+        print(f"  benchmarking {len(jobs)} runs ({BENCH_ENVS} envs x {BENCH_SECONDS:.0f} s each, {len(BENCH_SEEDS)} traffic seeds) ...")
         t0 = time.time()
         CACHE.parent.mkdir(parents=True, exist_ok=True)
         with mp.get_context(MP_START).Pool(workers) as pool:
@@ -385,8 +400,7 @@ def run_bench(entries: list[tuple[str, str, object, dict, list]], force: bool, w
     for key, kind, payload, physics, demands in entries:
         out.setdefault(key, {})
         for d in demands:
-            ck = f"{key}|{json.dumps(physics, sort_keys=True)}|{d}|{BENCH_ENVS}x{BENCH_SECONDS}@{BENCH_SEED}|{sim_src}"
-            out[key][f"{d:g}"] = cache[ck]  # as JS String(d): "1" for 1.0
+            out[key][f"{d:g}"] = _mean_results([cache[_bench_ck(key, physics, d, sd, sim_src)] for sd in BENCH_SEEDS])  # as JS String(d): "1" for 1.0
     return out
 
 
@@ -915,7 +929,7 @@ def main(argv=None):
         # reward rules the main brain was trained with (from its checkpoint's training cfg; drawn on /lernen)
         "reward": reward_of(found[main_id]["policy"].get("cfg") or {}) if main_id else None,
         "demands": DEMANDS,
-        "bench_setup": {"envs": BENCH_ENVS, "seconds": BENCH_SECONDS, "seed": BENCH_SEED},
+        "bench_setup": {"envs": BENCH_ENVS, "seconds": BENCH_SECONDS, "seeds": len(BENCH_SEEDS)},
     }
     # side-by-side replays (same traffic) of the two rule-based drivers and the best policy
     replays = None
