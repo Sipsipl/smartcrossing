@@ -170,8 +170,9 @@ def test_old_checkpoints_unchanged():
     """Committed MLP checkpoints load as before (no arch, K = 4) and their export has layers."""
     from smartcrossing.policy import export_json, load_npz
 
-    for path in sorted((ROOT / "results").glob("*.npz"))[:3]:
-        assert load_arch(path) is None
+    mlp_paths = [p for p in sorted((ROOT / "results").glob("*.npz")) if load_arch(p) is None]
+    assert len(mlp_paths) >= 3
+    for path in mlp_paths[:3]:
         params, sizes, _ = load_npz(path)
         sim = Sim(SimConfig(n_slots=8), 1, seed=0)
         drv = PolicyDriver.load(path, sim)
