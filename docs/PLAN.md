@@ -104,6 +104,8 @@ crashes in the box; lamp unused so far.
 
 ## Next up (ordered by the coordinator, owner 2026-10-14)
 1. Site: make the brain view on /gehirn larger (zoom / full-width / fullscreen toggle; owner: too small).
+   Same step: keep the start page's "Flackern (Störung)" slider (lamp noise, never used in training;
+   an intervention tool: do cars rely on the lamp?) but explain it in one plain sentence (owner: option a).
 2. Refactoring step (due after rounds 2-4: set encoder + site build grew).
 3. (G) Deadlock study, measurement first (see below).
 4. (G) Deadlock fixes, one variable at a time with 2+ seeds each.
