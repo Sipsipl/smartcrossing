@@ -91,21 +91,45 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
 - Subagents look at images themselves and report numbers; orchestrator keeps context small.
 - Emergence claims require ablations: signal zeroed/shuffled, no-comm training, MI(signal; intent).
 
-## Status (2026-10-11)
+## Status (2026-10-14)
 Done: simulator + baselines + metrics + tests; PPO training (numpy and GPU); emergence analysis
-tooling; website (site/) incl. sliders, agent mixing, side-by-side comparison; wide crossing, grip
-limit, reverse gear, impact-speed crash cost, wrecks / brake light / hazard / one lamp / right-half
-spawning; round 1 (crash cost x3, warm start).
-Main brain: round-1 brain results/round1_x3.npz (site main `r1_main_x3`; previous: wide_s1ft2_ckpt2650).
-Open: cars see obstacles but don't brake to a stop; crashes in the box; weaving; lamps unused.
-Next: round 2 (A/B/C, see Roadmap (E)), then (B), (C), (D).
+tooling; website (site/) incl. sliders, agent mixing, side-by-side comparison, reward visual, set-brain
+view; wide crossing, grip limit, reverse gear, impact-speed crash cost, wrecks / brake light / hazard /
+one lamp / right-half spawning; rounds 1-4 (crash cost x3, obstacle scenarios, set/attention encoder);
+stop gate; multi-seed site bench; run tracking.
+Main brain: round-4 set/attention brain results/round4_best.npz (site main `r4_S_s1`; previous r2_B_s1).
+Crash rule: equal cost for all involved (relative impact speed); own-speed variant C was worse (round 3).
+Open: deadlocks / near-gridlock in the box at high demand (cars removed after max_age 60 s); remaining
+crashes in the box; lamp unused so far.
+
+## Next up (ordered by the coordinator, owner 2026-10-14)
+1. Site: make the brain view on /gehirn larger (zoom / full-width / fullscreen toggle; owner: too small).
+2. Refactoring step (due after rounds 2-4: set encoder + site build grew).
+3. (G) Deadlock study, measurement first (see below).
+4. (G) Deadlock fixes, one variable at a time with 2+ seeds each.
+5. Then (D) norm experiments (lamp language, priority patterns) - (G) feeds directly into them.
+
+- (G) Deadlocks and decentralised negotiation (owner, 2026-10-14; the interesting part from a game-theory
+  view: can individual agents find a convention / negotiation without any central instance?).
+  Framing: a coordination game like "chicken" (go/yield; the problem is who yields). A traffic light is
+  a correlation device; agents could create their own: (1) symmetry breaking - all cars share one brain
+  and act deterministically in evaluation, so symmetric situations give symmetric actions (all wait /
+  all go); randomness as in Ethernet backoff; (2) conventions from observable asymmetries (who was
+  first, who comes from the right, who already stands); (3) communication via the free lamp ("I go" /
+  "I have waited long"); (4) memory (GRU) to know waiting time / arrival order; (5) incentives: today a
+  deadlock is cheap (removed after max_age 60 s: -1 plus waiting time vs crash from -4.5), and yielding
+  mainly helps others (individual reward; shared brain gives only weak cooperation).
+  Plan: measure first (deadlock frequency, duration, constellation; does a little action noise in
+  evaluation already dissolve them? does the lamp play a role?), then single-variable experiments:
+  deadlock cost (max_age handling / timeout cost, outcome-based), GRU memory, small shared reward
+  component (throughput of all; owner decision), lamp analysis. Literature: Pal et al. 2022.
 
 ## Roadmap (owner, after the wide-crossing change)
 - (A) Driving quality: failure breakdown (offroad vs crash, solo vs traffic, per manoeuvre and
   demand), solo-driving gate (a car alone never leaves the road), impact-speed crash/offroad
   cost, physically visible neighbour features (curvature, acceleration).  <- done
-- (B) Perception / network: set (attention) encoder over all neighbours instead of K nearest,
-  optional recurrent memory (GRU).
+- (B) Perception / network: set (attention) encoder over all neighbours instead of K nearest
+  <- done (round 4, clear win); optional recurrent memory (GRU) <- open, see (G).
 - (C) Geometry-independent inputs throughout + randomized geometries during training; GPU port
   (owner has an RTX 3070 Ti, local training later).
 - (D) Norm experiments: >= 20 seeds per configuration; lateral position (lanes; driving side is
@@ -144,7 +168,7 @@ Next: round 2 (A/B/C, see Roadmap (E)), then (B), (C), (D).
   brain, each learns from its own reward; ES: each mutation drives in its own environments, all
   cars there use it, fitness = sum over all cars).
 
-## Decided for the next training round (owner)
+## Decided for round 1 (owner; all implemented 2026-10-11)
 - Spawn on the right half of the road in driving direction, always (`spawn_right` for the learners
   too; owner, 2026-10-11): fewer crashes / space problems at the map edge. This gives up the
   "does a driving side emerge on its own" question (earlier runs already showed the cars agree on a
