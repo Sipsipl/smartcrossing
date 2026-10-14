@@ -380,6 +380,9 @@ def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--name", required=True)
     p.add_argument("--iters", type=int, default=500)
+    p.add_argument("--max-minutes", type=float, default=0.0,
+                   help="stop after the iteration that crosses this training wall time (0 = off; the final "
+                   "iteration is checkpointed and evaluated like the last of --iters)")
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--envs", type=int, default=24, help="envs per worker")
     p.add_argument("--horizon", type=int, default=128, help="steps per rollout")
@@ -419,8 +422,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--init", default="", help="resume from a full checkpoint (state.npz)")
     p.add_argument("--init-policy", default="", help="warm-start the actor from a policy .npz of an older interface "
                    "(policy_compat.transplant_actor); critic fresh")
-    p.add_argument("--init-bc", default="", help="--arch set: start the actor by behaviour cloning this MLP "
-                   "checkpoint (bc.py); critic fresh")
+    p.add_argument("--init-bc", default="", help="start the actor by behaviour cloning this MLP "
+                   "checkpoint (bc.py; --arch set or mlp); critic fresh")
     p.add_argument("--bc-steps", type=int, default=3000, help="Adam steps of the behaviour cloning")
     p.add_argument("--bc-seconds", type=float, default=120.0, help="behaviour cloning: teacher drive (32 envs)")
     p.add_argument("--critic-warmup", type=int, default=0, help="first N iterations of this run train only the critic")
@@ -502,13 +505,13 @@ def build_state(a) -> TrainState:
     if a.init_policy and a_arch:
         raise ValueError("--init-policy transplants an MLP actor; it cannot start a set-encoder actor (--init-bc)")
     if getattr(a, "init_bc", ""):
-        if not a_arch:
-            raise ValueError("--init-bc clones into a set-encoder actor (--arch set)")
         from .bc import bc_actor
 
         dev = a.rollout_device if a.rollout_device != "numpy" else a.update_device
-        actor.p = bc_actor(a.init_bc, cfg, a_arch, in_scale, actor.p, steps=a.bc_steps, seconds=a.bc_seconds,
+        t_bc = time.time()
+        actor.p = bc_actor(a.init_bc, cfg, a_arch or a_sizes, in_scale, actor.p, steps=a.bc_steps, seconds=a.bc_seconds,
                            device="cpu" if dev == "numpy" else dev, seed=a.seed)
+        print(f"bc: {time.time() - t_bc:.1f} s", flush=True)
     if a.init_policy:
         from .policy_compat import transplant_actor
 
@@ -609,6 +612,7 @@ def train_loop(a, st: TrainState, out: Path, source, update, ctx, git: dict):
     actor, critic, logstd, opt_a = st.actor, st.critic, st.logstd, st.opt_a
     cfg_d = st.cfg_d
     eval_proc = None
+    t_start = time.time()
     with open(out / "log.jsonl", "a", encoding="utf-8", newline="\n") as log:
         try:
             for it in range(st.it0, a.iters):
@@ -658,6 +662,8 @@ def train_loop(a, st: TrainState, out: Path, source, update, ctx, git: dict):
                 log.write(json.dumps(rec) + "\n")
                 log.flush()
                 print(json.dumps(rec), flush=True)
+                if getattr(a, "max_minutes", 0) and time.time() - t_start >= 60 * a.max_minutes:
+                    a.iters = it + 1  # this iteration is the last one: final checkpoint + eval below
                 extra = dict(iter=it, ceiling=st.ceiling, logstd=logstd.tolist(), algo="ppo", **git)
                 save_npz(out / "current.npz", actor.p, st.a_sizes, cfg_d, st.in_scale, arch=st.a_arch, **extra)
                 np.savez(out / "state.npz", actor=actor.p, critic=critic.p, logstd=logstd, ceiling=st.ceiling, iter=it,
@@ -672,6 +678,8 @@ def train_loop(a, st: TrainState, out: Path, source, update, ctx, git: dict):
                         job = (str(ck), str(out / "eval.jsonl"), it, EVAL_DEMANDS, EVAL_ENVS, EVAL_SECONDS, rdir, cfg_d)
                         eval_proc = ctx.Process(target=eval_job, args=job)
                         eval_proc.start()
+                if it == a.iters - 1:
+                    break  # --max-minutes reached (range() above was built with the original --iters)
         finally:
             source.close()
             if eval_proc is not None:
