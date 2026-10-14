@@ -257,3 +257,11 @@ ol.phases li.world { display: block; font-weight: 650; margin-top: 6px; color: v
   .rw-row .rw-track { grid-column: 1 / -1; grid-row: 2; }
   .rw-row .val { grid-row: 1; grid-column: 2; }
 }
+
+/* "Das Gehirn": set / attention brain diagram (brain.js SetView) and the brain picker */
+.setnet { display: block; max-width: 100%; touch-action: manipulation; }
+.setnet text { font-family: ui-sans-serif, system-ui, sans-serif; user-select: none; }
+.setnet text.halo { paint-order: stroke; stroke: var(--panel); stroke-width: 4px; stroke-linejoin: round; }
+.setnet [data-id] { cursor: pointer; }
+.brain-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 0; }
+.legend [hidden], .brain-pick[hidden], #setnet[hidden] { display: none !important; }

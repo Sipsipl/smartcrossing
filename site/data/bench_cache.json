@@ -959,6 +959,66 @@
 "throughput_per_min": 25.5,
 "timeouts": 0.0
 },
+"pol:083965a34ebbcc56|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@1000|1566041736f4": {
+"crash_cars": 13.0,
+"crash_cars_per_1000": 67.01,
+"delay_mean_s": 1.235,
+"demand_per_min": 13.125,
+"exit_ok_rate": 0.933,
+"offroad_cars": 0.0,
+"throughput_per_min": 11.312,
+"timeouts": 0.0
+},
+"pol:083965a34ebbcc56|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@2000|1566041736f4": {
+"crash_cars": 6.0,
+"crash_cars_per_1000": 50.562,
+"delay_mean_s": 1.238,
+"demand_per_min": 11.562,
+"exit_ok_rate": 0.949,
+"offroad_cars": 3.0,
+"throughput_per_min": 10.562,
+"timeouts": 0.0
+},
+"pol:083965a34ebbcc56|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@3000|1566041736f4": {
+"crash_cars": 5.0,
+"crash_cars_per_1000": 35.714,
+"delay_mean_s": 1.248,
+"demand_per_min": 13.125,
+"exit_ok_rate": 0.964,
+"offroad_cars": 2.0,
+"throughput_per_min": 11.812,
+"timeouts": 0.0
+},
+"pol:083965a34ebbcc56|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@1000|1566041736f4": {
+"crash_cars": 106.0,
+"crash_cars_per_1000": 210.227,
+"delay_mean_s": 1.983,
+"demand_per_min": 35.625,
+"exit_ok_rate": 0.79,
+"offroad_cars": 5.0,
+"throughput_per_min": 26.062,
+"timeouts": 0.0
+},
+"pol:083965a34ebbcc56|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@2000|1566041736f4": {
+"crash_cars": 56.0,
+"crash_cars_per_1000": 110.899,
+"delay_mean_s": 1.953,
+"demand_per_min": 34.688,
+"exit_ok_rate": 0.889,
+"offroad_cars": 2.0,
+"throughput_per_min": 29.062,
+"timeouts": 0.0
+},
+"pol:083965a34ebbcc56|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@3000|1566041736f4": {
+"crash_cars": 119.0,
+"crash_cars_per_1000": 211.073,
+"delay_mean_s": 2.137,
+"demand_per_min": 38.562,
+"exit_ok_rate": 0.787,
+"offroad_cars": 3.0,
+"throughput_per_min": 28.438,
+"timeouts": 0.0
+},
 "pol:0d69f55c3298d240|{\"L\": 50.0, \"Rc\": 6.0, \"W\": 3.5, \"a_lat_max\": 0.0, \"acc_max\": 3.0, \"brake_light\": false, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 2, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 0.0}|0.05|8x120.0@1000|1566041736f4": {
 "crash_cars": 8.0,
 "crash_cars_per_1000": 40.816,
@@ -1077,6 +1137,66 @@
 "exit_ok_rate": 0.492,
 "offroad_cars": 34.0,
 "throughput_per_min": 18.375,
+"timeouts": 0.0
+},
+"pol:1861ad71027645fe|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@1000|1566041736f4": {
+"crash_cars": 0.0,
+"crash_cars_per_1000": 0.0,
+"delay_mean_s": 0.809,
+"demand_per_min": 13.125,
+"exit_ok_rate": 1.0,
+"offroad_cars": 0.0,
+"throughput_per_min": 12.125,
+"timeouts": 0.0
+},
+"pol:1861ad71027645fe|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@2000|1566041736f4": {
+"crash_cars": 0.0,
+"crash_cars_per_1000": 0.0,
+"delay_mean_s": 0.69,
+"demand_per_min": 11.562,
+"exit_ok_rate": 1.0,
+"offroad_cars": 0.0,
+"throughput_per_min": 11.188,
+"timeouts": 0.0
+},
+"pol:1861ad71027645fe|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@3000|1566041736f4": {
+"crash_cars": 0.0,
+"crash_cars_per_1000": 0.0,
+"delay_mean_s": 0.671,
+"demand_per_min": 13.125,
+"exit_ok_rate": 1.0,
+"offroad_cars": 0.0,
+"throughput_per_min": 12.25,
+"timeouts": 0.0
+},
+"pol:1861ad71027645fe|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@1000|1566041736f4": {
+"crash_cars": 8.0,
+"crash_cars_per_1000": 15.238,
+"delay_mean_s": 2.616,
+"demand_per_min": 35.625,
+"exit_ok_rate": 0.985,
+"offroad_cars": 0.0,
+"throughput_per_min": 32.312,
+"timeouts": 0.0
+},
+"pol:1861ad71027645fe|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@2000|1566041736f4": {
+"crash_cars": 2.0,
+"crash_cars_per_1000": 9.579,
+"delay_mean_s": 2.212,
+"demand_per_min": 34.688,
+"exit_ok_rate": 0.99,
+"offroad_cars": 3.0,
+"throughput_per_min": 32.312,
+"timeouts": 0.0
+},
+"pol:1861ad71027645fe|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@3000|1566041736f4": {
+"crash_cars": 8.0,
+"crash_cars_per_1000": 17.513,
+"delay_mean_s": 4.706,
+"demand_per_min": 38.562,
+"exit_ok_rate": 0.982,
+"offroad_cars": 2.0,
+"throughput_per_min": 35.062,
 "timeouts": 0.0
 },
 "pol:1fbb8473f8ed003c|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": false, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 2, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 0.0}|0.05|8x120.0@1000|1566041736f4": {
@@ -2759,6 +2879,276 @@
 "throughput_per_min": 13.188,
 "timeouts": 0.0
 },
+"pol:b0642de192dac608|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": false, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 2, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@1000|1566041736f4": {
+"crash_cars": 10.0,
+"crash_cars_per_1000": 51.546,
+"delay_mean_s": 1.047,
+"demand_per_min": 13.125,
+"exit_ok_rate": 0.948,
+"offroad_cars": 0.0,
+"throughput_per_min": 11.5,
+"timeouts": 0.0
+},
+"pol:b0642de192dac608|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": false, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 2, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@2000|1566041736f4": {
+"crash_cars": 9.0,
+"crash_cars_per_1000": 50.562,
+"delay_mean_s": 1.041,
+"demand_per_min": 11.562,
+"exit_ok_rate": 0.949,
+"offroad_cars": 0.0,
+"throughput_per_min": 10.562,
+"timeouts": 0.0
+},
+"pol:b0642de192dac608|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": false, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 2, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@3000|1566041736f4": {
+"crash_cars": 6.0,
+"crash_cars_per_1000": 30.612,
+"delay_mean_s": 0.989,
+"demand_per_min": 13.125,
+"exit_ok_rate": 0.969,
+"offroad_cars": 0.0,
+"throughput_per_min": 11.875,
+"timeouts": 0.0
+},
+"pol:b0642de192dac608|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": false, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 2, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@1000|1566041736f4": {
+"crash_cars": 113.0,
+"crash_cars_per_1000": 231.939,
+"delay_mean_s": 1.755,
+"demand_per_min": 35.625,
+"exit_ok_rate": 0.768,
+"offroad_cars": 9.0,
+"throughput_per_min": 25.25,
+"timeouts": 0.0
+},
+"pol:b0642de192dac608|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": false, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 2, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@2000|1566041736f4": {
+"crash_cars": 93.0,
+"crash_cars_per_1000": 189.753,
+"delay_mean_s": 1.691,
+"demand_per_min": 34.688,
+"exit_ok_rate": 0.81,
+"offroad_cars": 7.0,
+"throughput_per_min": 26.688,
+"timeouts": 0.0
+},
+"pol:b0642de192dac608|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": false, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 2, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@3000|1566041736f4": {
+"crash_cars": 146.0,
+"crash_cars_per_1000": 268.041,
+"delay_mean_s": 1.968,
+"demand_per_min": 38.562,
+"exit_ok_rate": 0.732,
+"offroad_cars": 10.0,
+"throughput_per_min": 26.625,
+"timeouts": 0.0
+},
+"pol:b072674a02888f5a|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@1000|1566041736f4": {
+"crash_cars": 0.0,
+"crash_cars_per_1000": 0.0,
+"delay_mean_s": 0.984,
+"demand_per_min": 13.125,
+"exit_ok_rate": 1.0,
+"offroad_cars": 0.0,
+"throughput_per_min": 12.188,
+"timeouts": 0.0
+},
+"pol:b072674a02888f5a|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@2000|1566041736f4": {
+"crash_cars": 0.0,
+"crash_cars_per_1000": 5.587,
+"delay_mean_s": 0.971,
+"demand_per_min": 11.562,
+"exit_ok_rate": 0.994,
+"offroad_cars": 1.0,
+"throughput_per_min": 11.125,
+"timeouts": 0.0
+},
+"pol:b072674a02888f5a|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@3000|1566041736f4": {
+"crash_cars": 0.0,
+"crash_cars_per_1000": 0.0,
+"delay_mean_s": 0.801,
+"demand_per_min": 13.125,
+"exit_ok_rate": 1.0,
+"offroad_cars": 0.0,
+"throughput_per_min": 12.188,
+"timeouts": 0.0
+},
+"pol:b072674a02888f5a|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@1000|1566041736f4": {
+"crash_cars": 4.0,
+"crash_cars_per_1000": 11.45,
+"delay_mean_s": 2.37,
+"demand_per_min": 35.625,
+"exit_ok_rate": 0.989,
+"offroad_cars": 2.0,
+"throughput_per_min": 32.375,
+"timeouts": 0.0
+},
+"pol:b072674a02888f5a|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@2000|1566041736f4": {
+"crash_cars": 2.0,
+"crash_cars_per_1000": 5.725,
+"delay_mean_s": 1.908,
+"demand_per_min": 34.688,
+"exit_ok_rate": 0.994,
+"offroad_cars": 1.0,
+"throughput_per_min": 32.562,
+"timeouts": 0.0
+},
+"pol:b072674a02888f5a|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@3000|1566041736f4": {
+"crash_cars": 2.0,
+"crash_cars_per_1000": 3.503,
+"delay_mean_s": 2.582,
+"demand_per_min": 38.562,
+"exit_ok_rate": 0.996,
+"offroad_cars": 0.0,
+"throughput_per_min": 35.562,
+"timeouts": 0.0
+},
+"pol:b072674a02888f5a|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.1|8x120.0@1000|1566041736f4": {
+"crash_cars": 0.0,
+"crash_cars_per_1000": 5.405,
+"delay_mean_s": 1.465,
+"demand_per_min": 24.625,
+"exit_ok_rate": 0.995,
+"offroad_cars": 2.0,
+"throughput_per_min": 23.0,
+"timeouts": 0.0
+},
+"pol:b072674a02888f5a|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.1|8x120.0@2000|1566041736f4": {
+"crash_cars": 2.0,
+"crash_cars_per_1000": 5.556,
+"delay_mean_s": 1.32,
+"demand_per_min": 23.375,
+"exit_ok_rate": 0.994,
+"offroad_cars": 0.0,
+"throughput_per_min": 22.375,
+"timeouts": 0.0
+},
+"pol:b072674a02888f5a|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.1|8x120.0@3000|1566041736f4": {
+"crash_cars": 0.0,
+"crash_cars_per_1000": 2.564,
+"delay_mean_s": 1.924,
+"demand_per_min": 26.125,
+"exit_ok_rate": 0.997,
+"offroad_cars": 1.0,
+"throughput_per_min": 24.312,
+"timeouts": 0.0
+},
+"pol:b072674a02888f5a|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.2|8x120.0@1000|1566041736f4": {
+"crash_cars": 12.0,
+"crash_cars_per_1000": 22.523,
+"delay_mean_s": 3.607,
+"demand_per_min": 45.438,
+"exit_ok_rate": 0.971,
+"offroad_cars": 3.0,
+"throughput_per_min": 40.438,
+"timeouts": 4.0
+},
+"pol:b072674a02888f5a|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.2|8x120.0@2000|1566041736f4": {
+"crash_cars": 2.0,
+"crash_cars_per_1000": 2.954,
+"delay_mean_s": 2.536,
+"demand_per_min": 46.188,
+"exit_ok_rate": 0.997,
+"offroad_cars": 0.0,
+"throughput_per_min": 42.188,
+"timeouts": 0.0
+},
+"pol:b072674a02888f5a|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.2|8x120.0@3000|1566041736f4": {
+"crash_cars": 28.0,
+"crash_cars_per_1000": 42.336,
+"delay_mean_s": 4.374,
+"demand_per_min": 50.062,
+"exit_ok_rate": 0.946,
+"offroad_cars": 1.0,
+"throughput_per_min": 40.5,
+"timeouts": 8.0
+},
+"pol:b072674a02888f5a|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.3|8x120.0@1000|1566041736f4": {
+"crash_cars": 32.0,
+"crash_cars_per_1000": 41.568,
+"delay_mean_s": 6.553,
+"demand_per_min": 68.25,
+"exit_ok_rate": 0.95,
+"offroad_cars": 3.0,
+"throughput_per_min": 50.0,
+"timeouts": 7.0
+},
+"pol:b072674a02888f5a|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.3|8x120.0@2000|1566041736f4": {
+"crash_cars": 21.0,
+"crash_cars_per_1000": 24.417,
+"delay_mean_s": 5.118,
+"demand_per_min": 68.375,
+"exit_ok_rate": 0.963,
+"offroad_cars": 1.0,
+"throughput_per_min": 54.25,
+"timeouts": 11.0
+},
+"pol:b072674a02888f5a|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.3|8x120.0@3000|1566041736f4": {
+"crash_cars": 64.0,
+"crash_cars_per_1000": 73.355,
+"delay_mean_s": 8.37,
+"demand_per_min": 76.125,
+"exit_ok_rate": 0.926,
+"offroad_cars": 4.0,
+"throughput_per_min": 53.625,
+"timeouts": 1.0
+},
+"pol:b072674a02888f5a|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.5|8x120.0@1000|1566041736f4": {
+"crash_cars": 117.0,
+"crash_cars_per_1000": 133.261,
+"delay_mean_s": 13.338,
+"demand_per_min": 118.5,
+"exit_ok_rate": 0.831,
+"offroad_cars": 6.0,
+"throughput_per_min": 47.938,
+"timeouts": 33.0
+},
+"pol:b072674a02888f5a|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.5|8x120.0@2000|1566041736f4": {
+"crash_cars": 101.0,
+"crash_cars_per_1000": 108.135,
+"delay_mean_s": 12.411,
+"demand_per_min": 115.875,
+"exit_ok_rate": 0.864,
+"offroad_cars": 8.0,
+"throughput_per_min": 54.438,
+"timeouts": 28.0
+},
+"pol:b072674a02888f5a|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.5|8x120.0@3000|1566041736f4": {
+"crash_cars": 107.0,
+"crash_cars_per_1000": 119.372,
+"delay_mean_s": 13.646,
+"demand_per_min": 126.562,
+"exit_ok_rate": 0.847,
+"offroad_cars": 7.0,
+"throughput_per_min": 50.562,
+"timeouts": 32.0
+},
+"pol:b072674a02888f5a|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|1.0|8x120.0@1000|1566041736f4": {
+"crash_cars": 148.0,
+"crash_cars_per_1000": 162.644,
+"delay_mean_s": 15.028,
+"demand_per_min": 241.562,
+"exit_ok_rate": 0.805,
+"offroad_cars": 7.0,
+"throughput_per_min": 47.938,
+"timeouts": 31.0
+},
+"pol:b072674a02888f5a|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|1.0|8x120.0@2000|1566041736f4": {
+"crash_cars": 112.0,
+"crash_cars_per_1000": 119.192,
+"delay_mean_s": 13.791,
+"demand_per_min": 238.938,
+"exit_ok_rate": 0.833,
+"offroad_cars": 6.0,
+"throughput_per_min": 51.562,
+"timeouts": 47.0
+},
+"pol:b072674a02888f5a|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|1.0|8x120.0@3000|1566041736f4": {
+"crash_cars": 108.0,
+"crash_cars_per_1000": 114.721,
+"delay_mean_s": 15.23,
+"demand_per_min": 249.0,
+"exit_ok_rate": 0.861,
+"offroad_cars": 5.0,
+"throughput_per_min": 53.0,
+"timeouts": 24.0
+},
 "pol:b3c3d754f793b44d|{\"L\": 50.0, \"Rc\": 6.0, \"W\": 3.5, \"a_lat_max\": 0.0, \"acc_max\": 3.0, \"brake_light\": false, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 2, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 0.0}|0.05|8x120.0@1000|1566041736f4": {
 "crash_cars": 57.0,
 "crash_cars_per_1000": 416.058,
@@ -2818,6 +3208,66 @@
 "offroad_cars": 2.0,
 "throughput_per_min": 1.062,
 "timeouts": 44.0
+},
+"pol:b3c7d7ef3838118b|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@1000|1566041736f4": {
+"crash_cars": 2.0,
+"crash_cars_per_1000": 25.641,
+"delay_mean_s": 1.132,
+"demand_per_min": 13.125,
+"exit_ok_rate": 0.974,
+"offroad_cars": 3.0,
+"throughput_per_min": 11.875,
+"timeouts": 0.0
+},
+"pol:b3c7d7ef3838118b|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@2000|1566041736f4": {
+"crash_cars": 0.0,
+"crash_cars_per_1000": 0.0,
+"delay_mean_s": 1.063,
+"demand_per_min": 11.562,
+"exit_ok_rate": 1.0,
+"offroad_cars": 0.0,
+"throughput_per_min": 11.188,
+"timeouts": 0.0
+},
+"pol:b3c7d7ef3838118b|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@3000|1566041736f4": {
+"crash_cars": 0.0,
+"crash_cars_per_1000": 0.0,
+"delay_mean_s": 0.975,
+"demand_per_min": 13.125,
+"exit_ok_rate": 1.0,
+"offroad_cars": 0.0,
+"throughput_per_min": 12.188,
+"timeouts": 0.0
+},
+"pol:b3c7d7ef3838118b|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@1000|1566041736f4": {
+"crash_cars": 4.0,
+"crash_cars_per_1000": 11.407,
+"delay_mean_s": 2.56,
+"demand_per_min": 35.625,
+"exit_ok_rate": 0.989,
+"offroad_cars": 2.0,
+"throughput_per_min": 32.5,
+"timeouts": 0.0
+},
+"pol:b3c7d7ef3838118b|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@2000|1566041736f4": {
+"crash_cars": 6.0,
+"crash_cars_per_1000": 11.561,
+"delay_mean_s": 2.462,
+"demand_per_min": 34.688,
+"exit_ok_rate": 0.988,
+"offroad_cars": 0.0,
+"throughput_per_min": 32.062,
+"timeouts": 0.0
+},
+"pol:b3c7d7ef3838118b|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 8, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@3000|1566041736f4": {
+"crash_cars": 15.0,
+"crash_cars_per_1000": 28.986,
+"delay_mean_s": 4.164,
+"demand_per_min": 38.562,
+"exit_ok_rate": 0.944,
+"offroad_cars": 1.0,
+"throughput_per_min": 32.562,
+"timeouts": 15.0
 },
 "pol:b67f1607820b2528|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": false, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 2, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 0.0}|0.05|8x120.0@1000|1566041736f4": {
 "crash_cars": 29.0,
@@ -3599,6 +4049,66 @@
 "throughput_per_min": 8.125,
 "timeouts": 0.0
 },
+"pol:d826388aec6dcaf5|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@1000|1566041736f4": {
+"crash_cars": 0.0,
+"crash_cars_per_1000": 0.0,
+"delay_mean_s": 0.841,
+"demand_per_min": 13.125,
+"exit_ok_rate": 1.0,
+"offroad_cars": 0.0,
+"throughput_per_min": 12.125,
+"timeouts": 0.0
+},
+"pol:d826388aec6dcaf5|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@2000|1566041736f4": {
+"crash_cars": 0.0,
+"crash_cars_per_1000": 0.0,
+"delay_mean_s": 0.738,
+"demand_per_min": 11.562,
+"exit_ok_rate": 1.0,
+"offroad_cars": 0.0,
+"throughput_per_min": 11.188,
+"timeouts": 0.0
+},
+"pol:d826388aec6dcaf5|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@3000|1566041736f4": {
+"crash_cars": 0.0,
+"crash_cars_per_1000": 0.0,
+"delay_mean_s": 0.737,
+"demand_per_min": 13.125,
+"exit_ok_rate": 1.0,
+"offroad_cars": 0.0,
+"throughput_per_min": 12.25,
+"timeouts": 0.0
+},
+"pol:d826388aec6dcaf5|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@1000|1566041736f4": {
+"crash_cars": 2.0,
+"crash_cars_per_1000": 9.542,
+"delay_mean_s": 3.115,
+"demand_per_min": 35.625,
+"exit_ok_rate": 0.99,
+"offroad_cars": 3.0,
+"throughput_per_min": 32.438,
+"timeouts": 0.0
+},
+"pol:d826388aec6dcaf5|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@2000|1566041736f4": {
+"crash_cars": 4.0,
+"crash_cars_per_1000": 7.722,
+"delay_mean_s": 2.536,
+"demand_per_min": 34.688,
+"exit_ok_rate": 0.992,
+"offroad_cars": 0.0,
+"throughput_per_min": 32.125,
+"timeouts": 0.0
+},
+"pol:d826388aec6dcaf5|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@3000|1566041736f4": {
+"crash_cars": 25.0,
+"crash_cars_per_1000": 46.181,
+"delay_mean_s": 5.278,
+"demand_per_min": 38.562,
+"exit_ok_rate": 0.943,
+"offroad_cars": 1.0,
+"throughput_per_min": 33.188,
+"timeouts": 6.0
+},
 "pol:dae47e8f081fc0f9|{\"L\": 50.0, \"Rc\": 6.0, \"W\": 3.5, \"a_lat_max\": 0.0, \"acc_max\": 3.0, \"brake_light\": false, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 2, \"neighbour_vis\": 60.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 0.0}|0.05|8x120.0@1000|1566041736f4": {
 "crash_cars": 10.0,
 "crash_cars_per_1000": 71.066,
@@ -3719,6 +4229,66 @@
 "throughput_per_min": 2.312,
 "timeouts": 0.0
 },
+"pol:e545dadfce192bae|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@1000|1566041736f4": {
+"crash_cars": 0.0,
+"crash_cars_per_1000": 0.0,
+"delay_mean_s": 1.045,
+"demand_per_min": 13.125,
+"exit_ok_rate": 1.0,
+"offroad_cars": 0.0,
+"throughput_per_min": 12.125,
+"timeouts": 0.0
+},
+"pol:e545dadfce192bae|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@2000|1566041736f4": {
+"crash_cars": 2.0,
+"crash_cars_per_1000": 11.173,
+"delay_mean_s": 1.062,
+"demand_per_min": 11.562,
+"exit_ok_rate": 0.989,
+"offroad_cars": 0.0,
+"throughput_per_min": 11.062,
+"timeouts": 0.0
+},
+"pol:e545dadfce192bae|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@3000|1566041736f4": {
+"crash_cars": 0.0,
+"crash_cars_per_1000": 0.0,
+"delay_mean_s": 0.872,
+"demand_per_min": 13.125,
+"exit_ok_rate": 1.0,
+"offroad_cars": 0.0,
+"throughput_per_min": 12.25,
+"timeouts": 0.0
+},
+"pol:e545dadfce192bae|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@1000|1566041736f4": {
+"crash_cars": 8.0,
+"crash_cars_per_1000": 15.385,
+"delay_mean_s": 3.55,
+"demand_per_min": 35.625,
+"exit_ok_rate": 0.985,
+"offroad_cars": 0.0,
+"throughput_per_min": 32.0,
+"timeouts": 0.0
+},
+"pol:e545dadfce192bae|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@2000|1566041736f4": {
+"crash_cars": 12.0,
+"crash_cars_per_1000": 23.952,
+"delay_mean_s": 2.282,
+"demand_per_min": 34.688,
+"exit_ok_rate": 0.976,
+"offroad_cars": 0.0,
+"throughput_per_min": 30.562,
+"timeouts": 0.0
+},
+"pol:e545dadfce192bae|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@3000|1566041736f4": {
+"crash_cars": 27.0,
+"crash_cars_per_1000": 51.852,
+"delay_mean_s": 6.06,
+"demand_per_min": 38.562,
+"exit_ok_rate": 0.946,
+"offroad_cars": 1.0,
+"throughput_per_min": 31.938,
+"timeouts": 1.0
+},
 "pol:e6c7568396205e96|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": false, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 2, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@1000|1566041736f4": {
 "crash_cars": 24.0,
 "crash_cars_per_1000": 144.33,
@@ -3777,6 +4347,66 @@
 "exit_ok_rate": 0.637,
 "offroad_cars": 8.0,
 "throughput_per_min": 23.625,
+"timeouts": 0.0
+},
+"pol:eeb346ff1f915bdb|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@1000|1566041736f4": {
+"crash_cars": 0.0,
+"crash_cars_per_1000": 0.0,
+"delay_mean_s": 0.809,
+"demand_per_min": 13.125,
+"exit_ok_rate": 1.0,
+"offroad_cars": 0.0,
+"throughput_per_min": 12.125,
+"timeouts": 0.0
+},
+"pol:eeb346ff1f915bdb|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@2000|1566041736f4": {
+"crash_cars": 2.0,
+"crash_cars_per_1000": 11.173,
+"delay_mean_s": 0.691,
+"demand_per_min": 11.562,
+"exit_ok_rate": 0.989,
+"offroad_cars": 0.0,
+"throughput_per_min": 11.062,
+"timeouts": 0.0
+},
+"pol:eeb346ff1f915bdb|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@3000|1566041736f4": {
+"crash_cars": 0.0,
+"crash_cars_per_1000": 0.0,
+"delay_mean_s": 0.668,
+"demand_per_min": 13.125,
+"exit_ok_rate": 1.0,
+"offroad_cars": 0.0,
+"throughput_per_min": 12.312,
+"timeouts": 0.0
+},
+"pol:eeb346ff1f915bdb|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@1000|1566041736f4": {
+"crash_cars": 14.0,
+"crash_cars_per_1000": 26.769,
+"delay_mean_s": 2.383,
+"demand_per_min": 35.625,
+"exit_ok_rate": 0.973,
+"offroad_cars": 0.0,
+"throughput_per_min": 31.812,
+"timeouts": 0.0
+},
+"pol:eeb346ff1f915bdb|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@2000|1566041736f4": {
+"crash_cars": 12.0,
+"crash_cars_per_1000": 22.945,
+"delay_mean_s": 1.937,
+"demand_per_min": 34.688,
+"exit_ok_rate": 0.977,
+"offroad_cars": 0.0,
+"throughput_per_min": 31.938,
+"timeouts": 0.0
+},
+"pol:eeb346ff1f915bdb|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.15|8x120.0@3000|1566041736f4": {
+"crash_cars": 33.0,
+"crash_cars_per_1000": 60.659,
+"delay_mean_s": 3.463,
+"demand_per_min": 38.562,
+"exit_ok_rate": 0.939,
+"offroad_cars": 2.0,
+"throughput_per_min": 33.875,
 "timeouts": 0.0
 },
 "pol:f5d1b53b8f43852b|{\"L\": 50.0, \"Rc\": 9.0, \"W\": 7.0, \"a_lat_max\": 4.0, \"acc_max\": 3.0, \"brake_light\": true, \"brake_max\": 7.0, \"kappa_max\": 0.2, \"kappa_rate\": 0.4, \"n_neighbours\": 4, \"n_signal\": 1, \"neighbour_vis\": 30.0, \"speed_control\": 0.0, \"v_max\": 14.0, \"v_reverse\": 2.0}|0.05|8x120.0@1000|1566041736f4": {

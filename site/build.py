@@ -20,7 +20,9 @@ runs/ is gitignored and usually holds only the latest runs, so by default (--sou
 merges: the committed snapshot plus the training runs found in runs/ (a run in runs/ replaces the
 snapshot's run of the same name). Training runs are runs/es*, runs/ppo*, runs/wide* and runs/r<N>_*
 (training rounds, PPO); prof_*, smoke_* and other folders are ignored. Warm starts are followed via
-args.json "init" (a run's state.npz) and "init_policy" (a transplanted checkpoint, matched by weights).
+args.json "init" (a run's state.npz), "init_policy" (a transplanted checkpoint, matched by weights) and
+"init_bc" (the MLP teacher a brain was behaviour-cloned from, matched by weights). Brains are MLPs
+(policy "layers") or set encoders (smartcrossing/policy_set.py: policy "arch" + flat "params").
 A build from runs/ (or a merge) also writes a compact snapshot of everything it used
 to results/site/ (committed): the chosen checkpoints (brains/<run>/<name>.npz, exact weights,
 so the bench cache keys stay valid), the warm-start chain info and the thinned learning curves
@@ -65,8 +67,8 @@ DEMANDS = [0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 1.0]  # up to the start page slider m
 # shown before it (narrow crossing); override with --main / --history
 # Checkpoints are named <run>/<file stem> (found in runs/ or in the snapshot); a path to an
 # .npz anywhere (e.g. results/wide_s1ft2_ckpt2650.npz) works too if its weights match one.
-DEFAULT_MAIN = ["r2_B_s1/ckpt_0639"]  # = results/round2_best.npz (round 2: practised with obstacle scenarios)
-DEFAULT_PREVIOUS = "r1_main_x3/current"  # = results/round1_x3.npz, the main brain before round 2
+DEFAULT_MAIN = ["r4_S_s1/ckpt_0205"]  # = results/round4_best.npz (round 4: set / attention encoder, K=8 neighbours)
+DEFAULT_PREVIOUS = "r2_B_s1/ckpt_0639"  # = results/round2_best.npz, the main brain before round 4
 DEFAULT_HISTORY = "ppo17/ckpt_5250"
 # second brain for mixing on the start page; old brains (2 lamps, no brake light) cannot share a sim with the
 # main brain, so none for now (was wide_s0ft/ckpt_2850 = results/wide_s0ft_ckpt2850.npz)
@@ -136,13 +138,32 @@ RUN_INFO = {
     "r1_main_x3": ("R1+", "Runde 1: länger weitergelernt",
                    "Rund 40 % weniger Unfälle als das Gehirn davor, bei dichtem Verkehr aber noch viele – das Hauptgehirn vor Runde 2."),
     "r2_B_s1": ("R2", "Runde 2: mit Hindernissen geübt",
-                "Das aktuelle Gehirn: im Training standen Wracks und parkende Autos im Weg. Es bremst viel öfter dahinter ab und reiht sich ein, statt hineinzufahren."),
+                "Im Training standen Wracks und parkende Autos im Weg: Es bremst viel öfter dahinter ab und reiht sich ein, statt hineinzufahren – das Hauptgehirn vor Runde 4."),
     "r2_A_s1": ("R2a", "Runde 2, Test: nur mehr Ausprobieren",
                 "Ohne Hindernisse im Training: schon deutlich weniger Unfälle als vorher, aber längst nicht so sicher vor Hindernissen."),
     "r2_A_s2": ("R2a'", "Runde 2, Test: nur mehr Ausprobieren, zweiter Lauf",
                 "Anderer Zufallsstart, fast dasselbe Ergebnis."),
     "r2_C_s1": ("R2c", "Runde 2, Test: Unfälle je nach eigenem Tempo bestraft",
                 "Mit Hindernissen und tempoabhängiger Strafe: etwas schlechter als ohne die Strafe (bei einem Lauf nicht sicher)."),
+    "r3_B_long": ("R3", "Runde 3: Hindernis-Gehirn länger trainiert",
+                  "Weitergelernt: kaum weniger Unfälle – mehr vom Gleichen half nicht."),
+    "r2_B_s2": ("R2'", "Runde 2: mit Hindernissen, zweiter Lauf",
+                "Gleiches Rezept, anderer Zufallsstart: deutlich mehr Unfälle – der erste Lauf hatte auch Glück."),
+    "r2_C_s2": ("R2c'", "Runde 2, Test: tempoabhängige Strafe, zweiter Lauf",
+                "Bestätigt: mit tempoabhängiger Strafe mehr Unfälle bei dichtem Verkehr."),
+    "r4_S_s1": ("R4", "Runde 4: ein Mini-Netz für jeden Nachbarn + Aufmerksamkeit",
+                "Das aktuelle Gehirn: schaut auf bis zu 8 Nachbarn, jeder geht durch dasselbe kleine Netz, dann entscheidet eine „Aufmerksamkeit“, wer gerade zählt. "
+                "Erst hat es das vorige Gehirn nachgeahmt, dann 12 Minuten weitergelernt."),
+    "r4_S_s2": ("R4'", "Runde 4: Mini-Netz + Aufmerksamkeit, zweiter Lauf",
+                "Anderer Zufallsstart, ähnlich gut – bei sehr dichtem Verkehr bleiben aber mehr Autos mitten auf der Kreuzung stecken."),
+    "r4_M_s1": ("R4m", "Runde 4, Vergleich: bisheriges Netz weitertrainiert",
+                "Gleich lange (12 Minuten) mit dem bisherigen Netz (64 × 64) weitergelernt: nicht besser als vorher, bei dichtem Verkehr eher mehr Unfälle."),
+    "r4_M_s2": ("R4m'", "Runde 4, Vergleich: bisheriges Netz, zweiter Lauf",
+                "Anderer Zufallsstart, ähnlich."),
+    "r4_W_s1": ("R4w", "Runde 4, Vergleich: doppelt so breites Netz",
+                "Mehr Neuronen (128 × 128) helfen auch – aber nicht so viel wie das Mini-Netz pro Nachbar."),
+    "r4_W_s2": ("R4w'", "Runde 4, Vergleich: breites Netz, zweiter Lauf",
+                "Anderer Zufallsstart, ähnlich."),
     "r1_x1": ("R1a", "Runde 1, Test: Unfälle so teuer wie bisher",
               "Kurzer Test: ähnlich gut wie mit dreifacher Strafe – der Unterschied ist Zufall."),
     "r1_x10": ("R1b", "Runde 1, Test: Unfälle zehnmal so teuer",
@@ -175,6 +196,7 @@ STEP_INFO = {
     "r1_x3": "Neue Regeln: Wracks mit Warnblinker, Bremslicht, eine Lampe, Einfahrt nur rechts; Unfälle kosten dreimal so viel, geübt wird mit dichterem Verkehr → die Kurve fällt erst, dann lernt das alte Gehirn um",
     "r1_main_x3": "Länger weitergelernt → rund 40 % weniger Unfälle als vorher: das Hauptgehirn bis Runde 2",
     "r2_B_s1": "Dazu Hindernisse im Training (Wracks, parkende Autos) → bremst viel öfter dahinter ab und reiht sich ein; noch Unfälle mitten auf der Kreuzung bei dichtem Verkehr",
+    "r4_S_s1": "Neues Gehirn: ein gemeinsames Mini-Netz für jeden der bis zu 8 Nachbarn plus Aufmerksamkeit; erst das vorige Gehirn nachgeahmt, dann weitergelernt → im Vergleich (gleich lange trainiert wie das bisherige und ein doppelt so breites Netz) die wenigsten Unfälle",
 }
 
 
@@ -228,7 +250,14 @@ def ckpt_meta(path: Path) -> dict:
     return {"gen": gen, "cfg": cfg, "extra": extra}
 
 
+def is_set(d: dict) -> bool:
+    """A set-encoder brain (policy_set.py): arch + flat params instead of MLP layers."""
+    return bool(d.get("arch")) and d["arch"].get("type") == "set"
+
+
 def policy_vector(d: dict) -> np.ndarray:
+    if is_set(d):
+        return np.asarray(d["params"], dtype=float)
     return np.concatenate([np.concatenate([np.ravel(np.asarray(l["W"], dtype=float)), np.asarray(l["b"], dtype=float)]) for l in d["layers"]])
 
 
@@ -249,8 +278,11 @@ def discover(world: str = "any") -> dict:
         for f in sorted((SNAPSHOT / "brains").glob("*/*.npz")):
             with np.load(f) as z:
                 info = json.loads(str(z["info"]))
-                pol = {**info["policy"], "in_scale": z["in_scale"].tolist(),
-                       "layers": [{"W": z[f"W{i}"].tolist(), "b": z[f"b{i}"].tolist()} for i in range(info["n_layers"])]}
+                pol = {**info["policy"], "in_scale": z["in_scale"].tolist()}
+                if "params" in z.files:  # set encoder: flat params (its arch is in info["policy"])
+                    pol["params"] = z["params"].tolist()
+                else:
+                    pol["layers"] = [{"W": z[f"W{i}"].tolist(), "b": z[f"b{i}"].tolist()} for i in range(info["n_layers"])]
             # snapshots written before the interface keys existed: lamp count / neighbour layout from the
             # checkpoint's own training cfg (old brains: 2 lamps, acceleration feature)
             phys = {**info["physics"], **{k: v for k, v in physics_of(pol.get("cfg") or {}).items() if k in INTERFACE_KEYS}}
@@ -274,9 +306,6 @@ def discover(world: str = "any") -> dict:
             except Exception as e:  # incompatible / broken checkpoint: skip loudly
                 print(f"  skip {f.relative_to(ROOT)}: {e}")
                 continue
-            if "layers" not in pol:  # set encoder (policy_set.py): sim.js runs it, brain view / snapshot not yet
-                print(f"  skip {f.relative_to(ROOT)}: set-encoder brains are not published on the site yet")
-                continue
             meta = ckpt_meta(f)
             if world != "any" and world_of(physics_of(meta["cfg"])) != world:
                 continue
@@ -293,12 +322,16 @@ def init_of(run: str) -> tuple[str, int] | None:
     p = RUNS / run / "args.json"
     args = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
     init = args.get("init") or ""
-    if not init and args.get("init_policy"):  # actor transplanted from a checkpoint: find it by its weights
-        ip = ROOT / args["init_policy"]
+    # actor transplanted from a checkpoint (init_policy) or behaviour-cloned from a teacher (init_bc): find it by its weights
+    src = args.get("init_policy") or args.get("init_bc")
+    if not init and src:
+        ip = ROOT / src
         if not ip.is_file():
             return None
         h = policy_hash(load_adapted_policy(ip))
-        c = next((c for c in FOUND.values() if c["hash"] == h and c["run"] != run), None)
+        # a run whose first checkpoint is an exact copy of the same brain is not its origin: prefer gen > 0
+        cands = [c for c in FOUND.values() if c["hash"] == h and c["run"] != run]
+        c = min(cands, key=lambda c: not c["gen"], default=None)
         return (c["run"], c["gen"] or 0) if c else None
     if not init:
         return None
@@ -330,11 +363,18 @@ def chain_of(run: str) -> list[tuple[str, int]]:
 
 
 # ------------------------------------------------------------------ bench
+def policy_driver(sim, payload):
+    """PolicyDriver for a bench / replay payload (params, sizes, in_scale[, arch]; arch None = MLP)."""
+    from smartcrossing.policy import PolicyDriver
+
+    params, sizes, in_scale, *rest = payload
+    return PolicyDriver(sim, np.asarray(params), sizes, in_scale=np.asarray(in_scale), archs=rest[0] if rest else None)
+
+
 def _bench_job(job):
     kind, payload, physics, demand, seed = job
     from smartcrossing.baselines import LaneDriver
     from smartcrossing.metrics import summarize
-    from smartcrossing.policy import PolicyDriver
     from smartcrossing.sim import Sim
 
     cfg = SimConfig(**{**physics, "demand": demand})
@@ -342,8 +382,7 @@ def _bench_job(job):
     if kind == "baseline":
         drv = LaneDriver(sim, payload)
     else:
-        params, sizes, in_scale = payload
-        drv = PolicyDriver(sim, np.asarray(params), sizes, in_scale=np.asarray(in_scale))
+        drv = policy_driver(sim, payload)
     for _ in range(int(BENCH_SECONDS / cfg.dt)):
         sim.step(drv.act())
     r = summarize(sim, BENCH_SECONDS)
@@ -426,7 +465,6 @@ def _replay_job(job):
     the car is a wreck (-1: never; a wreck stays cfg.wreck_time, its samples continue the track).
     Plus crash marks and the queue per arm. "lamps" = lamp channels per sample (0 for the baselines)."""
     from smartcrossing.baselines import LaneDriver
-    from smartcrossing.policy import PolicyDriver
     from smartcrossing.sim import DONE_NAMES, Sim
 
     kind, payload, physics, demand = job
@@ -435,8 +473,7 @@ def _replay_job(job):
     if kind == "baseline":
         drv = LaneDriver(sim, payload)
     else:
-        params, sizes, in_scale = payload
-        drv = PolicyDriver(sim, np.asarray(params), sizes, in_scale=np.asarray(in_scale))
+        drv = policy_driver(sim, payload)
     lamps = 0 if kind == "baseline" else cfg.n_signal
     tracks, marks, queue = {}, [], []
     n_warm, n = int(round(REPLAY_WARMUP / cfg.dt)), int(round(REPLAY_SECONDS / cfg.dt))
@@ -504,7 +541,8 @@ def record_replays(drivers: list[tuple[str, str, object, dict]], workers: int) -
 
 def pol_entry(c: dict) -> tuple:
     p = c["policy"]
-    return (f"pol:{c['hash']}", "policy", (policy_vector(p).tolist(), p["sizes"], p["in_scale"]), c["physics"])
+    payload = (policy_vector(p).tolist(), p["sizes"], p["in_scale"], *([p["arch"]] if is_set(p) else []))
+    return (f"pol:{c['hash']}", "policy", payload, c["physics"])
 
 
 # ------------------------------------------------------------------ logs
@@ -599,10 +637,12 @@ def write_snapshot(found: dict, used: list[str], chain_runs: list[str]):
         if c.get("snap") and (brains / rel).exists():  # unchanged copy from the snapshot itself
             continue
         info = {"run": c["run"], "file": c["file"], "method": c["method"], "gen": c["gen"], "physics": c["physics"],
-                "n_layers": len(pol["layers"]),
-                "policy": {k: v for k, v in pol.items() if k not in ("layers", "in_scale")}}
+                "n_layers": 0 if is_set(pol) else len(pol["layers"]),
+                "policy": {k: v for k, v in pol.items() if k not in ("layers", "in_scale", "params")}}
         arrays = {"in_scale": np.asarray(pol["in_scale"], dtype=float)}
-        for i, l in enumerate(pol["layers"]):
+        if is_set(pol):  # set encoder: flat params, the arch stays in info["policy"]
+            arrays["params"] = np.asarray(pol["params"], dtype=float)
+        for i, l in enumerate(pol.get("layers", [])):
             arrays[f"W{i}"], arrays[f"b{i}"] = np.asarray(l["W"], dtype=float), np.asarray(l["b"], dtype=float)
         path = brains / rel
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -697,6 +737,8 @@ def timeline(found: dict, best_id: str, n_max: int, keep: set = frozenset()) -> 
 def round_policy(d: dict, digits: int = 5) -> dict:
     """Shrink the JSON: weights rounded to `digits` decimals."""
     r = lambda a: np.round(np.asarray(a, dtype=float), digits).tolist()  # noqa: E731
+    if is_set(d):
+        return {**d, "in_scale": r(d["in_scale"]), "params": r(d["params"])}
     return {**d, "in_scale": r(d["in_scale"]), "layers": [{"W": r(l["W"]), "b": r(l["b"])} for l in d["layers"]]}
 
 

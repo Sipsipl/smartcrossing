@@ -234,4 +234,344 @@
   }
 
   SCX.NetView = NetView;
+
+  // ------------------------------------------------------------------ set-encoder view
+  /* The set / attention brain (smartcrossing/policy_set.py) drawn as its real structure, top to
+   * bottom: own values (ego) | up to K neighbour cards -> ONE shared mini-network (drawn once,
+   * stacked like cards) -> attention per neighbour ("who matters now?", live bars + line widths)
+   * -> mix (weighted sum) + own values -> two layers -> outputs. Values come from the simulator's
+   * own forward pass (SmartCrossing.setTrace), so the picture is exactly what drives the car. */
+  const SVGNS = "http://www.w3.org/2000/svg";
+  function svgEl(tag, attrs, parent) {
+    const e = document.createElementNS(SVGNS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  const NB_SHORT = { fwd: "vor mir", left: "links von mir", same: "gleiche Richtung", cross: "fährt quer", speed: "Tempo",
+    present: "da?", kappa: "lenkt", brake: "Bremslicht", hazard: "Warnblinker", acc: "beschleunigt", lamp1: "Lampe", lamp2: "Lampe 2" };
+  const sgn = (v) => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(2).replace(".", ",");
+
+  /** Strongest `per` incoming weights per output neuron of a row-major W (nin x nout). */
+  function topEdges(W, nin, nout, per, inScale) {
+    const list = [];
+    let wmax = 1e-9;
+    for (let o = 0; o < nout; o++) {
+      const cand = [];
+      for (let i = 0; i < nin; i++) {
+        const w = W[i * nout + o] * (inScale ? inScale[i] : 1);
+        cand.push([Math.abs(w), i, w]);
+      }
+      cand.sort((a, b) => b[0] - a[0]);
+      for (const [aw, i, w] of cand.slice(0, per)) { list.push({ i, o, w }); wmax = Math.max(wmax, aw); }
+    }
+    for (const e of list) e.n = Math.abs(e.w) / wmax;
+    return list;
+  }
+
+  class SetView {
+    /** host: an empty block element; layout: SC_DATA layout of the sim; pol: SmartCrossing.loadPolicy(set policy);
+     *  opts.fmt(item, rawValue) formats an observation value, opts.onHover(text|null), opts.onFocus(k|null). */
+    constructor(host, layout, pol, opts) {
+      this.host = host;
+      this.opts = Object.assign({ onHover: null, onFocus: null, fmt: null }, opts);
+      this.hoverId = null; this.pinned = null; this.tr = null; this.obs = null; this.lastFocus = undefined;
+      this.setPolicy(pol, layout);
+      new ResizeObserver(() => {
+        const w = Math.round(host.getBoundingClientRect().width);
+        if (w && Math.abs(w - this.W) > 2) this.build();
+      }).observe(host);
+      host.addEventListener("pointermove", (e) => this._hover(e.target));
+      host.addEventListener("click", (e) => {
+        const k = this._nbOf(this._idOf(e.target));
+        this.pinned = k !== null && this.pinned !== k ? k : null;
+        this._hover(e.target);
+      });
+      host.addEventListener("pointerleave", () => { this.hoverId = null; this.refresh(); if (this.opts.onHover) this.opts.onHover(null); });
+    }
+
+    setPolicy(pol, layout) {
+      this.pol = pol; this.ar = pol.arch;
+      if (layout) this.layout = layout;
+      const ar = this.ar, P = pol.P, E = ar.n_ego, F = ar.F;
+      const own = this.layout.groups.filter((g) => g.sub !== "neighbour");
+      this.ownGroups = own.map((g) => g.items.length);
+      this.ownItems = own.flatMap((g) => g.items.map((it) => Object.assign({ group: g.name }, it)));
+      this.nbItems = this.layout.groups.filter((g) => g.sub === "neighbour").map((g) => g.items);
+      const nbScale = pol.inScale ? pol.inScale.subarray(E, E + F) : null;
+      const dims = [F, ...ar.phi], ts = [E + ar.n_extra + (ar.pool === "attn" ? ar.heads * ar.dv : ar.phi[ar.phi.length - 1]), ...ar.hidden, ar.n_out];
+      this.phiEdges = ar.phi.map((_, l) => topEdges(P[`phi${l}.W`], dims[l], dims[l + 1], 2, l === 0 ? nbScale : null));
+      this.trunkEdges = ts.slice(1).map((n, l) => topEdges(P[`trunk${l}.W`], ts[l], n, l === ts.length - 2 ? 6 : 2, null));
+      this.nParams = pol.P ? Object.values(P).reduce((a, v) => a + v.length, 0) : 0;
+      this.build();
+    }
+
+    /** Mean attention per neighbour slot over the heads (0 for absent slots); null before the first update. */
+    attention() {
+      const tr = this.tr;
+      if (!tr || !tr.attn) return null;
+      const K = this.ar.K, H = tr.attn.length, a = new Array(K).fill(0);
+      for (const h of tr.attn) for (let k = 0; k < K; k++) a[k] += h[k] / H;
+      return a;
+    }
+
+    /** Neighbour shown in the mini-network: hovered, else pinned, else the one with the most attention. */
+    focus() {
+      const h = this._nbOf(this.hoverId);
+      if (h !== null) return h;
+      if (this.pinned !== null) return this.pinned;
+      const a = this.attention();
+      if (!a) return null;
+      let best = null;
+      a.forEach((v, k) => { if (this.tr.present[k] && (best === null || v > a[best])) best = k; });
+      return best;
+    }
+
+    build() {
+      const host = this.host, ar = this.ar, K = ar.K, F = ar.F, E = ar.n_ego;
+      const W = Math.max(300, Math.round(host.getBoundingClientRect().width || 300));
+      this.W = W;
+      const narrow = W < 460, fs = narrow ? 11 : 12;
+      host.innerHTML = "";
+      const svg = svgEl("svg", { width: W, class: "setnet", role: "img", "aria-label": "Aufbau des Gehirns mit Live-Werten" }, host);
+      const gE = svgEl("g", {}, svg), gL = svgEl("g", {}, svg), gN = svgEl("g", {}, svg), gT = svgEl("g", {}, svg);
+      const els = (this.els = {});
+      const live = (this.live = { ego: [], nb: [], cards: [], phi: [], bars: [], pct: [], down: [], up: [], mix: [], ego2: [], trunk: [], out: [], outTxt: [] });
+      const text = (x, y, s, o = {}) => {
+        const t = svgEl("text", { x, y, "font-size": o.size || fs, "text-anchor": o.anchor || "start", class: o.halo ? "halo" : "" }, gT);
+        t.style.fill = o.fill || "var(--muted)";
+        if (o.bold) t.setAttribute("font-weight", "600");
+        t.textContent = s;
+        return t;
+      };
+      const dot = (x, y, r, id, parent) => {
+        const c = svgEl("circle", { cx: x, cy: y, r, "data-id": id }, parent || gN);
+        c.style.stroke = "rgba(128,128,128,0.6)"; c.style.strokeWidth = "0.8";
+        els[id] = c;
+        return c;
+      };
+      const row = (n, x0, x1, y) => {
+        const step = (x1 - x0) / n;
+        return Array.from({ length: n }, (_, j) => [x0 + step * (j + 0.5), y]);
+      };
+      const edge = (A, B, e, parent) => {
+        const l = svgEl("line", { x1: A[0], y1: A[1], x2: B[0], y2: B[1] }, parent || gE);
+        l.style.stroke = e.w >= 0 ? "var(--pos)" : "var(--neg)";
+        l.style.strokeOpacity = (0.07 + 0.22 * e.n).toFixed(3);
+        l.style.strokeWidth = (0.5 + 1.1 * e.n).toFixed(2);
+        return l;
+      };
+      const pad = 6, gut = 14, X0 = pad + gut, X1 = W - pad;
+      const busX = pad + 4;
+      // 1) own values
+      text(X0, 13, narrow ? "Ich: eigene Werte (19)" : `Ich: eigene Werte (${E} Zahlen)`, { fill: "var(--fg)", bold: true });
+      const nG = this.ownGroups.length, unit = (X1 - X0) / (E + 0.7 * (nG - 1));
+      const rE = Math.min(5, unit * 0.36);
+      let gx = X0, idx = 0;
+      this.ownGroups.forEach((n) => {
+        for (let j = 0; j < n; j++, idx++) live.ego.push(dot(gx + unit * (j + 0.5), 29, rE, `ego:${idx}`));
+        gx += unit * (n + 0.7);
+      });
+      // 2) neighbour cards
+      const cardTop = 62, colW = (X1 - X0) / K, cw = colW - (narrow ? 3 : 5), cellH = narrow ? 9 : 10;
+      text(X0, cardTop - 7, narrow ? `Nachbarn (bis zu ${K}, nach Abstand)` : `Nachbarn: bis zu ${K} Autos in der Nähe, nach Abstand sortiert (je ${F} Zahlen)`, { fill: "var(--fg)", bold: true });
+      const rows = Math.ceil(F / 2), cardH = 16 + rows * cellH + 4;
+      const colX = (k) => X0 + colW * (k + 0.5);
+      for (let k = 0; k < K; k++) {
+        const x = colX(k) - cw / 2;
+        const g = svgEl("g", {}, gN);
+        const r = svgEl("rect", { x, y: cardTop, width: cw, height: cardH, rx: 5, "data-id": `card:${k}` }, g);
+        r.style.fill = "rgba(128,128,128,0.08)"; r.style.stroke = "rgba(128,128,128,0.55)";
+        els[`card:${k}`] = r;
+        const t = svgEl("text", { x: colX(k), y: cardTop + 12, "font-size": fs, "text-anchor": "middle", "data-id": `card:${k}` }, g);
+        t.style.fill = "var(--fg)"; t.textContent = String(k + 1);
+        const ds = [];
+        for (let f = 0; f < F; f++) {
+          const cx = colX(k) + (f % 2 ? 1 : -1) * Math.min(cw * 0.22, 9), cy = cardTop + 20 + Math.floor(f / 2) * cellH + cellH / 2;
+          ds.push(dot(cx, cy, narrow ? 2.8 : 3.3, `nb:${k}:${f}`, g));
+        }
+        live.cards.push(g); live.nb.push(ds);
+      }
+      const cardBot = cardTop + cardH;
+      // 3) the shared mini-network, drawn once (stacked cards behind it)
+      const bx0 = X0 + (narrow ? 10 : 22), bx1 = X1 - (narrow ? 14 : 26), bTop = cardBot + 34;
+      const bMid = (bx0 + bx1) / 2, rowsY = [bTop + 34, bTop + 64, bTop + 94], bBot = bTop + 106;
+      for (const off of [8, 4]) {
+        const s = svgEl("rect", { x: bx0 + off, y: bTop - off, width: bx1 - bx0, height: bBot - bTop, rx: 7 }, gE);
+        s.style.fill = "var(--panel)"; s.style.stroke = "rgba(128,128,128,0.5)";
+      }
+      const box = svgEl("rect", { x: bx0, y: bTop, width: bx1 - bx0, height: bBot - bTop, rx: 7 }, gE);
+      box.style.fill = "var(--panel)"; box.style.stroke = "rgba(128,128,128,0.75)";
+      text(bx0 + 8, bTop + 15, narrow ? "Mini-Netz (für alle gleich)" : `Mini-Netz – dasselbe für jeden Nachbarn (×${K})`, { fill: "var(--fg)", bold: true });
+      this.focusTxt = text(bx1 - 8, bTop + 15, "", { anchor: "end" });
+      for (let k = 0; k < K; k++) {
+        const l = svgEl("line", { x1: colX(k), y1: cardBot, x2: bMid + (colX(k) - bMid) * 0.45, y2: bTop - 9 }, gL);
+        l.style.stroke = "var(--muted)"; l.style.strokeWidth = "1";
+        live.down.push(l);
+      }
+      const phiPos = [row(F, bx0 + 10, bx1 - 10, rowsY[0]), ...ar.phi.map((n, l) => row(n, bx0 + 10, bx1 - 10, rowsY[Math.min(l + 1, 2)]))];
+      this.phiEdges.forEach((list, l) => list.forEach((e) => edge(phiPos[l][e.i], phiPos[l + 1][e.o], e)));
+      const rPhi = Math.min(3.4, ((bx1 - bx0 - 20) / Math.max(...ar.phi)) * 0.36);
+      phiPos.forEach((ps, l) => live.phi.push(ps.map(([x, y], j) => dot(x, y, l === 0 ? (narrow ? 3.4 : 4.2) : rPhi, `phi:${l}:${j}`))));
+      // 4) attention per neighbour
+      const aTitle = bBot + 20, aTop = bBot + 30, aH = 44, aBase = aTop + aH;
+      this.aH = aH; this.aBase = aBase;
+      text(X0, aTitle, narrow ? "Aufmerksamkeit: wer zählt gerade?" : "Aufmerksamkeit – ich frage: welcher Nachbar zählt gerade?", { fill: "var(--fg)", bold: true, halo: true });
+      const bw = Math.min(18, colW * 0.5);
+      for (let k = 0; k < K; k++) {
+        const l = svgEl("line", { x1: bMid + (colX(k) - bMid) * 0.45, y1: bBot, x2: colX(k), y2: aTop }, gL);
+        l.style.stroke = "var(--c4)"; live.up.push(l);
+        const hit = svgEl("rect", { x: colX(k) - colW / 2, y: aTop - 4, width: colW, height: aH + 20, "data-id": `att:${k}`, fill: "transparent" }, gN);
+        els[`att:${k}`] = hit;
+        const track = svgEl("rect", { x: colX(k) - bw / 2, y: aTop, width: bw, height: aH, rx: 2, "data-id": `att:${k}` }, gN);
+        track.style.fill = "rgba(128,128,128,0.13)";
+        const bar = svgEl("rect", { x: colX(k) - bw / 2, y: aBase, width: bw, height: 0, rx: 2, "data-id": `att:${k}` }, gN);
+        bar.style.fill = "var(--c4)";
+        live.bars.push(bar);
+        live.pct.push(text(colX(k), aBase + 13, "–", { anchor: "middle", size: narrow ? 10 : 11 }));
+      }
+      // ego bus: own values go to the attention (the "question") and on to the combined layer
+      const mixY = aBase + 52;
+      const bus = svgEl("path", { d: `M${busX} 29 L${busX} ${mixY} L${X0} ${mixY}`, fill: "none" }, gE);
+      bus.style.stroke = "var(--muted)"; bus.style.strokeDasharray = "3 3"; bus.style.strokeWidth = "1.2";
+      const q = svgEl("path", { d: `M${busX} ${aTop + aH / 2} L${X0 + colW / 2 - bw / 2 - 3} ${aTop + aH / 2}`, fill: "none" }, gE);
+      q.style.stroke = "var(--muted)"; q.style.strokeDasharray = "2 3";
+      svgEl("path", { d: `M${busX} 29 L${X0 - 2} 29`, fill: "none" }, gE).style.stroke = "var(--muted)";
+      // 5) combined: own values + mix -> trunk -> outputs
+      const nMix = this.ar.pool === "attn" ? ar.heads * ar.dv : ar.phi[ar.phi.length - 1];
+      const nIn = E + ar.n_extra + nMix, uIn = (X1 - X0) / (nIn + 2);
+      const egoX1 = X0 + uIn * E, mixX0 = egoX1 + uIn * 2;
+      const egoPos = row(E, X0, egoX1, mixY), mixPos = row(nMix, mixX0, X1, mixY);
+      const mixMid = (mixX0 + X1) / 2;
+      for (let k = 0; k < K; k++) {
+        const l = svgEl("line", { x1: colX(k), y1: aBase + 18, x2: mixMid + (colX(k) - mixMid) * 0.3, y2: mixY - 6 }, gL);
+        l.style.stroke = "var(--c4)"; live.down.push(l);
+      }
+      const rIn = Math.min(3.6, uIn * 0.4);
+      egoPos.forEach(([x, y], j) => live.ego2.push(dot(x, y, rIn, `ego:${j}`)));
+      mixPos.forEach(([x, y], j) => live.mix.push(dot(x, y, rIn, `mix:${j}`)));
+      text((X0 + egoX1) / 2, mixY + 16, narrow ? "ich" : "ich (eigene Werte)", { anchor: "middle", size: narrow ? 10 : 11 });
+      text(mixMid, mixY + 16, narrow ? "Mischung der Nachbarn" : "Mischung der Nachbarn (nach Aufmerksamkeit)", { anchor: "middle", size: narrow ? 10 : 11 });
+      const trunkPos = [[...egoPos, ...mixPos]];
+      let ty = mixY + 44;
+      ar.hidden.forEach((n) => { trunkPos.push(row(n, X0, X1, ty)); ty += 34; });
+      const outY = ty + 12, outPos = row(ar.n_out, X0, X1, outY);
+      trunkPos.push(outPos);
+      this.trunkEdges.forEach((list, l) => list.forEach((e) => edge(trunkPos[l][e.i], trunkPos[l + 1][e.o], e)));
+      const rH = Math.min(3.4, ((X1 - X0) / Math.max(...ar.hidden)) * 0.38);
+      ar.hidden.forEach((_, l) => live.trunk.push(trunkPos[l + 1].map(([x, y], j) => dot(x, y, rH, `tr:${l}:${j}`))));
+      const names = this.layout.actions;
+      outPos.forEach(([x, y], j) => {
+        live.out.push(dot(x, y, 9, `out:${j}`));
+        text(x, y + 24, names[j] || `Ausgang ${j + 1}`, { anchor: "middle", fill: "var(--fg)" });
+        live.outTxt.push(text(x, y + 39, "", { anchor: "middle", size: narrow ? 10 : 11 }));
+      });
+      const H = outY + 46;
+      svg.setAttribute("height", H);
+      svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+      this.lastFocus = undefined;
+      this.refresh();
+    }
+
+    update(tr, obsRow) { this.tr = tr; this.obs = obsRow; this.refresh(); }
+
+    refresh() {
+      const L = this.live, tr = this.tr;
+      if (!L) return;
+      const cPos = hexToRgb(cssVar("--pos", "#2a7fd4")), cNeg = hexToRgb(cssVar("--neg", "#d9731a"));
+      const bg = hexToRgb(cssVar("--bg", "#eeeeee")), dark = bg[0] + bg[1] + bg[2] < 3 * 110;
+      const col = (a) => {
+        const v = Math.max(-1, Math.min(1, a || 0)), base = dark ? [70, 78, 74] : [214, 220, 214], tgt = v >= 0 ? cPos : cNeg;
+        const t = Math.abs(v), c = base.map((b, i) => Math.round(b + (tgt[i] - b) * t));
+        return `rgb(${c[0]},${c[1]},${c[2]})`;
+      };
+      const fill = (el, v) => { el.style.fill = col(v); };
+      const ar = this.ar, K = ar.K, F = ar.F, E = ar.n_ego;
+      const att = this.attention(), foc = this.focus();
+      if (tr) {
+        L.ego.forEach((d, i) => fill(d, Math.tanh(tr.x[i])));
+        L.ego2.forEach((d, i) => fill(d, Math.tanh(tr.x[i])));
+        for (let k = 0; k < K; k++) {
+          const on = tr.present[k];
+          L.cards[k].style.opacity = on ? "1" : "0.35";
+          L.nb[k].forEach((d, f) => fill(d, on ? Math.tanh(tr.x[E + k * F + f]) : 0));
+          const a = att ? att[k] : 0;
+          L.bars[k].setAttribute("height", (this.aH * a).toFixed(1));
+          L.bars[k].setAttribute("y", (this.aBase - this.aH * a).toFixed(1));  // grows up from the baseline
+          L.pct[k].textContent = on ? `${Math.round(a * 100)} %` : "–";
+          for (const l of [L.up[k], L.down[K + k]]) {
+            l.style.strokeWidth = (0.6 + 7 * a).toFixed(2);
+            l.style.strokeOpacity = on ? (0.2 + 0.8 * Math.min(1, a * 1.6)).toFixed(2) : "0.06";
+          }
+          L.down[k].style.strokeOpacity = on ? "0.55" : "0.12";
+          const card = this.els[`card:${k}`];
+          card.style.stroke = k === foc ? "var(--c4)" : "rgba(128,128,128,0.55)";
+          card.style.strokeWidth = k === foc ? "2.2" : "1";
+        }
+        const on = foc !== null && tr.present[foc];
+        L.phi[0].forEach((d, f) => fill(d, on ? Math.tanh(tr.x[E + foc * F + f]) : 0));
+        for (let l = 1; l < L.phi.length; l++) L.phi[l].forEach((d, j) => fill(d, on ? tr.phi[foc][l - 1][j] : 0));
+        this.focusTxt.textContent = on ? `${this.W < 460 ? "" : "zeigt gerade: "}Nachbar ${foc + 1}` : this.W < 460 ? "niemand da" : "gerade kein Nachbar in Sicht";
+        L.mix.forEach((d, j) => fill(d, Math.tanh(tr.pooled[j])));
+        L.trunk.forEach((ds, l) => ds.forEach((d, j) => fill(d, tr.trunk[l][j])));
+        L.out.forEach((d, j) => fill(d, tr.out[j]));
+        const word = [(v) => (v >= 0 ? "Gas" : "Bremse"), (v) => (Math.abs(v) < 0.02 ? "geradeaus" : v > 0 ? "links" : "rechts"), (v) => (v >= 0 ? "hell" : "dunkel")];
+        L.outTxt.forEach((t, j) => { t.textContent = `${sgn(tr.out[j])} · ${(word[j] || (() => ""))(tr.out[j])}`; });
+      }
+      for (const [id, el] of Object.entries(this.els)) {
+        if (!id.startsWith("card:") && !id.startsWith("att:")) {
+          el.style.stroke = id === this.hoverId ? "var(--fg)" : "rgba(128,128,128,0.6)";
+          el.style.strokeWidth = id === this.hoverId ? "2" : "0.8";
+        }
+      }
+      if (foc !== this.lastFocus) { this.lastFocus = foc; if (this.opts.onFocus) this.opts.onFocus(foc); }
+      if (this.hoverId && this.opts.onHover) this.opts.onHover(this.describe(this.hoverId));
+    }
+
+    _idOf(t) { const e = t && t.closest ? t.closest("[data-id]") : null; return e ? e.getAttribute("data-id") : null; }
+    _nbOf(id) {
+      if (!id) return null;
+      const m = /^(?:card|att|nb):(\d+)/.exec(id);
+      return m ? +m[1] : null;
+    }
+    _hover(target) {
+      const id = this._idOf(target);
+      if (id === this.hoverId) return;
+      this.hoverId = id;
+      this.refresh();
+      if (this.opts.onHover) this.opts.onHover(id ? this.describe(id) : null);
+    }
+
+    describe(id) {
+      const tr = this.tr, [kind, a, b] = id.split(":"), ar = this.ar, E = ar.n_ego, F = ar.F;
+      const raw = (i) => (this.obs ? this.obs[i] : null);
+      const fmt = (it) => (this.opts.fmt && raw(it.i) !== null ? this.opts.fmt(it, raw(it.i)) : tr ? sgn(tr.x[it.i]) : "");
+      const att = this.attention();
+      if (kind === "ego") { const it = this.ownItems[+a]; return it ? `Ich · ${it.group} · ${it.label}: ${fmt(it)}` : ""; }
+      const k = +a;
+      if (kind === "nb" || kind === "card" || kind === "att") {
+        if (tr && !tr.present[k]) return `Nachbar ${k + 1}: gerade niemand in Sicht (zählt nicht mit)`;
+        const items = this.nbItems[k] || [];
+        if (kind === "nb") {
+          const it = items[+b];
+          return it ? `Nachbar ${k + 1} · ${NB_SHORT[it.key.split("_").slice(1).join("_")] || it.label}: ${fmt(it)}` : "";
+        }
+        const by = (key) => items.find((it) => it.key.endsWith("_" + key));
+        const pos = by("fwd") && by("left") ? ` · ${fmt(by("fwd"))} vor, ${fmt(by("left"))} links von mir · ${fmt(by("speed"))}` : "";
+        const heads = tr && tr.attn ? ` (${tr.attn.length} „Köpfe“: ${tr.attn.map((h) => Math.round(h[k] * 100) + " %").join(", ")})` : "";
+        return `Nachbar ${k + 1}: Aufmerksamkeit ${att ? Math.round(att[k] * 100) : 0} %${heads}${pos}`;
+      }
+      if (kind === "phi") {
+        const f = this.focus(), v = tr && f !== null && tr.present[f] ? (+a === 0 ? Math.tanh(tr.x[E + f * F + +b]) : tr.phi[f][+a - 1][+b]) : null;
+        const what = +a === 0 ? `Eingang „${NB_SHORT[(this.nbItems[0][+b] || { key: "" }).key.split("_").slice(1).join("_")] || +b + 1}“` : `Schicht ${a}, Neuron ${+b + 1}`;
+        return `Mini-Netz · ${what}${v !== null ? ` = ${sgn(v)} (für Nachbar ${f + 1})` : ""}`;
+      }
+      if (kind === "mix") return `Mischung ${+a + 1}${tr ? ` = ${sgn(tr.pooled[+a])}` : ""}: Summe über die Nachbarn, jeder gewichtet mit seiner Aufmerksamkeit`;
+      if (kind === "tr") return `Schicht ${+a + 1}, Neuron ${+b + 1}${tr ? ` = ${sgn(tr.trunk[+a][+b])}` : ""}`;
+      if (kind === "out") return `Ausgang: ${this.layout.actions[+a]}${tr ? ` = ${sgn(tr.out[+a])}` : ""}`;
+      return "";
+    }
+  }
+
+  SCX.SetView = SetView;
 })();
