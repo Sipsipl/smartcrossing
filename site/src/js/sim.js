@@ -655,22 +655,28 @@
     return y;
   }
 
-  /** Set-encoder forward on one (scaled) input row x: linear output (policy_set.forward). */
-  function setForwardRow(pol, x) {
+  /** Set-encoder forward on one (scaled) input row x: linear output (policy_set.forward).
+   *  tr (optional object) receives the intermediate values for the brain view: ego, present[K],
+   *  phi[K][layer] (per-neighbour net activations), attn[H][K] (attention weights, 0 for absent neighbours),
+   *  pooled, trunk (hidden activations) and the linear output. */
+  function setForwardRow(pol, x, tr) {
     const ar = pol.arch, P = pol.P, E = ar.n_ego, K = ar.K, F = ar.F;
     const ego = new Float64Array(E + ar.n_extra);
     for (let i = 0; i < E; i++) ego[i] = x[i];
     for (let i = 0; i < ar.n_extra; i++) ego[E + i] = x[E + K * F + i];
-    const hs = [], present = [];
+    const hs = [], present = [], phiLayers = [];
     for (let k = 0; k < K; k++) {
       let h = x.subarray(E + k * F, E + (k + 1) * F);
       present.push(h[ar.present] !== 0);
       let nin = F;
+      const ls = [];
       for (let l = 0; l < ar.phi.length; l++) {
         h = affine(h, P[`phi${l}.W`], P[`phi${l}.b`], nin, ar.phi[l]).map(Math.tanh);
         nin = ar.phi[l];
+        if (tr) ls.push(h);
       }
       hs.push(h);
+      phiLayers.push(ls);
     }
     const e = ar.phi[ar.phi.length - 1];
     let pooled;
@@ -681,6 +687,7 @@
       const vs = hs.map((h) => affine(h, P["v.W"], P["v.b"], e, H * dv));
       pooled = new Float64Array(H * dv);
       const sc = 1 / Math.sqrt(dk);
+      if (tr) tr.attn = [];
       for (let hd = 0; hd < H; hd++) {
         const s = new Float64Array(K);
         let mx = -Infinity;
@@ -693,6 +700,7 @@
         let sum = 0.0;
         for (let k = 0; k < K; k++) { s[k] = present[k] ? Math.exp(s[k] - mx) : 0.0; sum += s[k]; }
         sum = Math.max(sum, 1e-30);
+        if (tr) tr.attn.push(Array.from(s, (v) => v / sum));
         for (let k = 0; k < K; k++) {
           if (!s[k]) continue;
           const w = s[k] / sum;
@@ -714,11 +722,24 @@
     z.set(ego, 0);
     z.set(pooled, ego.length);
     const ts = [z.length, ...ar.hidden, ar.n_out];
+    if (tr) Object.assign(tr, { ego, present, phi: phiLayers, pooled, trunk: [] });
     for (let l = 0; l + 1 < ts.length; l++) {
       z = affine(z, P[`trunk${l}.W`], P[`trunk${l}.b`], ts[l], ts[l + 1]);
       if (l + 2 < ts.length) z = z.map(Math.tanh);
+      if (tr && l + 2 < ts.length) tr.trunk.push(z);
     }
+    if (tr) tr.linear = z;
     return z;
+  }
+
+  /** Set-encoder forward of one observation row with all intermediate values (see setForwardRow);
+   *  trace.out equals forward(pol, obs, off). */
+  function setTrace(pol, obs, off = 0) {
+    const x = new Float64Array(pol.nin);
+    for (let i = 0; i < pol.nin; i++) x[i] = pol.inScale ? obs[off + i] * pol.inScale[i] : obs[off + i];
+    const tr = { x };
+    tr.out = setForwardRow(pol, x, tr).map(Math.tanh);
+    return tr;
   }
 
   /** Normalises a policy JSON (policy.export_json format) for fast evaluation. */
@@ -786,6 +807,6 @@
     POS_SCALE, GOAL_SCALE, RAY_RANGE, CAR_LENGTH, CAR_WIDTH, HAZARD_PERIOD,
     DONE, defaultConfig, obsDim, actDim, nbFeatures, nNeighbours, wreckSteps, rot, cornerDist, rayEdgeDist, routeDist, freeFlowTime,
     gripKappa, laneOffsets, makeRng,
-    Sim, loadPolicy, forward, act,
+    Sim, loadPolicy, forward, act, setTrace,
   };
 });

@@ -6,7 +6,7 @@ Read `docs/PLAN.md` first (goals, fixed decisions, architecture). Log experiment
 ```bash
 poetry install
 poetry install --with gpu   # optional: torch 2.6.0+cu118 (sim_torch, ppo --update-device cuda); CI skips it
-poetry run pytest -q
+poetry run pytest -q               # cuda test cases are skipped unless SC_TEST_CUDA=1 (never while a training runs)
 poetry run python -m smartcrossing.cli bench --driver reservation --envs 8 --demand 0.15
 poetry run python -m smartcrossing.cli render --driver light --out runs/light   # sheet.png + episode.gif
 ```

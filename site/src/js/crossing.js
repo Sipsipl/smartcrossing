@@ -15,6 +15,9 @@
   const WINDOW_S = 60;
   const TRAIL_FADE = 5; // s: trails of removed cars fade out over this time
   const MARK_FADE = 5; // s: crash / off-road markers fade out
+  // observation / action interface (array sizes of a sim): lamp count, neighbour layout, neighbour slots
+  const IFACE_KEYS = ["n_signal", "brake_light", "n_neighbours"];
+  SCX.IFACE_KEYS = IFACE_KEYS;
 
   SCX.MAN_COLOURS = MAN_COLOURS;
   SCX.MAN_NAMES = MAN_NAMES;
@@ -98,14 +101,14 @@
      *  for a sim (array sizes), so a change needs a new sim. Other types must share it. */
     _iface() {
       const phys = (this.types[0] && this.types[0].physics) || {}, d = SC.defaultConfig(), out = {};
-      for (const k of ["n_signal", "brake_light"]) out[k] = phys[k] !== undefined ? phys[k] : d[k];
+      for (const k of IFACE_KEYS) out[k] = phys[k] !== undefined ? phys[k] : d[k];
       return out;
     }
 
     setTypes(types, keepSim) {
       this.types = types;
       const want = this._iface();
-      if (keepSim && (want.n_signal !== this.sim.cfg.n_signal || want.brake_light !== this.sim.cfg.brake_light)) keepSim = false;
+      if (keepSim && IFACE_KEYS.some((k) => want[k] !== this.sim.cfg[k])) keepSim = false;
       if (keepSim) {
         this.perType = types.map(() => ({ exits: 0, bad: 0 }));
         this.applyControls();
@@ -121,7 +124,7 @@
       cfg.signal_enabled = c.signal;
       cfg.signal_noise = c.noise;
       const phys = (this.types[0] && this.types[0].physics) || {};
-      for (const [k, v] of Object.entries(phys)) if (k !== "n_signal" && k !== "brake_light") cfg[k] = v; // (interface: newSim)
+      for (const [k, v] of Object.entries(phys)) if (!IFACE_KEYS.includes(k)) cfg[k] = v; // (interface: newSim)
       const probs = this.types.map((t) => t.share);
       const tot = probs.reduce((a, b) => a + b, 0);
       this.sim.groupProbs = tot > 0 ? probs.map((p) => p / tot) : this.types.map((_, i) => (i === 0 ? 1 : 0));
@@ -359,6 +362,7 @@
       }
       ctx.globalAlpha = 1;
       if (overlay) this._drawSensors(sel, false);
+      if (sel >= 0 && this.opts.overlay === "attention") this._drawAttention(sel);
       if (sel >= 0) {
         ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 0.35;
         ctx.beginPath(); ctx.arc(ip.x[sel], ip.y[sel], 3.4, 0, 2 * Math.PI); ctx.stroke();
@@ -460,6 +464,37 @@
         ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(vx, vy); ctx.stroke();
         arrowHead(ctx, x, y, vx, vy, 1.4);
       }
+    }
+
+    /** Attention overlay (brain page, set-encoder brains): a line from car n to every neighbour it sees,
+     *  as thick as the attention the brain gives it (opts.attention(n) -> {w: [K], focus: k | null}),
+     *  plus the slot number as on the brain diagram. */
+    _drawAttention(n) {
+      const att = this.opts.attention && this.opts.attention(n);
+      const sim = this.sim, ctx = this.ctx, cfg = sim.cfg, m = att && SCX.obsMap(cfg);
+      if (!m) return;
+      const o = this.obsRow(n), ip = this.ip || this._interp();
+      const x = ip.x[n], y = ip.y[n], th = ip.th[n], ct = Math.cos(th), st = Math.sin(th);
+      const lw = 1.6 / (this.px || 4) * (window.devicePixelRatio || 1);
+      m.nbs.forEach((nb, k) => {
+        if (o[nb.present.i] < 0.5) return;
+        const f = o[nb.fwd.i] * nb.fwd.scale, l = o[nb.left.i] * nb.left.scale;
+        const nx = x + ct * f - st * l, ny = y + st * f + ct * l, w = Math.max(0, Math.min(1, att.w[k] || 0));
+        ctx.strokeStyle = `rgba(255,196,40,${(0.25 + 0.75 * Math.min(1, w * 1.6)).toFixed(2)})`;
+        ctx.lineWidth = lw * (0.7 + 7 * w);
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(nx, ny); ctx.stroke();
+        if (k === att.focus) {
+          ctx.strokeStyle = "#ffffff"; ctx.lineWidth = lw * 1.4; ctx.setLineDash([0.8, 0.6]);
+          ctx.beginPath(); ctx.arc(nx, ny, 3.4, 0, 2 * Math.PI); ctx.stroke(); ctx.setLineDash([]);
+        }
+        ctx.beginPath(); ctx.arc(nx, ny, 1.55, 0, 2 * Math.PI);
+        ctx.fillStyle = "rgba(255,196,40,0.95)"; ctx.fill();
+        ctx.save(); ctx.translate(nx, ny); ctx.scale(1, -1);
+        ctx.fillStyle = "#222"; ctx.font = "bold 2px ui-sans-serif, system-ui, sans-serif";
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(String(k + 1), 0, 0.1);
+        ctx.restore();
+      });
     }
 
     // ---------------------------------------------------------------- stats
@@ -671,7 +706,8 @@
     const D = window.SC_DATA;
     if (!cfg) {
       const main = D && D.policies && D.policies[D.main_id];
-      cfg = Object.assign(SC.defaultConfig(), main ? { n_signal: main.physics.n_signal, brake_light: main.physics.brake_light } : {});
+      cfg = SC.defaultConfig();
+      if (main) for (const k of IFACE_KEYS) if (main.physics[k] !== undefined) cfg[k] = main.physics[k];
     }
     const lay = SCX.layoutFor(cfg) || (cfg && SCX.layoutFor());
     const dim = SC.obsDim(cfg);

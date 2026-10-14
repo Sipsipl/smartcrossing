@@ -1,6 +1,7 @@
-"""Behaviour cloning of an MLP brain into a set-encoder actor (``ppo --arch set --init-bc TEACHER.npz``).
+"""Behaviour cloning of an MLP brain into a new actor (``ppo --init-bc TEACHER.npz``): a set-encoder actor
+(``--arch set``) or an MLP of other sizes (``--arch mlp --hidden ...``).
 
-There is no function-preserving map from the MLP to the set encoder, so the new actor imitates the
+There is no function-preserving map from the MLP to the set encoder (or a wider MLP), so the new actor imitates the
 teacher instead: the teacher drives a numpy Sim in the training world (its own cars, so the states
 are the ones it visits), every car's observation is recorded, and the student's linear output (the
 PPO mean in pre-squash space) is fitted to the teacher's pre-tanh output by MSE (Adam, torch).
@@ -62,11 +63,17 @@ def collect(teacher: str, cfg: SimConfig, envs=32, seconds=120.0, demand=(0.1, 0
     return np.concatenate(X), np.concatenate(Y)
 
 
-def fit(arch, p0, x, y, steps=3000, batch=4096, lr=1e-3, device="cpu", seed=0, log=None):
-    """Adam on MSE(student linear output, teacher mu); x already scaled with the student's in_scale."""
-    import torch
+def student_forward(p, arch, x):
+    """Linear output of the student: a set encoder (``arch`` dict) or an MLP (``arch`` = layer sizes)."""
+    from .ppo_torch import mlp_forward, set_forward
 
-    from .ppo_torch import set_forward
+    return set_forward(p, arch, x) if isinstance(arch, dict) else mlp_forward(p, list(arch), x)[0]
+
+
+def fit(arch, p0, x, y, steps=3000, batch=4096, lr=1e-3, device="cpu", seed=0, log=None):
+    """Adam on MSE(student linear output, teacher mu); x already scaled with the student's in_scale.
+    ``arch``: set-encoder arch dict or MLP layer sizes."""
+    import torch
 
     dev = torch.device(device)
     X = torch.as_tensor(x, dtype=torch.float32, device=dev)
@@ -77,22 +84,23 @@ def fit(arch, p0, x, y, steps=3000, batch=4096, lr=1e-3, device="cpu", seed=0, l
     n = len(X)
     for s in range(steps):
         idx = torch.randint(0, n, (min(batch, n),), generator=gen, device=dev)
-        loss = torch.mean((set_forward(p, arch, X[idx]) - Y[idx]) ** 2)
+        loss = torch.mean((student_forward(p, arch, X[idx]) - Y[idx]) ** 2)
         opt.zero_grad()
         loss.backward()
         opt.step()
         if log and (s % 500 == 0 or s == steps - 1):
             log(f"bc step {s}: mse {float(loss):.4f}")
     with torch.no_grad():
-        full = float(torch.mean((set_forward(p, arch, X) - Y) ** 2))
+        full = float(torch.mean((student_forward(p, arch, X) - Y) ** 2))
     return p.detach().cpu().double().numpy(), full
 
 
-def bc_actor(teacher: str, cfg: SimConfig, arch: dict, in_scale, p0, steps=3000, seconds=120.0, device="cpu", seed=0,
+def bc_actor(teacher: str, cfg: SimConfig, arch, in_scale, p0, steps=3000, seconds=120.0, device="cpu", seed=0,
              log=print):
-    """Set-encoder actor params cloned from the MLP checkpoint ``teacher`` (see module doc)."""
+    """Actor params (set encoder: ``arch`` dict; MLP: ``arch`` = layer sizes) cloned from the MLP checkpoint
+    ``teacher`` (see module doc)."""
     x, y = collect(teacher, cfg, seconds=seconds, seed=seed)
     log(f"bc: {len(x)} car-steps from {teacher}; teacher mu var {np.var(y, 0).round(3).tolist()}")
     p, mse = fit(arch, p0, x * in_scale, y, steps=steps, device=device, seed=seed, log=log)
-    log(f"bc: final mse {mse:.4f}")
+    log(f"bc: final mse {mse:.4f}, R2 {1 - mse / float(np.mean(np.var(y, 0))):.3f}")
     return p

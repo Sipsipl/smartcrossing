@@ -94,9 +94,7 @@ Erledigt (2026-10-11): lokale Einrichtung, GPU-Training (Roadmap C), Runde 1 in 
 - Windows: ein lokaler Webserver (`python -m http.server` in `site/public`, z. B. von einem
   Browser-Check) sperrt das Verzeichnis; `site/build.py` bricht dann mitten im Löschen ab. Vor dem
   Build solche Server beenden und vor jedem Commit `git status` prüfen.
-- `pytest` nutzt automatisch die GPU, wenn CUDA da ist (Torch-Paritätstests). Während ein Training
-  läuft, Tests nur mit `CUDA_VISIBLE_DEVICES=-1` starten (sonst läuft der GPU-Speicher voll und das
-  Training steht). Besser: CUDA-Tests nur per explizitem Schalter aktivieren (offen).
+- CUDA-Tests laufen nur mit `SC_TEST_CUDA=1` (nie während eines Trainings; Standardlauf überspringt sie).
 - Mehrere CPU-lastige Jobs gleichzeitig (Training + Website-Build) überbuchen die Kerne.
 - Alte Checkpoints laufen über `smartcrossing/policy_compat.py`; bei Änderungen an
   Beobachtung/Aktion prüfen, dass die Website-Gehirne weiter laden (`site/build.py`, Tests).
