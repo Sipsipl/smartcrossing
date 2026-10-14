@@ -7,6 +7,11 @@ with tanh hidden layers and a tanh output.
 ``forward`` accepts either one parameter vector (D,) applied to every car, or one
 vector per environment (B, D) so a whole ES population can be evaluated inside a
 single batched Sim (environment b uses params[b]).
+
+Architecture: the default is this MLP on the flat observation (``arch`` None / absent from the
+checkpoint). ``arch = {"type": "set", ...}`` is the neighbour set encoder of policy_set.py; its
+checkpoints store the arch dict next to the flat params (``save_npz(..., arch=...)``) and keep
+``sizes = [obs_dim, *trunk hidden, act_dim]`` so every size check stays valid.
 """
 
 import json
@@ -14,7 +19,8 @@ from pathlib import Path
 
 import numpy as np
 
-from .sim import K_NEIGHBOURS, NB_FEATURES, OBS_DIM, Sim, SimConfig, act_dim, obs_dim
+from . import policy_set
+from .sim import OBS_DIM, Sim, SimConfig, act_dim, nb_features, obs_dim
 
 
 def layer_sizes(cfg: SimConfig, hidden=(32, 32)) -> list[int]:
@@ -26,8 +32,8 @@ def default_in_scale(cfg: SimConfig) -> np.ndarray:
     units) are already scaled by fixed constants in the sim; neighbour positions are
     divided by 30 m there, rescale them to ~10 m units."""
     s = np.ones(obs_dim(cfg))
-    blk = NB_FEATURES + cfg.n_signal
-    for k in range(K_NEIGHBOURS):
+    blk = nb_features(cfg) + cfg.n_signal
+    for k in range(cfg.n_neighbours):
         # neighbour relative position (~10 m units; a longer perception range keeps far cars in range)
         s[OBS_DIM + k * blk : OBS_DIM + k * blk + 2] = 3.0 * min(1.0, 30.0 / cfg.neighbour_vis)
     return s
@@ -64,10 +70,19 @@ def unpack(params: np.ndarray, sizes):
     return layers
 
 
-def forward(params: np.ndarray, obs: np.ndarray, sizes, in_scale=None) -> np.ndarray:
+def is_set(arch) -> bool:
+    return bool(arch) and arch.get("type", "mlp") == "set"
+
+
+def forward(params: np.ndarray, obs: np.ndarray, sizes, in_scale=None, arch=None) -> np.ndarray:
     """params (D,) with obs (..., obs_dim), or params (B, D) with obs (B, N, obs_dim).
-    in_scale (obs_dim,) multiplies the observation first (None = identity)."""
+    in_scale (obs_dim,) multiplies the observation first (None = identity). arch: None / mlp,
+    or a policy_set arch (one params vector only)."""
     h = obs if in_scale is None else obs * in_scale
+    if is_set(arch):
+        if params.ndim != 1:
+            raise ValueError("set-encoder policies take one parameter vector")
+        return np.tanh(policy_set.forward(params, arch, h))
     batched = params.ndim == 2
     for W, b in unpack(params, sizes):
         if batched:
@@ -81,7 +96,7 @@ class PolicyDriver:
     """Drives every car of a Sim with one of several parameter vectors chosen by
     ``sim.group``. ``mute[g]`` forces the signal output of group g to zero."""
 
-    def __init__(self, sim: Sim, params, sizes, mute=None, train_cfg: dict | None = None, in_scale=None):
+    def __init__(self, sim: Sim, params, sizes, mute=None, train_cfg: dict | None = None, in_scale=None, archs=None):
         self.sim = sim
         self.in_scale = in_scale
         self.sizes = list(sizes)
@@ -89,6 +104,11 @@ class PolicyDriver:
         self.params = [np.asarray(p, dtype=float) for p in plist]
         self.mute = list(mute) if mute is not None else [False] * len(self.params)
         self.train_cfg = train_cfg or {}
+        # architecture per parameter vector (None = MLP); a single dict applies to all
+        self.archs = list(archs) if isinstance(archs, (list, tuple)) else [archs] * len(self.params)
+        for p, ar in zip(self.params, self.archs):
+            if is_set(ar) and (policy_set.in_dim(ar) != obs_dim(sim.cfg) or policy_set.n_params(ar) != p.shape[-1]):
+                raise ValueError(f"set-encoder policy {ar} does not match the sim's observation / its params")
         if self.sizes[0] != obs_dim(sim.cfg) or self.sizes[-1] != act_dim(sim.cfg):
             raise ValueError(f"policy sizes {self.sizes} do not match sim obs/act dims")
 
@@ -97,25 +117,38 @@ class PolicyDriver:
         """``path`` may be one .npz file or several joined by '+' (one per group)."""
         from .policy_compat import LEGACY_INTERFACE, adapt_inputs
 
-        plist, sizes, tcfg, scale = [], None, None, None
-        for p in str(path).split("+"):
+        paths = str(path).split("+")
+        # sensors, the action interface and the world (geometry, grip) are part of what a policy
+        # learned: run it with the values it was trained with (older checkpoints: the legacy
+        # values, see policy_compat); all policies of one sim must share them. Traffic settings
+        # (spawn_right, wreck_time, demand) stay those of the given sim.
+        ifaces = []
+        for p in paths:
+            tc = load_npz(p)[2]
+            ifaces.append({k: type(legacy)(tc.get(k, legacy)) for k, legacy in LEGACY_INTERFACE.items()})
+        for p, iface in zip(paths[1:], ifaces[1:]):
+            if iface != ifaces[0]:
+                diff = {k: (ifaces[0][k], v) for k, v in iface.items() if v != ifaces[0][k]}
+                raise ValueError(f"policies with different interfaces cannot share one sim: {paths[0]} vs {p} "
+                                 f"differ in {diff}")
+        for k, v in ifaces[0].items():
+            setattr(sim.cfg, k, v)
+        if sim.sig.shape[-1] != sim.cfg.n_signal:  # lamp count of the checkpoint (fresh sim: lamps are 0)
+            sim.sig = np.zeros((*sim.sig.shape[:-1], sim.cfg.n_signal))
+        plist, archs, sizes, tcfg, scale = [], [], None, None, None
+        for p in paths:
             params, sizes, tcfg = load_npz(p)
             scale = load_in_scale(p)
-            if sizes[0] != obs_dim(sim.cfg):  # older observation layout: remap inputs by feature name
+            archs.append(load_arch(p))
+            if sizes[0] != obs_dim(sim.cfg) and not is_set(archs[-1]):  # older observation layout: remap inputs by feature name
                 d = adapt_inputs(export_json(p), sim.cfg)
                 sizes = d["sizes"]
                 params = np.concatenate([np.concatenate([np.ravel(la["W"]), la["b"]]) for la in d["layers"]])
                 scale = np.asarray(d["in_scale"], dtype=float)
             plist.append(params)
         if mute is None:  # policies trained without signal never learned to use their lamp
-            mute = [not load_npz(p)[2].get("signal_enabled", True) for p in str(path).split("+")]
-        # sensors, the action interface and the world (geometry, grip) are part of what a policy
-        # learned: run it with the values it was trained with (first policy wins; older
-        # checkpoints: the legacy values, see policy_compat)
-        tc = load_npz(str(path).split("+")[0])[2]
-        for k, legacy in LEGACY_INTERFACE.items():
-            setattr(sim.cfg, k, type(legacy)(tc.get(k, legacy)))
-        return cls(sim, plist, sizes, mute=mute, train_cfg=tcfg, in_scale=scale)
+            mute = [not load_npz(p)[2].get("signal_enabled", True) for p in paths]
+        return cls(sim, plist, sizes, mute=mute, train_cfg=tcfg, in_scale=scale, archs=archs)
 
     def act(self) -> np.ndarray:
         obs = self.sim.observe()
@@ -125,22 +158,25 @@ class PolicyDriver:
             m = grp == g if len(self.params) > 1 else np.ones(grp.shape, dtype=bool)
             if not m.any():
                 continue
-            a = forward(p, obs[m], self.sizes, self.in_scale)
+            a = forward(p, obs[m], self.sizes, self.in_scale, self.archs[g])
             if self.mute[g]:
                 a[:, 2:] = 0.0
             out[m] = a
         if len(self.params) > 1:  # groups beyond the given params use the last one
             m = grp >= len(self.params)
             if m.any():
-                out[m] = forward(self.params[-1], obs[m], self.sizes, self.in_scale)
+                out[m] = forward(self.params[-1], obs[m], self.sizes, self.in_scale, self.archs[-1])
         return out
 
 
 # ---------------------------------------------------------------- persistence
-def save_npz(path, params, sizes, cfg: SimConfig | dict, in_scale=None, **extra):
+def save_npz(path, params, sizes, cfg: SimConfig | dict, in_scale=None, arch=None, **extra):
+    """arch: None for the MLP (no field written: the file format of all older checkpoints), else
+    the policy_set arch dict (stored as JSON in the field ``arch``)."""
     cfg_d = cfg if isinstance(cfg, dict) else dict(cfg.__dict__)
     np.savez(
         path,
+        **({"arch": np.array(json.dumps(arch))} if is_set(arch) else {}),
         in_scale=np.ones(sizes[0]) if in_scale is None else np.asarray(in_scale, dtype=float),
         params=np.asarray(params),
         sizes=np.asarray(sizes, dtype=np.int64),
@@ -154,20 +190,29 @@ def load_npz(path):
         return z["params"].copy(), [int(s) for s in z["sizes"]], json.loads(str(z["cfg"]))
 
 
+def load_arch(path) -> dict | None:
+    """The checkpoint's architecture (policy_set arch dict), or None for the MLP (also every older file)."""
+    with np.load(path) as z:
+        return json.loads(str(z["arch"])) if "arch" in z.files else None
+
+
 def load_in_scale(path):
     with np.load(path) as z:
         return z["in_scale"].copy() if "in_scale" in z.files else None
 
 
 def export_json(npz_path, json_path=None) -> dict:
-    """Weights as nested lists (W[in][out], b[out]) for the browser (site/src/js/sim.js)."""
+    """Weights as nested lists (W[in][out], b[out]) for the browser (site/src/js/sim.js); a set
+    encoder instead carries its ``arch`` and the flat ``params`` (no ``layers``)."""
     params, sizes, cfg = load_npz(npz_path)
+    arch = load_arch(npz_path)
     d = {
         "sizes": sizes,
         "in_scale": (scale if (scale := load_in_scale(npz_path)) is not None else np.ones(sizes[0])).tolist(),
         "activation": "tanh",
         "output": "tanh",
-        "layers": [{"W": W.tolist(), "b": b.tolist()} for W, b in unpack(params, sizes)],
+        **({"arch": arch, "params": params.tolist()} if is_set(arch) else
+           {"layers": [{"W": W.tolist(), "b": b.tolist()} for W, b in unpack(params, sizes)]}),
         "cfg": cfg,
     }
     if json_path:

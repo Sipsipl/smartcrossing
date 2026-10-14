@@ -21,6 +21,15 @@
   SCX.TYPE_COLOURS = TYPE_COLOURS;
   SCX.OVL = OVL;
   SCX.lampRGB = (s0, s1) => `rgb(${Math.round(127 + 127 * clamp1(s0))},40,${Math.round(127 + 127 * clamp1(s1))})`;
+  /** One lamp channel: dark (-1) ... bright violet-white (+1) (smartcrossing/render.py). */
+  SCX.lampRGB1 = (s) => {
+    const t = (clamp1(s) + 1) / 2;
+    return `rgb(${Math.round(40 + 185 * t)},${Math.round(40 + 130 * t)},${Math.round(50 + 205 * t)})`;
+  };
+  /** Roof-lamp colour for n lamp channels (1: brightness; 2: the old red / blue mix). */
+  SCX.lampCSS = (n, s0, s1) => (n === 1 ? SCX.lampRGB1(s0) : SCX.lampRGB(s0, s1));
+  /** Hazard lights of a wreck: on in the first half of every HAZARD_PERIOD of sim time (sim.hazard_on). */
+  SCX.hazardOn = (t) => Math.floor(t / (0.5 * SC.HAZARD_PERIOD) + 1e-6) % 2 === 0;
   function clamp1(v) { return Math.max(-1, Math.min(1, v || 0)); }
 
   /** Policy entry from SC_DATA.policies -> agent type for the widget. */
@@ -65,6 +74,7 @@
     newSim() {
       const cfg = SC.defaultConfig();
       cfg.n_slots = 32;
+      Object.assign(cfg, this._iface());
       this.sim = new SC.Sim(cfg, this.seed);
       this.crashMarks = [];
       this.trails = new Map();
@@ -84,8 +94,18 @@
 
     reset() { this.seed += 1; this.newSim(); }
 
+    /** Observation / action interface of the first agent type (lamp count, neighbour layout): fixed
+     *  for a sim (array sizes), so a change needs a new sim. Other types must share it. */
+    _iface() {
+      const phys = (this.types[0] && this.types[0].physics) || {}, d = SC.defaultConfig(), out = {};
+      for (const k of ["n_signal", "brake_light"]) out[k] = phys[k] !== undefined ? phys[k] : d[k];
+      return out;
+    }
+
     setTypes(types, keepSim) {
       this.types = types;
+      const want = this._iface();
+      if (keepSim && (want.n_signal !== this.sim.cfg.n_signal || want.brake_light !== this.sim.cfg.brake_light)) keepSim = false;
       if (keepSim) {
         this.perType = types.map(() => ({ exits: 0, bad: 0 }));
         this.applyControls();
@@ -101,7 +121,7 @@
       cfg.signal_enabled = c.signal;
       cfg.signal_noise = c.noise;
       const phys = (this.types[0] && this.types[0].physics) || {};
-      for (const [k, v] of Object.entries(phys)) cfg[k] = v;
+      for (const [k, v] of Object.entries(phys)) if (k !== "n_signal" && k !== "brake_light") cfg[k] = v; // (interface: newSim)
       const probs = this.types.map((t) => t.share);
       const tot = probs.reduce((a, b) => a + b, 0);
       this.sim.groupProbs = tot > 0 ? probs.map((p) => p / tot) : this.types.map((_, i) => (i === 0 ? 1 : 0));
@@ -167,7 +187,7 @@
       const ok = p && p.uid.length === N;
       this.slotOf = new Map();
       for (let n = 0; n < N; n++) {
-        if (!sim.alive[n]) continue;
+        if (!sim.alive[n] && !sim.wreck[n]) continue;
         this.slotOf.set(sim.uid[n], n);
         const s0 = NS > 0 ? sim.sig[n * NS] : 0, s1 = NS > 1 ? sim.sig[n * NS + 1] : 0;
         if (ok && p.uid[n] === sim.uid[n]) {
@@ -325,12 +345,17 @@
 
       const overlay = sel >= 0 && this.opts.overlay === "sensors";
       if (overlay) this._drawSensors(sel, true);
-      const NS = cfg.n_signal;
+      // crash / off-road marks under the cars (a wreck stays visible on top of its mark)
+      for (const m of this.crashMarks) SCX.drawMark(ctx, m.x, m.y, m.kind, 1 - (tNow - m.t) / MARK_FADE);
+      ctx.globalAlpha = 1;
+      const NS = cfg.n_signal, hazard = SCX.hazardOn(tNow);
       for (let n = 0; n < sim.N; n++) {
-        if (!sim.alive[n]) continue;
+        if (!sim.alive[n] && !sim.wreck[n]) continue;
         ctx.globalAlpha = sel >= 0 && n !== sel && this.opts.dimOthers && overlay ? 0.7 : 1;
-        const lamp = NS > 0 ? (cfg.signal_enabled ? SCX.lampRGB(ip.s0[n], ip.s1[n]) : "rgb(90,90,96)") : null;
-        SCX.drawCar(ctx, ip.x[n], ip.y[n], ip.th[n], sim.man[n], TYPE_COLOURS[sim.group[n] % TYPE_COLOURS.length], lamp, sim.acc[n] < SCX.BRAKE_ACC);
+        const frame = TYPE_COLOURS[sim.group[n] % TYPE_COLOURS.length];
+        if (sim.wreck[n]) { SCX.drawCar(ctx, ip.x[n], ip.y[n], ip.th[n], sim.man[n], frame, null, false, { on: hazard }); continue; }
+        const lamp = NS > 0 ? (cfg.signal_enabled ? SCX.lampCSS(NS, ip.s0[n], ip.s1[n]) : "rgb(90,90,96)") : null;
+        SCX.drawCar(ctx, ip.x[n], ip.y[n], ip.th[n], sim.man[n], frame, lamp, sim.acc[n] < SCX.BRAKE_ACC);
       }
       ctx.globalAlpha = 1;
       if (overlay) this._drawSensors(sel, false);
@@ -339,8 +364,6 @@
         ctx.beginPath(); ctx.arc(ip.x[sel], ip.y[sel], 3.4, 0, 2 * Math.PI); ctx.stroke();
       }
 
-      for (const m of this.crashMarks) SCX.drawMark(ctx, m.x, m.y, m.kind, 1 - (tNow - m.t) / MARK_FADE);
-      ctx.globalAlpha = 1;
 
       // screen-space text
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -421,7 +444,7 @@
         const [nx, ny] = nbPos(nb);
         const s0 = nb.lamps.length > 0 ? o[nb.lamps[0].i] : 0, s1 = nb.lamps.length > 1 ? o[nb.lamps[1].i] : 0;
         ctx.beginPath(); ctx.arc(nx, ny, 1.55, 0, 2 * Math.PI);
-        ctx.fillStyle = cfg.signal_enabled ? SCX.lampRGB(s0, s1) : "rgb(90,90,96)";
+        ctx.fillStyle = cfg.signal_enabled ? SCX.lampCSS(nb.lamps.length, s0, s1) : "rgb(90,90,96)";
         ctx.fill(); ctx.strokeStyle = "#fff"; ctx.lineWidth = lw; ctx.stroke();
         ctx.save(); ctx.translate(nx, ny); ctx.scale(1, -1);
         ctx.fillStyle = "#fff"; ctx.font = "bold 2px ui-sans-serif, system-ui, sans-serif";
@@ -449,11 +472,11 @@
         if (te < t - WINDOW_S) break;
         n += 1; delay += age - ff;
       }
-      let road = 0;
-      for (let i = 0; i < sim.N; i++) road += sim.alive[i];
+      let road = 0, wrecks = 0;
+      for (let i = 0; i < sim.N; i++) { road += sim.alive[i]; wrecks += sim.wreck[i]; }
       return {
         throughput: win > 0 ? (n / win) * 60 : 0, crashes: st.crashes, offroad: st.offroad,
-        exits: st.exits, queue: sim.queueLength(), delay: n ? delay / n : null, road, t,
+        exits: st.exits, queue: sim.queueLength(), delay: n ? delay / n : null, road, wrecks, t,
       };
     }
   }
@@ -498,16 +521,30 @@
     ctx.stroke(); ctx.setLineDash([]);
   };
 
-  SCX.BRAKE_ACC = -0.5; // m/s^2: brake lights on below this actual acceleration (as site/build.py replays)
+  SCX.BRAKE_ACC = SC.BRAKE_ACC; // m/s^2: brake lights on below this actual acceleration (sim.BRAKE_ACC)
   /** One car: body in the manoeuvre colour, frame in the brain colour, roof lamp (css colour or
-   *  null), two brake lights at the rear (lit while braking). */
-  SCX.drawCar = function (ctx, x, y, th, man, frame, lamp, brake) {
+   *  null), two brake lights at the rear (lit while braking). wreck = {on}: a crashed car (dimmed,
+   *  hazard lights at the four corners, lit while on). */
+  SCX.drawCar = function (ctx, x, y, th, man, frame, lamp, brake, wreck) {
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(th);
-    roundRect(ctx, -2.3, -0.9, 4.6, 1.8, 0.45);
+    roundRect(ctx, -SC.CAR_LENGTH / 2, -SC.CAR_WIDTH / 2, SC.CAR_LENGTH, SC.CAR_WIDTH, 0.45);
     ctx.fillStyle = MAN_COLOURS[man];
     ctx.fill();
+    if (wreck) {
+      ctx.fillStyle = "rgba(20,20,24,0.55)"; ctx.fill(); // dimmed body
+      ctx.lineWidth = 0.3; ctx.strokeStyle = wreck.on ? "#ffab00" : "#1b1b1f"; ctx.stroke();
+      for (const [cx, cy] of [[1.95, 0.6], [1.95, -0.6], [-1.95, 0.6], [-1.95, -0.6]]) {
+        ctx.beginPath(); ctx.arc(cx, cy, 0.55, 0, 2 * Math.PI);
+        if (wreck.on) { ctx.fillStyle = "#ffab00"; ctx.shadowColor = "#ffb300"; ctx.shadowBlur = 8; }
+        else { ctx.fillStyle = "rgba(120,80,10,0.9)"; ctx.shadowBlur = 0; }
+        ctx.fill();
+      }
+      ctx.shadowBlur = 0;
+      ctx.restore();
+      return;
+    }
     if (frame) { ctx.lineWidth = 0.32; ctx.strokeStyle = frame; ctx.stroke(); }
     ctx.fillStyle = "rgba(20,24,28,0.55)";
     ctx.fillRect(0.7, -0.62, 0.6, 1.24);
@@ -572,10 +609,24 @@
 
   SCX.Crossing = Crossing;
 
-  /** Observation entry {i, scale, unit, ...} by feature key, from the exported label
-   *  metadata (SC_DATA.layout), or null. */
-  SCX.obsItem = function (key) {
-    const lay = window.SC_DATA && window.SC_DATA.layout;
+  /** Name of an observation interface (site/obs_labels.py interface_key), e.g. "1L-brake". */
+  SCX.ifaceKey = (cfg) => {
+    const k = cfg.n_neighbours || SC.K_NEIGHBOURS;
+    return `${cfg.n_signal}L-${cfg.brake_light ? "brake" : "acc"}` + (k !== SC.K_NEIGHBOURS ? `-K${k}` : "");
+  };
+
+  /** Label metadata (SC_DATA.layouts, one per observation interface) for a sim config; without
+   *  cfg: the main brain's (SC_DATA.layout). */
+  SCX.layoutFor = function (cfg) {
+    const D = window.SC_DATA;
+    if (!D) return null;
+    if (!cfg) return D.layout;
+    return (D.layouts && D.layouts[SCX.ifaceKey(cfg)]) || null;
+  };
+
+  /** Observation entry {i, scale, unit, ...} by feature key for a sim config (see layoutFor), or null. */
+  SCX.obsItem = function (key, cfg) {
+    const lay = SCX.layoutFor(cfg);
     if (!lay) return null;
     if (!lay._byKey) {
       lay._byKey = new Map();
@@ -588,13 +639,14 @@
    *  change in sim.py moves the indices with it): exit-gate vector, edge rays with their angles,
    *  and per neighbour its position, "present" flag and lamps. null (and an error) if the
    *  labels do not match the simulator. */
-  let obsMapCache = null;
+  const obsMapCache = new Map();
   SCX.obsMap = function (cfg) {
-    if (obsMapCache && obsMapCache.ns === cfg.n_signal) return obsMapCache.m;
-    const lay = window.SC_DATA && window.SC_DATA.layout;
+    const key = SCX.ifaceKey(cfg);
+    if (obsMapCache.has(key)) return obsMapCache.get(key);
+    const lay = SCX.layoutFor(cfg);
     let m = null;
-    if (lay && !SCX.checkLayout()) {
-      const it = SCX.obsItem;
+    if (lay && !SCX.checkLayout(cfg)) {
+      const it = (k) => SCX.obsItem(k, cfg);
       const rays = lay.keys.filter((k) => k.startsWith("ray_")).map((k, r) => Object.assign({ deg: lay.ray_angles_deg[r] }, it(k)));
       const nbs = [];
       for (let k = 1; k <= lay.k_neighbours; k++) {
@@ -609,15 +661,21 @@
         m = null;
       }
     }
-    obsMapCache = { ns: cfg.n_signal, m };
+    obsMapCache.set(key, m);
     return m;
   };
 
-  /** The labels were exported for one sim layout; refuse to mislabel a different one. */
-  SCX.checkLayout = function () {
-    const lay = window.SC_DATA && window.SC_DATA.layout;
-    const dim = SC.obsDim(SC.defaultConfig());
-    if (!lay || lay.dim !== dim || lay.own_dim !== SC.OBS_DIM) {
+  /** The labels were exported per observation interface; refuse to mislabel a different one.
+   *  cfg: the sim's config (default: the main brain's interface). */
+  SCX.checkLayout = function (cfg) {
+    const D = window.SC_DATA;
+    if (!cfg) {
+      const main = D && D.policies && D.policies[D.main_id];
+      cfg = Object.assign(SC.defaultConfig(), main ? { n_signal: main.physics.n_signal, brake_light: main.physics.brake_light } : {});
+    }
+    const lay = SCX.layoutFor(cfg) || (cfg && SCX.layoutFor());
+    const dim = SC.obsDim(cfg);
+    if (!lay || lay.dim !== dim || lay.own_dim !== SC.OBS_DIM || (lay.key && lay.key !== SCX.ifaceKey(cfg))) {
       const msg = `Beschriftung passt nicht zum Simulator (Labels: ${lay && lay.dim}, sim.js: ${dim}). Bitte site/build.py neu laufen lassen.`;
       console.error(msg);
       return msg;

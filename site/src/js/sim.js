@@ -21,8 +21,8 @@
   if (!C) throw new Error("SC_SIM_CONFIG missing: load js/sim-config.js before sim.js");
 
   const { RIGHT, STRAIGHT, LEFT, DISC_OFFSETS, DISC_R, SPAWN_LAT_MARGIN, SPAWN_BACK, SPAWN_CURB_GAP, SPAWN_RIGHT_MIN, SPAWN_LAT_STEP, SPAWN_MAX_PER_STEP } = C;
-  const { SPEED_TAU, N_RAYS, RAY_ANGLES, RAY_RANGE } = C;
-  const { K_NEIGHBOURS, NEIGHBOUR_RANGE, POS_SCALE, GOAL_SCALE, NB_FEATURES, LANE_WIDTH, OBS_DIM, OBS_RAYS, ARM_U } = C;
+  const { SPEED_TAU, N_RAYS, RAY_ANGLES, RAY_RANGE, CAR_LENGTH, CAR_WIDTH, HAZARD_PERIOD } = C;
+  const { K_NEIGHBOURS, NEIGHBOUR_RANGE, POS_SCALE, GOAL_SCALE, NB_FEATURES, NB_FEATURES_LEGACY, BRAKE_ACC, LANE_WIDTH, OBS_DIM, OBS_RAYS, ARM_U } = C;
   // why a slot was cleared in the last step (sim.doneKind): { none: 0, exit: 1, ... }
   const DONE = Object.fromEntries(C.DONE_NAMES.map((name, i) => [name, i]));
 
@@ -31,7 +31,13 @@
     return JSON.parse(JSON.stringify(C.defaults));
   }
 
-  const obsDim = (cfg) => OBS_DIM + K_NEIGHBOURS * (NB_FEATURES + cfg.n_signal);
+  /** Features per neighbour before its lamps: brake light + hazard (cfg.brake_light) or the legacy acceleration. */
+  const nbFeatures = (cfg) => (cfg.brake_light ? NB_FEATURES : NB_FEATURES_LEGACY);
+  /** Neighbour slots in the observation (cfg.n_neighbours; 4 for every checkpoint before the set encoder). */
+  const nNeighbours = (cfg) => cfg.n_neighbours || K_NEIGHBOURS;
+  const obsDim = (cfg) => OBS_DIM + nNeighbours(cfg) * (nbFeatures(cfg) + cfg.n_signal);
+  /** Steps a wreck stays (sim.wreck_steps). */
+  const wreckSteps = (cfg) => Math.round(cfg.wreck_time / cfg.dt);
 
   /** Largest curvature the tyres allow at speed v (sim.grip_kappa). */
   function gripKappa(cfg, v) {
@@ -180,7 +186,9 @@
     reset() {
       const N = this.cfg.n_slots, S = this.cfg.n_signal;
       this.N = N;
-      this.alive = new Uint8Array(N);
+      this.alive = new Uint8Array(N); // driving cars
+      this.wreck = new Uint8Array(N); // crashed cars standing as obstacles (cfg.wreck_time)
+      this.wreckLeft = new Int32Array(N); // steps until the wreck is removed
       this.x = new Float64Array(N);
       this.y = new Float64Array(N);
       this.th = new Float64Array(N);
@@ -208,15 +216,10 @@
       this.nextUid = 0;
       this.t = 0.0;
       this.events = [];
-      this.stats = { arrived: 0, spawned: 0, exits: 0, wrong_exits: 0, crashes: 0, offroad: 0, timeouts: 0, travel: [] };
+      this.stats = { arrived: 0, spawned: 0, exits: 0, wrong_exits: 0, crashes: 0, wreck_hits: 0, offroad: 0, timeouts: 0, travel: [] };
     }
 
     tgt(n) { return (this.arm[n] + this.man[n]) % 4; }
-
-    gateXY(n) {
-      const [c, s] = rot(this.tgt(n));
-      return [s * this.cfg.L, -c * this.cfg.L];
-    }
 
     distToGate(n) { return routeDist(this.cfg, this.arm[n], this.man[n], this.x[n], this.y[n]); }
 
@@ -226,7 +229,7 @@
     /** Returns a Float64Array of shape (N, obsDim) in row-major order. */
     observe() {
       const cfg = this.cfg, N = this.N, S = cfg.n_signal, L = cfg.L, W = cfg.W;
-      const D = obsDim(cfg), blk = NB_FEATURES + S;
+      const NF = nbFeatures(cfg), D = obsDim(cfg), blk = NF + S;
       const obs = new Float64Array(N * D);
       const cand = [];
       for (let i = 0; i < N; i++) {
@@ -260,16 +263,16 @@
         }
         obs[o + OBS_RAYS + N_RAYS] = this.kappa[i] / cfg.kappa_max;
         obs[o + OBS_RAYS + N_RAYS + 1] = gripKappa(cfg, this.v[i]) / cfg.kappa_max;
-        // neighbours: nearest K alive cars within range
+        // neighbours: nearest K cars (driving or wrecked) within range
         cand.length = 0;
         for (let j = 0; j < N; j++) {
-          if (j === i || !this.alive[j]) continue;
+          if (j === i || !(this.alive[j] || this.wreck[j])) continue;
           const nx = this.x[j] - x, ny = this.y[j] - y;
           const d = Math.hypot(nx, ny);
           if (d < cfg.neighbour_vis) cand.push([d, j, nx, ny]);
         }
         cand.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-        for (let k = 0; k < Math.min(K_NEIGHBOURS, cand.length); k++) {
+        for (let k = 0; k < Math.min(nNeighbours(cfg), cand.length); k++) {
           const [, j, nx, ny] = cand[k];
           const p = o + OBS_DIM + k * blk;
           const nth = this.th[j] - th;
@@ -280,14 +283,17 @@
           obs[p + 4] = this.v[j] / cfg.v_max;
           obs[p + 5] = 1.0;
           obs[p + 6] = this.kappa[j] / cfg.kappa_max;
-          obs[p + 7] = this.acc[j] / cfg.brake_max;
+          if (cfg.brake_light) {
+            obs[p + 7] = this.acc[j] < BRAKE_ACC ? 1.0 : 0.0; // brake lights
+            obs[p + 8] = this.wreck[j] ? 1.0 : 0.0; // hazard lights (a wreck)
+          } else obs[p + 7] = this.acc[j] / cfg.brake_max; // legacy interface: acceleration
           for (let q = 0; q < S; q++) {
             let sv = 0.0;
             if (cfg.signal_enabled) {
               sv = this.sig[j * S + q];
               if (cfg.signal_noise > 0) sv += cfg.signal_noise * this.noiseRng.normal();
             }
-            obs[p + NB_FEATURES + q] = sv;
+            obs[p + NF + q] = sv;
           }
         }
       }
@@ -333,6 +339,17 @@
       }
       this.t += dt;
       this.events = [];
+      const ws = wreckSteps(cfg);
+      if (ws > 0) { // wrecks whose time is up disappear (before the collision check)
+        const gone = new Uint8Array(N);
+        let any = false;
+        for (let n = 0; n < N; n++) {
+          if (!this.wreck[n]) continue;
+          this.wreckLeft[n] -= 1;
+          if (this.wreckLeft[n] <= 0) { gone[n] = 1; any = true; }
+        }
+        if (any) this._remove(gone);
+      }
       const cr = this.carReward, dk = this.doneKind;
       for (let n = 0; n < N; n++) {
         const d = this.distToGate(n);
@@ -373,15 +390,15 @@
           oy[n * 3 + k] = this.y[n] + st * DISC_OFFSETS[k];
         }
       }
-      const off = new Uint8Array(N), col = new Uint8Array(N), vrel = new Float64Array(N);
+      const off = new Uint8Array(N), col = new Uint8Array(N), vrel = new Float64Array(N), hitWreck = new Uint8Array(N);
       const near2 = (2 * DISC_OFFSETS[DISC_OFFSETS.length - 1] + 2 * DISC_R) ** 2, hit2 = (2 * DISC_R) ** 2;
       for (let i = 0; i < N; i++) {
         if (!this.alive[i]) continue;
         for (let k = 0; k < 3; k++) {
           if (cornerDist(ox[i * 3 + k], oy[i * 3 + k], cfg.W, cfg.Rc) < cfg.Rc + DISC_R) { off[i] = 1; break; }
         }
-        for (let j = 0; j < N; j++) {
-          if (j === i || !this.alive[j]) continue;
+        for (let j = 0; j < N; j++) { // partners: driving cars and wrecks (wrecks are not hit again)
+          if (j === i || !(this.alive[j] || this.wreck[j])) continue;
           const dcx = this.x[i] - this.x[j], dcy = this.y[i] - this.y[j];
           if (!(dcx ** 2 + dcy ** 2 < near2)) continue;
           let hit = false;
@@ -396,10 +413,11 @@
             const rvx = this.v[i] * Math.cos(this.th[i]) - this.v[j] * Math.cos(this.th[j]);
             const rvy = this.v[i] * Math.sin(this.th[i]) - this.v[j] * Math.sin(this.th[j]);
             vrel[i] = Math.max(vrel[i], Math.hypot(rvx, rvy));
+            if (this.wreck[j]) hitWreck[i] = 1;
           }
         }
       }
-      const bad = new Uint8Array(N);
+      const bad = new Uint8Array(N), crashed = new Uint8Array(N);
       for (let n = 0; n < N; n++) {
         if (off[n]) {
           this.events.push({ kind: "offroad", n, uid: this.uid[n], x: this.x[n], y: this.y[n] });
@@ -409,10 +427,13 @@
       for (let n = 0; n < N; n++) {
         if (col[n] && !off[n]) {
           this.events.push({ kind: "crash", n, uid: this.uid[n], x: this.x[n], y: this.y[n] });
-          cr[n] += cfg.r_crash - cfg.r_crash_speed * vrel[n]; dk[n] = DONE.crash; this.stats.crashes += 1; bad[n] = 1;
+          cr[n] += cfg.r_crash - cfg.r_crash_speed * vrel[n]; dk[n] = DONE.crash; this.stats.crashes += 1;
+          if (hitWreck[n]) this.stats.wreck_hits += 1;
+          if (ws > 0) crashed[n] = 1; else bad[n] = 1;
         }
       }
-      this._remove(bad);
+      this._remove(bad); // off-road cars (and crashed ones without wrecks) vanish
+      this._makeWreck(crashed, ws);
 
       const tmo = new Uint8Array(N);
       for (let n = 0; n < N; n++) {
@@ -430,11 +451,28 @@
       return reward - this.queueCost;
     }
 
+    /** Crashed cars become standing wrecks (speed 0, lamps off, hazard lights on; uid kept). */
+    _makeWreck(mask, ws) {
+      const S = this.cfg.n_signal;
+      for (let n = 0; n < this.N; n++) {
+        if (!mask[n]) continue;
+        this.alive[n] = 0;
+        this.wreck[n] = 1;
+        this.wreckLeft[n] = ws;
+        this.v[n] = 0.0;
+        this.acc[n] = 0.0;
+        this.kappa[n] = 0.0;
+        for (let q = 0; q < S; q++) this.sig[n * S + q] = 0.0;
+      }
+    }
+
     _remove(mask) {
       const S = this.cfg.n_signal;
       for (let n = 0; n < this.N; n++) {
         if (!mask[n]) continue;
         this.alive[n] = 0;
+        this.wreck[n] = 0;
+        this.wreckLeft[n] = 0;
         this.v[n] = 0.0;
         this.acc[n] = 0.0;
         for (let q = 0; q < S; q++) this.sig[n * S + q] = 0.0;
@@ -491,14 +529,14 @@
         const ch = Math.cos(h), sh = Math.sin(h);
         for (let r = 0; r < SPAWN_MAX_PER_STEP && q.length; r++) {
           let free = -1;
-          for (let j = 0; j < N; j++) if (!this.alive[j]) { free = j; break; }
+          for (let j = 0; j < N; j++) if (!this.alive[j] && !this.wreck[j]) { free = j; break; }
           if (free < 0) break;
           let cnt = 0;
           for (let i = 0; i < M; i++) {
             const sx = c * lats[i] - s * back, sy = s * lats[i] + c * back;
             let ok = 1;
-            for (let j = 0; j < N; j++) {
-              if (!this.alive[j]) continue;
+            for (let j = 0; j < N; j++) { // wrecks block like standing cars
+              if (!this.alive[j] && !this.wreck[j]) continue;
               const dx = this.x[j] - sx, dy = this.y[j] - sy;
               const dist = Math.hypot(dx, dy);
               const dd = Math.max(dist, 1e-6);
@@ -546,6 +584,8 @@
       const S = this.cfg.n_signal;
       const f64 = (a) => Float64Array.from(a);
       this.alive = Uint8Array.from(st.alive.map((b) => (b ? 1 : 0)));
+      this.wreck = Uint8Array.from((st.wreck || st.alive.map(() => false)).map((b) => (b ? 1 : 0)));
+      this.wreckLeft = Int32Array.from(st.wreck_left || st.alive.map(() => 0));
       this.x = f64(st.x); this.y = f64(st.y); this.th = f64(st.th); this.v = f64(st.v);
       this.kappa = f64(st.kappa); this.acc = f64(st.acc); this.age = f64(st.age); this.prevDist = f64(st.prev_dist);
       this.sig = f64(st.sig.flat()); if (this.sig.length !== this.N * S) throw new Error("sig shape");
@@ -561,7 +601,7 @@
       const sig = [];
       for (let n = 0; n < this.N; n++) sig.push(arr(this.sig.subarray(n * S, n * S + S)));
       return {
-        alive: arr(this.alive).map((b) => !!b), x: arr(this.x), y: arr(this.y), th: arr(this.th),
+        alive: arr(this.alive).map((b) => !!b), wreck: arr(this.wreck).map((b) => !!b), wreck_left: arr(this.wreckLeft), x: arr(this.x), y: arr(this.y), th: arr(this.th),
         v: arr(this.v), kappa: arr(this.kappa), acc: arr(this.acc), age: arr(this.age), prev_dist: arr(this.prevDist), sig,
         arm: arr(this.arm), man: arr(this.man), uid: arr(this.uid), group: arr(this.group),
         queues: this.queues.map((q) => q.map((e) => [e.u, e.man, e.grp])),
@@ -572,8 +612,118 @@
   }
 
   // ------------------------------------------------------------------ policy
+  /** (name, shape) of the parameter blocks of a set encoder, in flat order (policy_set.param_shapes). */
+  function setParamShapes(ar) {
+    const out = [], dims = [ar.F, ...ar.phi];
+    for (let i = 0; i + 1 < dims.length; i++) out.push([`phi${i}.W`, [dims[i], dims[i + 1]]], [`phi${i}.b`, [dims[i + 1]]]);
+    const e = ar.phi[ar.phi.length - 1];
+    if (ar.pool === "attn") {
+      const H = ar.heads, qin = ar.n_ego + ar.n_extra;
+      out.push(["q.W", [qin, H * ar.dk]], ["q.b", [H * ar.dk]], ["k.W", [e, H * ar.dk]], ["v.W", [e, H * ar.dv]],
+        ["v.b", [H * ar.dv]]);
+    }
+    const pooled = ar.pool === "attn" ? ar.heads * ar.dv : e;
+    const ts = [ar.n_ego + ar.n_extra + pooled, ...ar.hidden, ar.n_out];
+    for (let i = 0; i + 1 < ts.length; i++) out.push([`trunk${i}.W`, [ts[i], ts[i + 1]]], [`trunk${i}.b`, [ts[i + 1]]]);
+    return out;
+  }
+
+  /** Set-encoder policy (policy_set.py; export_json gives its arch + flat params). */
+  function loadSetPolicy(d) {
+    const ar = d.arch, flat = Float64Array.from(d.params), P = {};
+    let i = 0;
+    for (const [name, shape] of setParamShapes(ar)) {
+      const n = shape.reduce((a, b) => a * b, 1);
+      P[name] = flat.subarray(i, i + n);
+      i += n;
+    }
+    if (i !== flat.length) throw new Error(`set policy: ${flat.length} params, arch needs ${i}`);
+    const nin = ar.n_ego + ar.K * ar.F + ar.n_extra;
+    const inScale = d.in_scale ? Float64Array.from(d.in_scale) : null;
+    if (inScale && inScale.length !== nin) throw new Error("in_scale length mismatch");
+    return { kind: "set", arch: ar, P, nin, sizes: d.sizes || [nin, ...ar.hidden, ar.n_out], inScale, cfg: d.cfg || {} };
+  }
+
+  /** y = x W + b for a row-major W (nin x nout); x is a plain array / typed array of length nin. */
+  function affine(x, W, b, nin, nout) {
+    const y = new Float64Array(nout);
+    for (let o = 0; o < nout; o++) {
+      let acc = 0.0;
+      for (let i = 0; i < nin; i++) acc += x[i] * W[i * nout + o];
+      y[o] = acc + (b ? b[o] : 0.0);
+    }
+    return y;
+  }
+
+  /** Set-encoder forward on one (scaled) input row x: linear output (policy_set.forward). */
+  function setForwardRow(pol, x) {
+    const ar = pol.arch, P = pol.P, E = ar.n_ego, K = ar.K, F = ar.F;
+    const ego = new Float64Array(E + ar.n_extra);
+    for (let i = 0; i < E; i++) ego[i] = x[i];
+    for (let i = 0; i < ar.n_extra; i++) ego[E + i] = x[E + K * F + i];
+    const hs = [], present = [];
+    for (let k = 0; k < K; k++) {
+      let h = x.subarray(E + k * F, E + (k + 1) * F);
+      present.push(h[ar.present] !== 0);
+      let nin = F;
+      for (let l = 0; l < ar.phi.length; l++) {
+        h = affine(h, P[`phi${l}.W`], P[`phi${l}.b`], nin, ar.phi[l]).map(Math.tanh);
+        nin = ar.phi[l];
+      }
+      hs.push(h);
+    }
+    const e = ar.phi[ar.phi.length - 1];
+    let pooled;
+    if (ar.pool === "attn") {
+      const H = ar.heads, dk = ar.dk, dv = ar.dv;
+      const q = affine(ego, P["q.W"], P["q.b"], ego.length, H * dk);
+      const ks = hs.map((h) => affine(h, P["k.W"], null, e, H * dk));
+      const vs = hs.map((h) => affine(h, P["v.W"], P["v.b"], e, H * dv));
+      pooled = new Float64Array(H * dv);
+      const sc = 1 / Math.sqrt(dk);
+      for (let hd = 0; hd < H; hd++) {
+        const s = new Float64Array(K);
+        let mx = -Infinity;
+        for (let k = 0; k < K; k++) {
+          let acc = 0.0;
+          for (let d = 0; d < dk; d++) acc += q[hd * dk + d] * ks[k][hd * dk + d];
+          s[k] = present[k] ? acc * sc : -1e9;
+          mx = Math.max(mx, s[k]);
+        }
+        let sum = 0.0;
+        for (let k = 0; k < K; k++) { s[k] = present[k] ? Math.exp(s[k] - mx) : 0.0; sum += s[k]; }
+        sum = Math.max(sum, 1e-30);
+        for (let k = 0; k < K; k++) {
+          if (!s[k]) continue;
+          const w = s[k] / sum;
+          for (let d = 0; d < dv; d++) pooled[hd * dv + d] += w * vs[k][hd * dv + d];
+        }
+      }
+    } else {
+      pooled = new Float64Array(e);
+      let n = 0;
+      if (ar.pool === "max") pooled.fill(-2.0);
+      for (let k = 0; k < K; k++) {
+        if (!present[k]) continue;
+        n++;
+        for (let d = 0; d < e; d++) pooled[d] = ar.pool === "max" ? Math.max(pooled[d], hs[k][d]) : pooled[d] + hs[k][d];
+      }
+      if (ar.pool === "max") { if (!n) pooled.fill(0.0); } else for (let d = 0; d < e; d++) pooled[d] /= Math.max(n, 1);
+    }
+    let z = new Float64Array(ego.length + pooled.length);
+    z.set(ego, 0);
+    z.set(pooled, ego.length);
+    const ts = [z.length, ...ar.hidden, ar.n_out];
+    for (let l = 0; l + 1 < ts.length; l++) {
+      z = affine(z, P[`trunk${l}.W`], P[`trunk${l}.b`], ts[l], ts[l + 1]);
+      if (l + 2 < ts.length) z = z.map(Math.tanh);
+    }
+    return z;
+  }
+
   /** Normalises a policy JSON (policy.export_json format) for fast evaluation. */
   function loadPolicy(d) {
+    if (d && d.arch && d.arch.type === "set") return loadSetPolicy(d);
     if (!d || !Array.isArray(d.layers) || !d.layers.length) throw new Error("policy JSON has no layers");
     const layers = d.layers.map((l) => {
       const nin = l.W.length, nout = l.b.length;
@@ -593,8 +743,13 @@
     return { sizes, layers, inScale, cfg: d.cfg || {} };
   }
 
-  /** tanh MLP on one observation row (obs[off .. off + nin)). */
+  /** Policy (tanh MLP, or set encoder + tanh) on one observation row (obs[off .. off + nin)). */
   function forward(pol, obs, off = 0) {
+    if (pol.kind === "set") {
+      const x = new Float64Array(pol.nin);
+      for (let i = 0; i < pol.nin; i++) x[i] = pol.inScale ? obs[off + i] * pol.inScale[i] : obs[off + i];
+      return setForwardRow(pol, x).map(Math.tanh);
+    }
     const l0 = pol.layers[0];
     let h = new Float64Array(l0.nin);
     for (let i = 0; i < l0.nin; i++) h[i] = pol.inScale ? obs[off + i] * pol.inScale[i] : obs[off + i];
@@ -627,8 +782,9 @@
   }
 
   return {
-    RIGHT, STRAIGHT, LEFT, DISC_R, K_NEIGHBOURS, NEIGHBOUR_RANGE, OBS_DIM, NB_FEATURES, POS_SCALE, GOAL_SCALE,
-    RAY_RANGE, DONE, defaultConfig, obsDim, actDim, rot, cornerDist, rayEdgeDist, routeDist, freeFlowTime,
+    RIGHT, STRAIGHT, LEFT, DISC_R, K_NEIGHBOURS, NEIGHBOUR_RANGE, OBS_DIM, NB_FEATURES, NB_FEATURES_LEGACY, BRAKE_ACC,
+    POS_SCALE, GOAL_SCALE, RAY_RANGE, CAR_LENGTH, CAR_WIDTH, HAZARD_PERIOD,
+    DONE, defaultConfig, obsDim, actDim, nbFeatures, nNeighbours, wreckSteps, rot, cornerDist, rayEdgeDist, routeDist, freeFlowTime,
     gripKappa, laneOffsets, makeRng,
     Sim, loadPolicy, forward, act,
   };

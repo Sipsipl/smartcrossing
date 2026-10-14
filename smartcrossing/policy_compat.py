@@ -5,7 +5,8 @@
   not exist yet get zero weights and rescaled inputs get their factor folded into
   ``in_scale``, so the network computes exactly what it computed before and simply
   ignores the new sensors.
-- Interface and world: sensors, the action interface, the crossing geometry and tyre grip
+- Interface and world: sensors (incl. the neighbour layout: brake light + hazard or the legacy
+  acceleration), the lamp count, the action interface, the crossing geometry and tyre grip
   are part of what a policy learned. ``LEGACY_INTERFACE`` holds the values of checkpoints
   saved before a field existed (``PolicyDriver.load`` applies them); ``physics_of`` gives
   the physics the browser runs a policy with.
@@ -26,7 +27,14 @@ from .sim import SimConfig, act_dim, obs_dim
 OWN_KEYS = ["pos_x", "pos_y", "dir_x", "dir_y", "speed", "goal_right", "goal_straight", "goal_left", "exit_fwd",
             "exit_left", "mouth_fwd", "mouth_left", "ray_r60", "ray_r30", "ray_0", "ray_l30", "ray_l60", "kappa",
             "kappa_grip"]
-NEIGHBOUR_KEYS = ["fwd", "left", "same", "cross", "speed", "present", "kappa", "acc"]
+NEIGHBOUR_KEYS = ["fwd", "left", "same", "cross", "speed", "present", "kappa", "brake", "hazard"]
+# cfg.brake_light = False (checkpoints trained before 2026-10-11): continuous acceleration, no hazard
+NEIGHBOUR_KEYS_LEGACY = ["fwd", "left", "same", "cross", "speed", "present", "kappa", "acc"]
+
+
+def nb_keys(cfg: SimConfig) -> list[str]:
+    """Per-neighbour feature keys (before the lamps) of the cfg's observation interface."""
+    return NEIGHBOUR_KEYS if cfg.brake_light else NEIGHBOUR_KEYS_LEGACY
 
 # Observation layouts of older sim versions, used to adapt old checkpoints by feature key.
 # "factor": old value = new value * factor (folded into in_scale, so the network computes
@@ -44,8 +52,8 @@ LEGACY_LAYOUTS = [
 
 
 def neighbour_keys(cfg: SimConfig, nb: list[str] | None = None) -> list[str]:
-    keys = (nb or NEIGHBOUR_KEYS) + [f"lamp{q + 1}" for q in range(cfg.n_signal)]
-    return [f"n{k + 1}_{f}" for k in range(simmod.K_NEIGHBOURS) for f in keys]
+    keys = (nb or nb_keys(cfg)) + [f"lamp{q + 1}" for q in range(cfg.n_signal)]
+    return [f"n{k + 1}_{f}" for k in range(cfg.n_neighbours) for f in keys]
 
 
 def obs_keys(cfg: SimConfig, own: list[str] | None = None, nb: list[str] | None = None) -> list[str]:
@@ -59,6 +67,8 @@ def adapt_inputs(d: dict, cfg: SimConfig) -> dict:
     n_in, want = d["sizes"][0], obs_dim(cfg)
     if n_in == want:
         return d
+    if "arch" in d:  # set encoders exist only with the current layout
+        raise ValueError(f"set-encoder policy has {n_in} inputs; the sim gives {want}")
     cur = obs_keys(cfg)
     for legacy in LEGACY_LAYOUTS:
         old = obs_keys(cfg, legacy["own"], legacy["nb"])
@@ -91,10 +101,7 @@ def load_adapted_policy(path: str | Path) -> dict:
         d = json.loads(path.read_text(encoding="utf-8"))
         d = d.get("policy", d)  # accept a {name, policy} wrapper
     sizes = d.get("sizes") or [len(d["layers"][0]["W"]), *[len(layer["b"]) for layer in d["layers"]]]
-    n_signal = int((d.get("cfg") or {}).get("n_signal", SimConfig.n_signal))
-    cfg = SimConfig(n_signal=n_signal)
-    if n_signal != SimConfig.n_signal:
-        raise ValueError(f"{path}: n_signal={n_signal}; the browser sim runs with n_signal={SimConfig.n_signal}")
+    cfg = interface_cfg(d.get("cfg") or {})  # the checkpoint's own lamp count / neighbour layout
     d["sizes"] = sizes
     if sizes[-1] != act_dim(cfg):
         raise ValueError(f"{path}: {sizes[-1]} outputs, the sim expects act_dim {act_dim(cfg)}")
@@ -110,21 +117,67 @@ def load_adapted_policy(path: str | Path) -> dict:
 # existed): its sensors / action interface, and the crossing geometry + tyre grip it was
 # trained on (checkpoints from before the wide crossing ran on the 7 m road without grip limit
 # and without reverse gear)
-LEGACY_INTERFACE = {"neighbour_vis": 30.0, "speed_control": False,
-                    "L": 50.0, "W": 3.5, "Rc": 6.0, "a_lat_max": 0.0, "v_reverse": 0.0}
+# n_signal (lamp count) and brake_light (neighbour block layout) are interface values too: checkpoints
+# from before 2026-10-11 have 2 lamps and see the neighbours' acceleration. Traffic / world settings
+# that are not part of the interface (spawn_right, wreck_time, demand) are NOT taken from a checkpoint.
+LEGACY_INTERFACE = {"neighbour_vis": 30.0, "speed_control": False, "n_signal": 2, "brake_light": False,
+                    "n_neighbours": simmod.K_NEIGHBOURS, "L": 50.0, "W": 3.5, "Rc": 6.0, "a_lat_max": 0.0, "v_reverse": 0.0}
+INTERFACE_KEYS = ("n_signal", "brake_light", "n_neighbours")  # what changes the observation / action sizes
+
+
+def interface_cfg(train_cfg: dict) -> SimConfig:
+    """SimConfig with the observation / action interface (lamps, neighbour layout) of a checkpoint cfg."""
+    return SimConfig(**{k: type(LEGACY_INTERFACE[k])(train_cfg.get(k, LEGACY_INTERFACE[k])) for k in INTERFACE_KEYS})
+
 
 PHYSICS_KEYS = ["v_max", "acc_max", "brake_max", "kappa_max", "kappa_rate", "neighbour_vis", "speed_control",
-                "a_lat_max", "v_reverse", "L", "W", "Rc"]
+                "a_lat_max", "v_reverse", "L", "W", "Rc", "n_signal", "brake_light", "n_neighbours"]
 # for the browser also kappa_rate: absent = trained before the steering-rate limit (steering acts instantly)
 LEGACY_PHYSICS = {**LEGACY_INTERFACE, "kappa_rate": 1e6}
 
 
 def physics_of(train_cfg: dict) -> dict:
-    """Vehicle physics a policy was trained with (to run it the way it learned)."""
+    """Vehicle physics and observation interface a policy was trained with (to run it the way it
+    learned). Numbers are floats, except n_signal (int) and brake_light (bool)."""
     fields = SimConfig.__dataclass_fields__
     out = {}
     for k in PHYSICS_KEYS:
         if k not in fields:
             continue
-        out[k] = float(train_cfg[k]) if k in train_cfg else float(LEGACY_PHYSICS.get(k, getattr(SimConfig, k)))
+        v = train_cfg[k] if k in train_cfg else LEGACY_PHYSICS.get(k, getattr(SimConfig, k))
+        out[k] = int(v) if k in ("n_signal", "n_neighbours") else bool(v) if k == "brake_light" else float(v)
     return out
+
+
+# ------------------------------------------------------------------ warm start across interfaces
+def transplant_actor(npz_path: str | Path, cfg: SimConfig, in_scale: np.ndarray, sizes: list[int]) -> np.ndarray:
+    """Flat actor params (policy.py layout) for ``cfg``'s interface from an older checkpoint
+    (e.g. 2 lamps + neighbour acceleration -> 1 lamp + brake light + hazard), for a PPO warm start.
+
+    Inputs are matched by feature key (scale folded in so the first layer sees the same
+    pre-activations); inputs the old brain did not have (brake, hazard, ...) start at weight 0
+    (the old acceleration input is dropped, not remapped); outputs: accel, curvature and the
+    first lamps are kept, extra old lamp outputs are dropped, missing ones start at 0."""
+    from .policy import load_in_scale, load_npz, unpack
+
+    params, old_sizes, old_cfg = load_npz(npz_path)
+    old_s = load_in_scale(npz_path)
+    old_s = np.ones(old_sizes[0]) if old_s is None else old_s
+    if list(old_sizes[1:-1]) != list(sizes[1:-1]):
+        raise ValueError(f"hidden sizes differ: {old_sizes} vs {sizes}")
+    old_icfg = interface_cfg(old_cfg)
+    old_keys, new_keys = obs_keys(old_icfg), obs_keys(cfg)
+    assert len(old_keys) == old_sizes[0] and len(new_keys) == sizes[0]
+    Ls = unpack(params, old_sizes)
+    W0, b0 = np.asarray(Ls[0][0]), np.asarray(Ls[0][1])
+    W = np.zeros((sizes[0], W0.shape[1]))
+    pos = {k: j for j, k in enumerate(old_keys)}
+    for j, k in enumerate(new_keys):
+        if k in pos and in_scale[j] != 0:
+            W[j] = W0[pos[k]] * old_s[pos[k]] / in_scale[j]
+    WL, bL = np.asarray(Ls[-1][0]), np.asarray(Ls[-1][1])
+    n = min(sizes[-1], old_sizes[-1])
+    WN, bN = np.zeros((WL.shape[0], sizes[-1])), np.zeros(sizes[-1])
+    WN[:, :n], bN[:n] = WL[:, :n], bL[:n]
+    layers = [(W, b0), *[(np.asarray(w), np.asarray(b)) for w, b in Ls[1:-1]], (WN, bN)]
+    return np.concatenate([x for w, b in layers for x in (w.ravel(), b.ravel())])

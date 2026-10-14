@@ -28,21 +28,29 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
   agents can learn without it.
 - Training budget (owner): during development keep trainings short (<= ~1 h per round); long
   trainings only right before a merge to main.
+- Before every training run (owner, 2026-10-11): give a duration estimate and, if the scope can be
+  fixed in advance, 2-3 options (short for fast iteration ... long for quality) with expected
+  benefit; the owner chooses. Training runs on the owner's PC (GPU), which is busy meanwhile.
+- Clean code (owner, 2026-10-11): insert refactoring steps regularly (dead code, duplication,
+  stale docs/compat layers, unclear names) so no technical debt builds up. The coordinator decides
+  when: between rounds, not while a sim change or training is in flight. Procedure: read-only audit
+  first, then refactor with acceptance "pytest green + bench/parity identical before vs after".
 - Deliverable: a live, in-browser visualisation with a few sliders (keep it simple),
   incl. mixing agent types.
 
 ## Architecture
 - `smartcrossing/sim.py`: batched numpy simulator, state arrays (B envs, N slots).
   Kinematic unicycle with curvature, steering-rate and grip limits, dt=0.1 s. Cars spawn at a
-  random lateral offset across the full road width (own spot if clear, else uniform among the
-  clear spots; up to 3 per arm and step, side by side; so no side is preferred; `spawn_right` =
-  right half only, used by the rule-based baselines), must exit through target arm. Car-car collision via
+  random lateral offset on the right half of the road in driving direction (`spawn_right`, default
+  for baselines and learners; own spot if clear, else uniform among the clear spots; up to 3 per arm
+  and step, side by side), must exit through target arm. Crashed cars stay 5 s as wrecks (hazard
+  lights, driving into one = crash). Car-car collision via
   3 discs per car, off-road via rounded-corner distance. Removal on crash/offroad/exit/timeout.
   Observations are mirror-neutral: own state in a canonical frame (entry arm = south; position
   in fixed 10 m units, not scaled by L/W), ego-frame vectors to the exit gate and to the exit
   mouth (25 m units), 5 edge rays, own curvature and grip-limited max curvature, K=4 nearest
-  neighbours (ego frame: position, heading, speed, curvature, acceleration, signal) but NOT
-  their destination. Action = (accel, curvature, signal[n_signal]) in [-1,1].
+  neighbours (ego frame: position, heading, speed, curvature, brake light, hazard light, one lamp
+  `n_signal=1`) but NOT their destination. Action = (accel, curvature, signal[n_signal]) in [-1,1].
   Common random numbers: env b uses traffic stream b % n_scenarios.
 - `smartcrossing/baselines.py`: rule-based references with lanes (light / reservation(AIM) / none),
   1 lane per direction on the 7 m road, 2 on the 14 m road (right-hand traffic).
@@ -51,7 +59,21 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
   see experiments.md). `smartcrossing/analyze.py`: signal zero/shuffle interventions,
   MI(lamp; manoeuvre/braking/region), driving side per arm / manoeuvre, lateral-offset
   histograms (lanes?), wobble metrics, failure breakdown (solo / per demand / per manoeuvre).
-- `smartcrossing/policy.py` (shared MLP, numpy, `PolicyDriver`), `es.py` (OpenAI-ES).
+  GPU path (optional `poetry install --with gpu`, torch): `sim_torch.py` (TorchSim, parity-tested
+  against `sim.py`), `rollout_torch.py` (rollouts on the device, CUDA graph), `ppo_torch.py` (update);
+  enabled by `ppo.py --update-device cuda --rollout-device cuda`. Warm start: `--init-policy`
+  (actor from an older-interface checkpoint) + `--critic-warmup N` (first N iterations critic only).
+- `smartcrossing/policy_set.py` (Roadmap B, optional `ppo --arch set`): neighbour set encoder, same
+  observation (no new information): shared per-neighbour MLP phi, pooling over the present neighbours
+  (attention with the ego features as query, or DeepSets mean / max), MLP trunk on [ego, pooled].
+  Permutation-invariant over the slots, so `SimConfig.n_neighbours` (default 4 = all older checkpoints;
+  an interface value like n_signal) can grow without new weights. numpy (PolicyDriver, workers), torch
+  (rollout_torch, ppo_torch via autograd) and JS (sim.js) forwards, parity-tested
+  (tests/test_policy_set.py, test_sim_js_parity.py). Checkpoints carry an `arch` field (absent = MLP,
+  older files unchanged). Site: sim.js runs set brains; build.py skips them for now (brain view and
+  snapshot format assume MLP layers).
+- `smartcrossing/policy.py` (shared MLP, numpy, `PolicyDriver`). The old ES trainer was removed
+  (history only); ES checkpoints still load via `policy_compat.py`.
   `smartcrossing/policy_compat.py`: running old checkpoints (observation-layout remap by
   feature name, legacy interface/world values, `physics_of` for the browser).
 - SimConfig `neighbour_vis` (perception range, default 30 m; 60 in ppo11/14/15) and
@@ -70,12 +92,13 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
 - Emergence claims require ablations: signal zeroed/shuffled, no-comm training, MI(signal; intent).
 
 ## Status (2026-10-11)
-Done: simulator + baselines + metrics + tests; ES and PPO training; emergence analysis tooling;
-website (site/) incl. sliders, agent mixing, side-by-side comparison; wide crossing, grip limit,
-reverse gear, impact-speed crash cost, higher inflow; refactor (single frontend, shared JS config).
-Main brain: results/wide_s1ft2_ckpt2650 (beats the light from demand 0.15 up, ~19 % crashes at 0.15).
-Open: crashes in traffic (cars rarely yield), weaving, lamps unused. Next: see "Decided for the
-next training round" and Roadmap (B), (C), (D).
+Done: simulator + baselines + metrics + tests; PPO training (numpy and GPU); emergence analysis
+tooling; website (site/) incl. sliders, agent mixing, side-by-side comparison; wide crossing, grip
+limit, reverse gear, impact-speed crash cost, wrecks / brake light / hazard / one lamp / right-half
+spawning; round 1 (crash cost x3, warm start).
+Main brain: round-1 brain results/round1_x3.npz (site main `r1_main_x3`; previous: wide_s1ft2_ckpt2650).
+Open: cars see obstacles but don't brake to a stop; crashes in the box; weaving; lamps unused.
+Next: round 2 (A/B/C, see Roadmap (E)), then (B), (C), (D).
 
 ## Roadmap (owner, after the wide-crossing change)
 - (A) Driving quality: failure breakdown (offroad vs crash, solo vs traffic, per manoeuvre and
@@ -94,10 +117,28 @@ next training round" and Roadmap (B), (C), (D).
   traffic. Owner's choice: a fixed, clearly higher crash/off-road cost (instead of an adaptive crash
   budget); the right factor is found by short comparison runs (too high -> cars refuse to enter).
   Still outcome-only. Perception (B) and brake lights should help as well.
+  Diagnosis 2026-10-11 (experiments.md): cars see the obstacle but don't brake to a stop. Stop gate
+  (acceptance test for every new brain, like the solo-driving gate): a car alone with a wreck or a
+  standing car on its path (several speeds/gaps) must stop without crashing in >= 95% of cases.
+  The stop gate only measures; the fix belongs in training. Reward check: for a single car, stopping
+  for a wreck is clearly better (~+2) than hitting it (~-6), so the reward is right in principle.
+  Suspected causes: (1) no exploration of hard braking (warm start from a never-stopping brain,
+  logstd -2); (2) multi-agent trap of the equal crash cost: a car that brakes gets rear-ended and pays
+  as much as the hitter, so braking is punished while nobody brakes; (3) standing obstacles were rare.
+  Round 2 (owner, 2026-10-11): three variants, equal training time, paired comparison:
+  A = more exploration; B = A + obstacle scenarios (some envs start with a wreck/standing car on a
+  path); C = B + crash cost by OWN impact speed (standing car pays only the base cost; still
+  outcome-only physics). The owner decides on C after the numbers.
 - (F) Geometry variety (long term): roundabout-like and non-right-angled crossings, then a whole
   village (road network; cars start/end at driveways or the map edge). Needs geometry-independent
   inputs (C), a road-graph representation instead of the hard-coded 4-arm crossing, and route
   information (next turn) as input instead of only the exit arm.
+- Run tracking (owner, 2026-10-11), with the next refactoring step: git commit hash (+ dirty flag)
+  in every run's args.json, full state.npz of important runs kept under results/ (cloud runs were
+  lost), a small script listing runs/ (name, commit, settings, key metrics). The owner needs no
+  tracking UI (the /lernen curve is enough); tooling is for the coordinator and agents, their call.
+- Site bench over several traffic seeds (mean) instead of one (BENCH_SEED): single-seed numbers are
+  noisy (round 2 best at 0.15: 12 on the site's seed vs 31 averaged over 3 seeds).
 - Quick wins: small GIF of the crossing at the top of README.md (rendered from the main brain);
   short, plain explanation on /lernen of how training with many cars works (PPO: all cars share one
   brain, each learns from its own reward; ES: each mutation drives in its own environments, all

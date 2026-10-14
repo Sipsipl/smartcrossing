@@ -19,6 +19,9 @@ def summarize(sim: Sim, duration: float) -> dict:
     travel = np.array([t for env in st.travel for t in env]).reshape(-1, 2)
     ratio = travel[:, 0] / travel[:, 1] if len(travel) else np.array([])
     delay = travel[:, 0] - travel[:, 1] if len(travel) else np.array([])
+    extra = {}
+    if sim.cfg.obstacle_envs > 0:  # obstacle scenarios: placed obstacles and cars that hit one (in crash_cars)
+        extra = {"obstacles": int(st.obstacles.sum()), "obstacle_hits": int(st.obstacle_hits.sum())}
     finished = st.exits.sum() + st.wrong_exits.sum() + st.crashes.sum() + st.offroad.sum() + st.timeouts.sum()
     bad = st.crashes.sum() + st.offroad.sum()
     return {
@@ -35,4 +38,5 @@ def summarize(sim: Sim, duration: float) -> dict:
         "delay_p95_s": float(np.percentile(delay, 95)) if len(delay) else float("nan"),
         "travel_max_s": float(travel[:, 0].max()) if len(travel) else float("nan"),
         "jain_speed": jain(1 / ratio) if len(ratio) else float("nan"),
+        **extra,
     }

@@ -11,7 +11,8 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from smartcrossing.policy import default_in_scale, layer_sizes  # noqa: E402
-from smartcrossing.ppo import MLP, N_PRIV, Worker  # noqa: E402
+from smartcrossing.ppo import MLP, Worker  # noqa: E402
+from smartcrossing.ppo_common import N_PRIV  # noqa: E402
 from smartcrossing.rollout_torch import TorchRollout  # noqa: E402
 from smartcrossing.sim import SimConfig, act_dim, obs_dim  # noqa: E402
 
@@ -34,12 +35,13 @@ def _setup(B=3, T=60, ep=100, seed=0):
 
 @pytest.mark.parametrize("device", DEVICES)
 def test_torch_rollout_matches_worker(device):
-    kw, actor, critic, logstd, a_sizes, c_sizes = _setup()
+    # cuda (eager, launch-bound): shorter rollouts, still with an episode reset in the third
+    kw, actor, critic, logstd, a_sizes, c_sizes = _setup() if device == "cpu" else _setup(T=40, ep=70)
     w = Worker(**kw)
     ro = TorchRollout(**kw, actor_sizes=a_sizes, critic_sizes=c_sizes, device=device, dtype=torch.float64,
                       rng="numpy", noise="numpy")
     kinds = np.zeros(6, np.int64)
-    for k in range(3):  # 60 + 60 steps, then a reset (episode = 100 steps)
+    for k in range(3):  # T + T steps, then a reset (T < episode <= 2 T)
         lo, hi = (0.3, 0.5) if k < 2 else (0.4, 0.6)
         ref = w.rollout(actor.p, a_sizes, logstd, critic.p, c_sizes, lo, hi)
         ro.set_params(actor.p, logstd, critic.p)

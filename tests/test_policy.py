@@ -58,8 +58,7 @@ def test_save_load_roundtrip_and_driver(tmp_path):
 
 def test_groups_and_mute(tmp_path):
     cfg, sizes, _, params = _setup()
-    sim = Sim(SimConfig(n_slots=5, demand=0.5), 2, seed=0)
-    sim.group_probs = np.array([0.5, 0.5])
+    sim = Sim(SimConfig(n_slots=5, demand=0.5), 2, seed=0, group_probs=[0.5, 0.5])
     for _ in range(40):
         sim.step(np.zeros((2, 5, act_dim(sim.cfg))))
     drv = PolicyDriver(sim, [params[0], params[1]], sizes, mute=[False, True])
@@ -81,3 +80,19 @@ def test_json_export(tmp_path):
     for layer in d["layers"]:
         h = np.tanh(h @ np.array(layer["W"]) + np.array(layer["b"]))
     np.testing.assert_allclose(h, forward(params[0], obs[0], sizes))
+
+
+def test_load_several_policies_needs_one_interface(tmp_path):
+    import dataclasses
+
+    import pytest
+
+    cfg, sizes, _, params = _setup()
+    save_npz(tmp_path / "a.npz", params[0], sizes, cfg)
+    save_npz(tmp_path / "b.npz", params[1], sizes, cfg)
+    save_npz(tmp_path / "far.npz", params[1], sizes, dataclasses.replace(cfg, neighbour_vis=60.0))
+    sim = Sim(SimConfig(n_slots=5), 2, seed=0, group_probs=[0.5, 0.5])
+    drv = PolicyDriver.load(f"{tmp_path / 'a.npz'}+{tmp_path / 'b.npz'}", sim)
+    assert len(drv.params) == 2
+    with pytest.raises(ValueError, match="neighbour_vis"):
+        PolicyDriver.load(f"{tmp_path / 'a.npz'}+{tmp_path / 'far.npz'}", Sim(SimConfig(n_slots=5), 2, seed=0))

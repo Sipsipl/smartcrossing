@@ -1,7 +1,7 @@
 """Build the static website into site/public/ (commit the result; Cloudflare Pages
 serves that folder as is, see docs/DEPLOY.md).
 
-    poetry run python site/build.py                       # runs/ if present, else results/site/
+    poetry run python site/build.py                       # snapshot results/site/ + training runs in runs/
     poetry run python site/build.py --main runs/es5/final_g310.npz --bench
 
 What it does:
@@ -16,7 +16,12 @@ What it does:
    policy weights, physics and the sim source, so rebuilding is fast and reproducible,
 5. writes everything the pages need into public/data/site-data.js (no fetch needed).
 
-runs/ is gitignored. A build from runs/ also writes a compact snapshot of everything it used
+runs/ is gitignored and usually holds only the latest runs, so by default (--source auto) the build
+merges: the committed snapshot plus the training runs found in runs/ (a run in runs/ replaces the
+snapshot's run of the same name). Training runs are runs/es*, runs/ppo*, runs/wide* and runs/r<N>_*
+(training rounds, PPO); prof_*, smoke_* and other folders are ignored. Warm starts are followed via
+args.json "init" (a run's state.npz) and "init_policy" (a transplanted checkpoint, matched by weights).
+A build from runs/ (or a merge) also writes a compact snapshot of everything it used
 to results/site/ (committed): the chosen checkpoints (brains/<run>/<name>.npz, exact weights,
 so the bench cache keys stay valid), the warm-start chain info and the thinned learning curves
 (manifest.json). Without runs/ (a fresh clone) the build reads that snapshot instead
@@ -40,10 +45,10 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "site")]
 
-from obs_labels import obs_layout  # noqa: E402
+from obs_labels import interface_key, obs_layout  # noqa: E402
 from smartcrossing.policy import default_in_scale, init_params, layer_sizes, unpack  # noqa: E402
-from smartcrossing.policy_compat import load_adapted_policy, physics_of  # noqa: E402
-from smartcrossing.sim import SimConfig, js_constants  # noqa: E402
+from smartcrossing.policy_compat import INTERFACE_KEYS, interface_cfg, load_adapted_policy, physics_of  # noqa: E402
+from smartcrossing.sim import BRAKE_ACC, SimConfig, js_constants  # noqa: E402
 
 SITE = ROOT / "site"
 SRC = SITE / "src"
@@ -51,7 +56,8 @@ OUT = SITE / "public"
 CACHE = SITE / "data" / "bench_cache.json"
 RUNS = ROOT / "runs"
 SNAPSHOT = ROOT / "results" / "site"  # committed copy of what the build uses from runs/ (see docstring)
-SOURCE = {"kind": "runs", "manifest": None}  # set in main(): "runs" or "snapshot"
+SOURCE = {"kind": "runs", "manifest": None, "runs": set()}  # set in main(): "runs", "snapshot" or "merge"
+FOUND = {}  # discovered checkpoints (set in main(); init_of matches transplanted warm starts against it)
 MP_START = "fork" if "fork" in mp.get_all_start_methods() else "spawn"  # Windows has no fork
 
 DEMANDS = [0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 1.0]  # up to the start page slider maximum
@@ -59,9 +65,12 @@ DEMANDS = [0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 1.0]  # up to the start page slider m
 # shown before it (narrow crossing); override with --main / --history
 # Checkpoints are named <run>/<file stem> (found in runs/ or in the snapshot); a path to an
 # .npz anywhere (e.g. results/wide_s1ft2_ckpt2650.npz) works too if its weights match one.
-DEFAULT_MAIN = ["wide_s1ft2/ckpt_2650"]  # = results/wide_s1ft2_ckpt2650.npz
+DEFAULT_MAIN = ["r2_B_s1/ckpt_0639"]  # = results/round2_best.npz (round 2: practised with obstacle scenarios)
+DEFAULT_PREVIOUS = "r1_main_x3/current"  # = results/round1_x3.npz, the main brain before round 2
 DEFAULT_HISTORY = "ppo17/ckpt_5250"
-DEFAULT_MIX = "wide_s0ft/ckpt_2850"  # = results/wide_s0ft_ckpt2850.npz; second brain for mixing on the start page
+# second brain for mixing on the start page; old brains (2 lamps, no brake light) cannot share a sim with the
+# main brain, so none for now (was wide_s0ft/ckpt_2850 = results/wide_s0ft_ckpt2850.npz)
+DEFAULT_MIX = ""
 TIMELINE_DEMANDS = [0.05, 0.15]
 BENCH_ENVS, BENCH_SECONDS, BENCH_SEED = 8, 120.0, 1000
 # Plain German names for known runs: run id -> (short label for chart markers, label, one-line
@@ -120,7 +129,23 @@ RUN_INFO = {
     "wide_s1ft": ("B3", "Breite Kreuzung: Feinschliff",
                   "Kleinere Lernschritte: weniger Unfälle."),
     "wide_s1ft2": ("B4", "Breite Kreuzung: länger feinschleifen",
-                   "Noch eine Stunde Feinschliff: nur noch etwas besser – das aktuelle Gehirn."),
+                   "Noch eine Stunde Feinschliff: nur noch etwas besser – das Hauptgehirn vor Runde 1."),
+    "r1_x3": ("R1", "Runde 1: neue Regeln, altes Gehirn lernt weiter",
+              "Neue Regeln: Wracks mit Warnblinker, Bremslicht, eine Lampe, Einfahrt nur rechts. Das alte Gehirn lernt weiter, Unfälle kosten jetzt dreimal so viel."),
+    "r1_main_x3": ("R1+", "Runde 1: länger weitergelernt",
+                   "Rund 40 % weniger Unfälle als das Gehirn davor, bei dichtem Verkehr aber noch viele – das Hauptgehirn vor Runde 2."),
+    "r2_B_s1": ("R2", "Runde 2: mit Hindernissen geübt",
+                "Das aktuelle Gehirn: im Training standen Wracks und parkende Autos im Weg. Es bremst viel öfter dahinter ab und reiht sich ein, statt hineinzufahren."),
+    "r2_A_s1": ("R2a", "Runde 2, Test: nur mehr Ausprobieren",
+                "Ohne Hindernisse im Training: schon deutlich weniger Unfälle als vorher, aber längst nicht so sicher vor Hindernissen."),
+    "r2_A_s2": ("R2a'", "Runde 2, Test: nur mehr Ausprobieren, zweiter Lauf",
+                "Anderer Zufallsstart, fast dasselbe Ergebnis."),
+    "r2_C_s1": ("R2c", "Runde 2, Test: Unfälle je nach eigenem Tempo bestraft",
+                "Mit Hindernissen und tempoabhängiger Strafe: etwas schlechter als ohne die Strafe (bei einem Lauf nicht sicher)."),
+    "r1_x1": ("R1a", "Runde 1, Test: Unfälle so teuer wie bisher",
+              "Kurzer Test: ähnlich gut wie mit dreifacher Strafe – der Unterschied ist Zufall."),
+    "r1_x10": ("R1b", "Runde 1, Test: Unfälle zehnmal so teuer",
+               "Kurzer Test: zu viel Strafe – weniger Autos kommen durch, und Unfälle gibt es nicht weniger."),
     "wide_s0": ("B1'", "Breite Kreuzung, zweiter Lauf",
                 "Gleiches Rezept, anderer Zufallsstart (noch ohne Rückwärtsgang)."),
     "wide_s0r": ("B2'", "Zweiter Lauf: mit Rückwärtsgang",
@@ -145,7 +170,10 @@ STEP_INFO = {
     "wide_s1": "Neue Kreuzung: Straße doppelt so breit, Reifen rutschen in zu schnellen Kurven → von Null an neu gelernt, die Kurve beginnt wieder unten",
     "wide_s1r": "Rückwärtsgang dazu → kaum benutzt, es geht weiter bergauf",
     "wide_s1ft": "Kleinere Lernschritte → weniger Unfälle",
-    "wide_s1ft2": "Länger feinschleifen → nur noch wenig besser: das aktuelle Gehirn",
+    "wide_s1ft2": "Länger feinschleifen → nur noch wenig besser: das Hauptgehirn bis Runde 1",
+    "r1_x3": "Neue Regeln: Wracks mit Warnblinker, Bremslicht, eine Lampe, Einfahrt nur rechts; Unfälle kosten dreimal so viel, geübt wird mit dichterem Verkehr → die Kurve fällt erst, dann lernt das alte Gehirn um",
+    "r1_main_x3": "Länger weitergelernt → rund 40 % weniger Unfälle als vorher: das Hauptgehirn bis Runde 2",
+    "r2_B_s1": "Dazu Hindernisse im Training (Wracks, parkende Autos) → bremst viel öfter dahinter ab und reiht sich ein; noch Unfälle mitten auf der Kreuzung bei dichtem Verkehr",
 }
 
 
@@ -168,9 +196,15 @@ PAGES = [
 def method_of(run: str) -> str | None:
     if run.startswith("es"):
         return "es"
-    if run.startswith("ppo") or run.startswith("wide"):  # wide_*: PPO on the wide crossing
+    # wide_*: PPO on the wide crossing; r<N>_*: training round N (PPO, warm-started)
+    if run.startswith("ppo") or run.startswith("wide") or re.match(r"r\d+_", run):
         return "ppo"
     return None
+
+
+def from_runs(run: str) -> bool:
+    """True if `run` is read from runs/ (source runs, or merge and the run exists in runs/)."""
+    return SOURCE["kind"] == "runs" or (SOURCE["kind"] == "merge" and run in SOURCE["runs"])
 
 
 def world_of(physics: dict) -> str:
@@ -210,22 +244,28 @@ def discover(world: str = "any") -> dict:
     """All loadable checkpoints of runs/es*, runs/ppo* and runs/wide* (or of the snapshot):
     id -> info (only those trained on `world` = narrow / wide crossing, unless 'any')."""
     found = {}
-    if SOURCE["kind"] == "snapshot":
+    if SOURCE["kind"] in ("snapshot", "merge"):
         for f in sorted((SNAPSHOT / "brains").glob("*/*.npz")):
             with np.load(f) as z:
                 info = json.loads(str(z["info"]))
                 pol = {**info["policy"], "in_scale": z["in_scale"].tolist(),
                        "layers": [{"W": z[f"W{i}"].tolist(), "b": z[f"b{i}"].tolist()} for i in range(info["n_layers"])]}
-            if world != "any" and world_of(info["physics"]) != world:
+            # snapshots written before the interface keys existed: lamp count / neighbour layout from the
+            # checkpoint's own training cfg (old brains: 2 lamps, acceleration feature)
+            phys = {**info["physics"], **{k: v for k, v in physics_of(pol.get("cfg") or {}).items() if k in INTERFACE_KEYS}}
+            if world != "any" and world_of(phys) != world:
                 continue
-            e = _entry(info["run"], f.stem, info["file"], info["method"], info["gen"], info["physics"], pol)
-            found[e["id"]] = e
-        return found
+            if from_runs(info["run"]):
+                continue
+            e = _entry(info["run"], f.stem, info["file"], info["method"], info["gen"], phys, pol)
+            found[e["id"]] = {**e, "snap": True}
+        if SOURCE["kind"] == "snapshot":
+            return found
     if not RUNS.exists():
         return found
     for run_dir in sorted(p for p in RUNS.iterdir() if p.is_dir()):
         method = method_of(run_dir.name)
-        if not method:
+        if not method or not from_runs(run_dir.name):
             continue
         for f in sorted(run_dir.glob("*.npz")):
             try:
@@ -233,21 +273,32 @@ def discover(world: str = "any") -> dict:
             except Exception as e:  # incompatible / broken checkpoint: skip loudly
                 print(f"  skip {f.relative_to(ROOT)}: {e}")
                 continue
+            if "layers" not in pol:  # set encoder (policy_set.py): sim.js runs it, brain view / snapshot not yet
+                print(f"  skip {f.relative_to(ROOT)}: set-encoder brains are not published on the site yet")
+                continue
             meta = ckpt_meta(f)
             if world != "any" and world_of(physics_of(meta["cfg"])) != world:
                 continue
-            e = _entry(run_dir.name, f.stem, str(f.relative_to(ROOT)), method, meta["gen"], physics_of(meta["cfg"]), pol)
+            e = _entry(run_dir.name, f.stem, f.relative_to(ROOT).as_posix(), method, meta["gen"], physics_of(meta["cfg"]), pol)
             found[e["id"]] = e
     return found
 
 
 def init_of(run: str) -> tuple[str, int] | None:
     """(run, generation) of the checkpoint `run` was warm-started from, if it is a known run."""
-    if SOURCE["kind"] == "snapshot":
+    if not from_runs(run):
         r = SOURCE["manifest"]["runs"].get(run, {}).get("init")
         return tuple(r) if r else None
     p = RUNS / run / "args.json"
-    init = (json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}).get("init") or ""
+    args = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    init = args.get("init") or ""
+    if not init and args.get("init_policy"):  # actor transplanted from a checkpoint: find it by its weights
+        ip = ROOT / args["init_policy"]
+        if not ip.is_file():
+            return None
+        h = policy_hash(load_adapted_policy(ip))
+        c = next((c for c in FOUND.values() if c["hash"] == h and c["run"] != run), None)
+        return (c["run"], c["gen"] or 0) if c else None
     if not init:
         return None
     ip = ROOT / init
@@ -304,9 +355,13 @@ def run_bench(entries: list[tuple[str, str, object, dict, list]], force: bool, w
     """entries: (key, kind, payload, physics, demands) -> {key: {demand: result}}."""
     sim_src = hashlib.sha1((ROOT / "smartcrossing" / "sim.py").read_bytes()
                            + (ROOT / "smartcrossing" / "baselines.py").read_bytes()).hexdigest()[:12]
-    cache = {}
+    cache, n_stored = {}, 0
     if CACHE.exists() and not force:
         cache = json.loads(CACHE.read_text(encoding="utf-8"))
+        n_stored = len(cache)
+        cache = {k: v for k, v in cache.items() if k.endswith(f"|{sim_src}")}  # drop results of older sim versions
+    if len(cache) < n_stored:
+        CACHE.write_text(json.dumps(cache, indent=0, sort_keys=True), encoding="utf-8", newline="\n")
     jobs, keys = [], []
     for key, kind, payload, physics, demands in entries:
         for d in demands:
@@ -340,7 +395,6 @@ REPLAY_DEMANDS = [0.05, 0.15, 0.3]
 REPLAY_SEED, REPLAY_WARMUP, REPLAY_SECONDS = 7, 15.0, 90.0
 GEOMETRY_KEYS = ("L", "W", "Rc", "a_lat_max", "v_reverse")  # the "world": same for all drivers compared
 Q_POS, Q_TH, Q_LAMP = 0.05, 0.01, 100.0  # quantisation: 5 cm, 0.01 rad, lamp in 1/100
-BRAKE_ACC = -0.5  # m/s^2: brake lights on below this actual acceleration (purely visual)
 
 
 def _b64(a: np.ndarray) -> str:
@@ -351,10 +405,12 @@ def _b64(a: np.ndarray) -> str:
 
 def _replay_job(job):
     """Drive one sim (1 env) and record every car as a compact track:
-    [t0, man, end_step, end_kind, qx0, qy0, qth0, width, b64, brake] where b64 holds per sample
-    (dx, dy, dth[, lamp0, lamp1]) as int8 (width 1) or int16 (width 2), deltas of the
-    quantised values (exact reconstruction), and brake the sample ranges [start, end) with the
-    brake lights on (acceleration < BRAKE_ACC), flattened. Plus crash marks and the queue per arm."""
+    [t0, man, end_step, end_kind, qx0, qy0, qth0, width, b64, brake, wreck_from] where b64 holds per
+    sample (dx, dy, dth[, lamp per channel]) as int8 (width 1) or int16 (width 2), deltas of the
+    quantised values (exact reconstruction), brake the sample ranges [start, end) with the
+    brake lights on (acceleration < sim.BRAKE_ACC), flattened, and wreck_from the first sample at which
+    the car is a wreck (-1: never; a wreck stays cfg.wreck_time, its samples continue the track).
+    Plus crash marks and the queue per arm. "lamps" = lamp channels per sample (0 for the baselines)."""
     from smartcrossing.baselines import LaneDriver
     from smartcrossing.policy import PolicyDriver
     from smartcrossing.sim import DONE_NAMES, Sim
@@ -367,7 +423,7 @@ def _replay_job(job):
     else:
         params, sizes, in_scale = payload
         drv = PolicyDriver(sim, np.asarray(params), sizes, in_scale=np.asarray(in_scale))
-    lamps = kind != "baseline" and cfg.n_signal >= 2
+    lamps = 0 if kind == "baseline" else cfg.n_signal
     tracks, marks, queue = {}, [], []
     n_warm, n = int(round(REPLAY_WARMUP / cfg.dt)), int(round(REPLAY_SECONDS / cfg.dt))
     for k in range(-n_warm, n):
@@ -380,13 +436,17 @@ def _replay_job(job):
                 tr["end"] = (k, int(sim.done_kind[0, slot]))
         for _, ev, x, y in sim.events:
             marks.append([k, 1 if ev == "crash" else 2, int(round(x / Q_POS)), int(round(y / Q_POS))])
-        for slot in np.nonzero(sim.alive[0])[0]:
+        for slot in np.nonzero(sim.alive[0] | sim.wreck[0])[0]:
             uid = int(sim.uid[0, slot])
             tr = tracks.get(uid)
             if tr is None:
-                tr = tracks[uid] = {"t0": k, "man": int(sim.man[0, slot]), "s": [], "b": [], "end": (None, 0)}
+                if sim.wreck[0, slot]:  # a wreck from before the recording started
+                    continue
+                tr = tracks[uid] = {"t0": k, "man": int(sim.man[0, slot]), "s": [], "b": [], "end": (None, 0), "w": -1}
+            if sim.wreck[0, slot] and tr["w"] < 0:
+                tr["w"] = len(tr["s"])
             tr["b"].append(bool(sim.acc[0, slot] < BRAKE_ACC))
-            tr["s"].append((sim.x[0, slot], sim.y[0, slot], sim.th[0, slot], *(sim.sig[0, slot, :2] if lamps else ())))
+            tr["s"].append((sim.x[0, slot], sim.y[0, slot], sim.th[0, slot], *(sim.sig[0, slot, :lamps] if lamps else ())))
         queue.append(np.minimum(sim.queue[0], 255))
     out = []
     for uid, tr in tracks.items():
@@ -405,9 +465,10 @@ def _replay_job(job):
         b = np.diff(np.concatenate([[0], np.asarray(tr["b"], dtype=np.int8), [0]]))
         runs = np.stack([np.nonzero(b == 1)[0], np.nonzero(b == -1)[0]], 1).ravel().tolist()
         out.append([tr["t0"], tr["man"], end_k if end_k is not None else -1, end_kind,
-                    int(q[0, 0]), int(q[0, 1]), int(q[0, 2]), width, _b64(d.astype(np.int8 if width == 1 else "<i2")), runs])
+                    int(q[0, 0]), int(q[0, 1]), int(q[0, 2]), width, _b64(d.astype(np.int8 if width == 1 else "<i2")), runs,
+                    tr["w"]])
     return {
-        "demand": demand, "steps": n, "dt": cfg.dt, "lamps": lamps,
+        "demand": demand, "steps": n, "dt": cfg.dt, "lamps": lamps, "wreck_time": cfg.wreck_time,
         "kinds": list(DONE_NAMES), "tracks": out, "marks": marks,
         "queue": _b64(np.asarray(queue, dtype=np.uint8)),
     }
@@ -453,7 +514,7 @@ def read_curve(run: str, offset: int) -> list[dict]:
     """Learning curve of one run: x (cumulative generation / iteration), exit, crash,
     offroad (fractions of finished cars) and exit at demand 0.15 where evaluated.
     Robust to the field names: ES logs use centre.exit_ok etc."""
-    if SOURCE["kind"] == "snapshot":  # stored with offset 0 (already thinned)
+    if not from_runs(run):  # snapshot: stored with offset 0 (already thinned)
         rows = SOURCE["manifest"]["curves"].get(run, [])
         return [{**r, "x": round(r["x"] + offset, 4)} for r in rows]
     p = RUNS / run / "log.jsonl"
@@ -477,6 +538,8 @@ def read_curve(run: str, offset: int) -> list[dict]:
             "demand": _pick(f, [r"ceiling", r"demand"]),
         }
         if row["exit"] is None and row["eval15"] is None:
+            continue
+        if _pick(f, [r"train\.finished"]) == 0 and row["eval15"] is None:  # no car finished: no rates
             continue
         rows.append({k: (round(v, 4) if isinstance(v, float) else v) for k, v in row.items() if v is not None})
     # thin out long logs (keep every eval point)
@@ -504,7 +567,7 @@ def run_world(run: str, found: dict) -> str | None:
     c = next((c for c in found.values() if c["run"] == run), None)
     if c is not None:
         return world_of(c["physics"])
-    if SOURCE["kind"] == "snapshot":
+    if SOURCE["manifest"]:
         return SOURCE["manifest"]["runs"].get(run, {}).get("world")
     return None
 
@@ -519,6 +582,8 @@ def write_snapshot(found: dict, used: list[str], chain_runs: list[str]):
         pol = c["policy"]
         rel = f"{c['run']}/{cid.split('/', 1)[1]}.npz"
         keep.add(rel)
+        if c.get("snap") and (brains / rel).exists():  # unchanged copy from the snapshot itself
+            continue
         info = {"run": c["run"], "file": c["file"], "method": c["method"], "gen": c["gen"], "physics": c["physics"],
                 "n_layers": len(pol["layers"]),
                 "policy": {k: v for k, v in pol.items() if k not in ("layers", "in_scale")}}
@@ -529,19 +594,34 @@ def write_snapshot(found: dict, used: list[str], chain_runs: list[str]):
         path.parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(path, info=json.dumps(info, sort_keys=True), **arrays)
     for rel in old - keep:
+        if SOURCE["kind"] == "merge":
+            continue  # merge: the snapshot only grows (nothing old is deleted)
         (brains / rel).unlink()
     for d in brains.iterdir():
         if d.is_dir() and not any(d.iterdir()):
             d.rmdir()
     runs = sorted(set(chain_runs) | {found[cid]["run"] for cid in used})
     manifest = {
-        "note": "written by site/build.py from runs/ (see its docstring); read when runs/ is absent",
+        "note": "written by site/build.py from runs/ (see its docstring); merged with runs/ or read alone",
         "runs": {r: {"init": list(init_of(r)) if init_of(r) else None, "world": run_world(r, found)} for r in runs},
         "curves": {r: read_curve(r, 0) for r in sorted(set(chain_runs))},
     }
+    if SOURCE["kind"] == "merge":  # keep what the snapshot knew about runs not in runs/
+        for k in ("runs", "curves"):
+            manifest[k] = {**{r: v for r, v in SOURCE["manifest"][k].items() if not from_runs(r)}, **manifest[k]}
     (SNAPSHOT / "manifest.json").write_text(json.dumps(manifest, separators=(",", ":"), sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     size = sum(f.stat().st_size for f in SNAPSHOT.rglob("*") if f.is_file())
     print(f"  snapshot: {len(keep)} brains + manifest in {SNAPSHOT.relative_to(ROOT)}/ ({size / 1024:.0f} KiB)")
+
+
+REWARD_KEYS = ("r_exit", "r_wrong_exit", "r_crash", "r_crash_speed", "r_offroad", "r_offroad_speed", "r_timeout",
+               "r_progress", "r_time", "r_queue", "crash_cost_speed", "L", "v_max", "spawn_speed", "max_age")
+
+
+def reward_of(train_cfg: dict) -> dict:
+    """The reward rules (and the few world numbers an example trip needs) a policy was trained with."""
+    d = SimConfig()
+    return {k: train_cfg.get(k, getattr(d, k)) for k in REWARD_KEYS}
 
 
 def choose(found: dict, main: list[str], quick: dict) -> dict:
@@ -561,7 +641,9 @@ def choose(found: dict, main: list[str], quick: dict) -> dict:
     return picked
 
 
-def timeline(found: dict, best_id: str, n_max: int) -> list[dict]:
+def timeline(found: dict, best_id: str, n_max: int, keep: set = frozenset()) -> list[dict]:
+    """Zeitreise points along the warm-start chain of `best_id` (at most n_max; checkpoints in
+    `keep`, e.g. the previous main brain, always stay)."""
     c = found[best_id]
     chain = chain_of(c["run"])
     pts = []
@@ -584,12 +666,17 @@ def timeline(found: dict, best_id: str, n_max: int) -> list[dict]:
     for p in pts:  # keep a point only if it is far enough from the previously kept one
         if not kept or p[0] - kept[-1][0] > 0.03 * span:
             kept.append(p)
-        elif p == pts[-1] or p[1] == best_id:  # the final / chosen checkpoint always stays
+        elif p == pts[-1] or p[1] == best_id or p[1] in keep:  # the final / chosen / kept checkpoint stays
             kept[-1] = p
     pts = kept
     if len(pts) > n_max:
-        idx = np.unique(np.linspace(0, len(pts) - 1, n_max).round().astype(int))
-        pts = [pts[i] for i in idx]
+        idx = set(np.unique(np.linspace(0, len(pts) - 1, n_max).round().astype(int)).tolist())
+        for j in (j for j, p in enumerate(pts) if p[1] in keep and j not in idx):
+            # replace the nearest evenly spaced point (never the first / last one) by the kept one
+            near = min((i for i in idx if 0 < i < len(pts) - 1 and pts[i][1] not in keep), key=lambda i: abs(i - j), default=None)
+            if near is not None:
+                idx = (idx - {near}) | {j}
+        pts = [pts[i] for i in sorted(idx)]
     return [{"gen": g, "id": cid} for g, cid in pts], chain
 
 
@@ -599,8 +686,9 @@ def round_policy(d: dict, digits: int = 5) -> dict:
     return {**d, "in_scale": r(d["in_scale"]), "layers": [{"W": r(l["W"]), "b": r(l["b"])} for l in d["layers"]]}
 
 
-def random_policy() -> dict:
-    cfg = SimConfig()
+def random_policy(physics: dict | None = None) -> dict:
+    """Random brain with the observation interface of `physics` (default: the current one)."""
+    cfg = interface_cfg(physics) if physics else SimConfig()
     sizes = layer_sizes(cfg)
     params = init_params(sizes, 7)
     return {
@@ -668,26 +756,32 @@ def main(argv=None):
     ap.add_argument("--world", choices=["narrow", "wide", "any"], default="any",
                     help="only use checkpoints trained on this crossing (narrow = original 7 m road, wide = 14 m road)")
     ap.add_argument("--mix", default=DEFAULT_MIX, metavar="PATH", help="second brain for mixing on the start page ('' = none)")
-    ap.add_argument("--source", choices=["auto", "runs", "snapshot"], default="auto",
-                    help="where the checkpoints / logs come from: runs/ (also refreshes the snapshot), the committed "
-                         "snapshot results/site/, or auto (runs/ if it holds training runs, else the snapshot)")
+    ap.add_argument("--previous", default=DEFAULT_PREVIOUS, metavar="PATH",
+                    help="the previous main brain, shown next to the main brain on Vergleich ('' = none)")
+    ap.add_argument("--source", choices=["auto", "runs", "snapshot", "merge"], default="auto",
+                    help="where the checkpoints / logs come from: runs/ only, the committed snapshot results/site/ only, "
+                         "or merge (snapshot + training runs in runs/); runs and merge also refresh the snapshot; "
+                         "auto = merge if both exist, else whichever exists")
     a = ap.parse_args(argv)
     if a.main is None:
         a.main = list(DEFAULT_MAIN)
     kind = a.source
+    train_runs = {p.name for p in RUNS.iterdir() if p.is_dir() and method_of(p.name)} if RUNS.exists() else set()
     if kind == "auto":
-        kind = "runs" if RUNS.exists() and any(method_of(p.name) for p in RUNS.iterdir() if p.is_dir()) else "snapshot"
-    SOURCE["kind"] = kind
-    if kind == "snapshot":
+        has_snap = (SNAPSHOT / "manifest.json").exists()
+        kind = ("merge" if train_runs else "snapshot") if has_snap else "runs"
+    SOURCE["kind"], SOURCE["runs"] = kind, train_runs
+    if kind in ("snapshot", "merge"):
         if not (SNAPSHOT / "manifest.json").exists():
             raise SystemExit(f"no runs/ and no snapshot in {SNAPSHOT.relative_to(ROOT)}/")
         SOURCE["manifest"] = json.loads((SNAPSHOT / "manifest.json").read_text(encoding="utf-8"))
-    print(f"source: {kind}")
+    print(f"source: {kind}" + (f" (+ runs/: {', '.join(sorted(train_runs))})" if kind == "merge" else ""))
 
     cfg = SimConfig()
-    layout = obs_layout(cfg)  # fails loudly if the sim's observation layout changed
+    obs_layout(cfg)  # fails loudly if the sim's observation layout changed
     print("discovering checkpoints ...")
     found = discover(a.world)
+    FOUND.update(found)
     print(f"  {len(found)} loadable checkpoints")
 
     def cid_of(spec):
@@ -701,6 +795,7 @@ def main(argv=None):
     picked = choose(found, a.main, quick)
     main_id = cid_of(a.main[0]) if a.main else max(picked.values(), key=lambda k: quick[k]["throughput_per_min"] * quick[k]["exit_ok_rate"])
     hist_id = cid_of(a.history) if a.history else None
+    prev_id = cid_of(a.previous) if a.previous else None
     print(f"  best per method: {picked}, main: {main_id}, history: {hist_id}")
 
     policies, bench_entries = {}, []
@@ -725,7 +820,7 @@ def main(argv=None):
         pts_all, chain_all, shift = [], [], 0
         for i, pid in enumerate(parts):
             # history first (fewer Zeitreise points), then the main chain, shifted to follow it
-            pts, chain = timeline(found, pid, max(2, a.timeline // 2) if i < len(parts) - 1 else a.timeline)
+            pts, chain = timeline(found, pid, max(2, a.timeline // 2) if i < len(parts) - 1 else a.timeline, keep={prev_id})
             crv = {r: read_curve(r, off) for r, off in chain}
             if i > 0 and any(crv.values()):
                 lo = min(row["x"] for rows in crv.values() for row in rows)
@@ -744,7 +839,7 @@ def main(argv=None):
     # random brain as "generation 0" of the ES timeline
     if "es" in timelines:
         phys = found[picked["es"]]["physics"]
-        rp = random_policy()
+        rp = random_policy(phys)
         rid = "zufall"
         policies[rid] = {"id": rid, "run": None, "file": None, "method": "es", "gen": 0, "physics": phys,
                          "adapted": None, "policy": round_policy(rp, 4), "bench": {}}
@@ -763,6 +858,8 @@ def main(argv=None):
     mix_id = cid_of(a.mix) if a.mix else None
     if mix_id:
         use(mix_id, DEMANDS)
+    if prev_id:
+        use(prev_id, DEMANDS)
     # the rule-based drivers run in the same world (geometry, grip) as the main policy, and also
     # in the world of each other brain on "Vergleich" (old narrow crossing), so every brain is
     # compared on its own crossing
@@ -788,9 +885,18 @@ def main(argv=None):
     baselines_by_world = {w: {drv: bench[base_key(drv, w)] for drv in ("light", "reservation")} for w in base_worlds}
     baselines = baselines_by_world[main_world]
 
+    # observation labels per interface (lamp count, neighbour layout) of the brains on the site; "layout"
+    # is the main brain's (the pages pick the one of their sim: SCX.layoutFor)
+    ifaces = {interface_key(cfg): cfg}
+    for p in policies.values():
+        c = SimConfig(**{k: p["physics"][k] for k in INTERFACE_KEYS if k in p["physics"]})
+        ifaces.setdefault(interface_key(c), c)
+    layouts = {k: obs_layout(c) for k, c in ifaces.items()}
+    main_iface = interface_key(found[main_id]["physics"]) if main_id else interface_key(cfg)
     data = {
         "built": date.today().isoformat(),
-        "layout": layout,
+        "layout": layouts[main_iface],
+        "layouts": layouts,
         "cfg": {k: (list(v) if isinstance(v, tuple) else v) for k, v in cfg.__dict__.items()},
         "policies": policies,
         "best": picked,
@@ -798,6 +904,7 @@ def main(argv=None):
         "main_id": main_id,
         "history": hist_id,
         "mix": mix_id,
+        "previous": prev_id if prev_id != main_id else None,  # the main brain before the current one
         "timelines": timelines,
         "chains": chains,
         "curves": curves,
@@ -805,6 +912,8 @@ def main(argv=None):
         "baselines": baselines,  # in the main brain's world
         "baselines_by_world": baselines_by_world,  # world ("wide" / "narrow") -> {light, reservation}
         "main_world": main_world,
+        # reward rules the main brain was trained with (from its checkpoint's training cfg; drawn on /lernen)
+        "reward": reward_of(found[main_id]["policy"].get("cfg") or {}) if main_id else None,
         "demands": DEMANDS,
         "bench_setup": {"envs": BENCH_ENVS, "seconds": BENCH_SECONDS, "seed": BENCH_SEED},
     }
@@ -821,7 +930,7 @@ def main(argv=None):
         replays["policy_id"] = main_id
         replays["world"] = {k: base_phys[k] for k in ("L", "W", "Rc") if k in base_phys}
     data["replay_world"] = world_of(base_phys)
-    if kind == "runs":
+    if kind in ("runs", "merge"):
         write_snapshot(found, [cid for cid in policies if cid in found], [r["run"] for ch in chains.values() for r in ch])
     src_hash = hashlib.sha1(b"".join(f.read_bytes() for f in sorted(SRC.rglob("*")) if f.is_file())
                             + sim_config_js().encode()).hexdigest()

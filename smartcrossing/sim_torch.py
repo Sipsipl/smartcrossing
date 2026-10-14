@@ -1,4 +1,5 @@
-"""PyTorch port of :class:`smartcrossing.sim.Sim` (feasibility study for the GPU port, Roadmap C).
+"""PyTorch port of :class:`smartcrossing.sim.Sim`: the simulator of the GPU rollouts
+(rollout_torch.py, ``ppo --rollout-device cuda``).
 
 Same physics, rewards, removal, arrivals and observations as sim.py, vectorised over
 (envs, slots) without data-dependent Python control flow, so it runs on cpu or cuda
@@ -16,7 +17,7 @@ Differences to sim.py (by design):
 - Not ported: ``Stats.travel`` per-vehicle lists (replaced by per-env sums
   ``travel_time`` / ``travel_free`` / exits count) and ``events`` (rendering only).
   The FIFO growth check costs one host sync per step (disabled in CUDA-graph mode, which
-  uses a fixed capacity of 256 per arm and only flags an overflow in ``fifo_overflow``).
+  uses a fixed capacity of at least 256 per arm and only flags an overflow in ``fifo_overflow``).
 - ``cuda_graph(fn)`` captures observe + policy + step into one CUDA graph: eager torch on the
   GPU is launch-bound (~1000 small kernels per step, ~55 ms on Windows regardless of B).
 """
@@ -28,6 +29,7 @@ import torch
 
 from .sim import (
     ARM_U,
+    BRAKE_ACC,
     DISC_OFFSETS,
     DISC_R,
     DONE_CRASH,
@@ -36,26 +38,29 @@ from .sim import (
     DONE_TIMEOUT,
     DONE_WRONG,
     GOAL_SCALE,
-    K_NEIGHBOURS,
     LEFT,
-    NB_FEATURES,
     NEIGHBOUR_RANGE,
     POS_SCALE,
     RAY_ANGLES,
     RAY_RANGE,
     RIGHT,
-    SPAWN_BACK,
-    SPAWN_CURB_GAP,
     SPAWN_LAT_MARGIN,
-    SPAWN_LAT_STEP,
     SPAWN_MAX_PER_STEP,
-    SPAWN_RIGHT_MIN,
     SPEED_TAU,
+    STAT_NAMES,
     STRAIGHT,
     SimConfig,
     free_flow_time,
-    rot,
+    nb_features,
+    obstacle_clear,
+    obstacle_pose,
+    obstacle_steps,
+    spawn_lats,
+    spawn_points,
+    wreck_steps,
 )
+
+GRAPH_FIFO_CAP = 256  # arrival FIFO capacity per arm in CUDA-graph mode (no growth possible)
 
 _COS4 = (1.0, 0.0, -1.0, 0.0)  # rint(cos(k * 90deg)), k = 0..3
 _SIN4 = (0.0, 1.0, 0.0, -1.0)
@@ -145,7 +150,7 @@ def grip_kappa(cfg: SimConfig, v):
 class TorchStats:
     """Per-environment counters (as sim.Stats, but tensors; travel as per-env sums)."""
 
-    NAMES = ("arrived", "spawned", "exits", "wrong_exits", "crashes", "offroad", "timeouts")
+    NAMES = STAT_NAMES
 
     def __init__(self, B, device, dtype):
         for name in self.NAMES:
@@ -156,9 +161,10 @@ class TorchStats:
 
 class TorchSim:
     def __init__(self, cfg: SimConfig, n_envs: int, seed: int = 0, n_scenarios: int | None = None,
-                 device="cpu", dtype=torch.float64, rng: str = "torch"):
+                 device="cpu", dtype=torch.float64, rng: str = "torch", group_probs=None, fifo_cap: int = 64):
         """rng: "numpy" = sim.py's random streams (bit-identical draws, for parity tests),
-        "torch" = on-device generator (fast)."""
+        "torch" = on-device generator (fast). group_probs: as sim.Sim. fifo_cap: initial capacity
+        of the per-arm arrival FIFO (grows on demand, except in CUDA-graph mode)."""
         assert rng in ("numpy", "torch")
         self.cfg = cfg
         self.B = n_envs
@@ -169,6 +175,9 @@ class TorchSim:
         self.C = _Consts(self.device, dtype)
         self.scen = torch.arange(self.B, device=self.device) % self.S
         self._scen_np = np.arange(self.B) % self.S
+        self.group_probs = np.array([1.0]) if group_probs is None else np.asarray(group_probs, dtype=float)
+        self.fifo_cap = fifo_cap
+        self.fifo_sync = True  # FIFO growth check (one host sync per step); off in CUDA-graph mode
         self.reset(seed)
 
     # ------------------------------------------------------------------ helpers
@@ -201,6 +210,13 @@ class TorchSim:
             self._stream_demand = sd
             self.demand = sd[self.scen]
         self.alive = self._i(B, N, dtype=torch.bool)
+        self.wreck = self._i(B, N, dtype=torch.bool)  # crashed cars standing as obstacles (sim.py)
+        self.wreck_left = self._i(B, N)  # steps until the wreck is removed
+        self.obstacle = self._i(B, N, dtype=torch.bool)  # obstacles (cfg.obstacle_*; sim.py)
+        self.parked = self._i(B, N, dtype=torch.bool)
+        self.obst_env = torch.arange(B, device=self.device) < int(round(cfg.obstacle_envs * B))
+        if self.rng_mode == "numpy":
+            self.obst_rng = np.random.default_rng([seed, 2])
         self.x, self.y, self.th, self.v = self._f(B, N), self._f(B, N), self._f(B, N), self._f(B, N)
         self.kappa, self.acc = self._f(B, N), self._f(B, N)
         self.sig = self._f(B, N, cfg.n_signal)
@@ -209,20 +225,17 @@ class TorchSim:
         self.uid = self._i(B, N, fill=-1)
         self.group = self._i(B, N)
         self.queue = self._i(B, 4)
-        self.queue_u, self.queue_man, self.queue_grp = self._f(B, 4), self._i(B, 4, fill=1), self._i(B, 4)
-        self._qcap = getattr(self, "fifo_cap", 64)
-        self.fifo_sync = getattr(self, "fifo_sync", True)
+        self._qcap = self.fifo_cap
         self.fifo_overflow = torch.zeros((), dtype=torch.bool, device=self.device)
         tp = np.asarray(self.cfg.turn_probs, dtype=float)
         self._turn_cdf = self._t(np.cumsum(tp / tp.sum())[:-1])
-        gp = np.asarray(getattr(self, "group_probs", np.array([1.0])), dtype=float)
+        gp = self.group_probs
         self._group_cdf = self._t(np.cumsum(gp / gp.sum())[:-1])
         self._qhead = self._i(B, 4)
         self._qbuf = self._f(B, 4, self._qcap, 3)
         self.next_uid = self._i()
         self.t = 0.0
         self.stats = TorchStats(B, self.device, self.dtype)
-        self.group_probs = getattr(self, "group_probs", np.array([1.0]))
         self._prev_dist = self._f(B, N)
         self.car_reward = self._f(B, N)
         self.done_kind = self._i(B, N, dtype=torch.int8)
@@ -231,25 +244,14 @@ class TorchSim:
         self._arange_B = torch.arange(B, device=self.device)
         self._arange_N = torch.arange(N, device=self.device)
         self._eye = torch.eye(N, dtype=torch.bool, device=self.device)
-        lats = self.spawn_lats()
-        self._lats = self._t(lats)
-        self._spawn_pts = []  # per arm: (px, py, h, hn) exactly as sim.py computes them (numpy)
-        back = -cfg.L + SPAWN_BACK
-        for k in range(4):
-            c, s = rot(k)
-            h = np.pi / 2 + k * np.pi / 2
-            hn = float(np.arctan2(np.sin(h), np.cos(h)))
-            px, py = c * lats - s * back, s * lats + c * back
-            self._spawn_pts.append((self._t(px), self._t(py), float(h), hn))
+        self._lats = self._t(spawn_lats(cfg))
+        # per arm: (px, py, h, hn) exactly as sim.py computes them (numpy)
+        self._spawn_pts = [(self._t(px), self._t(py), float(h), float(hn)) for px, py, h, hn in spawn_points(cfg)]
 
     # ------------------------------------------------------------------ geometry
     @property
     def tgt(self):
         return (self.arm + self.man) % 4
-
-    def gate_xy(self):
-        c, s = rot_t(self.tgt, self.C)
-        return s * self.cfg.L, -c * self.cfg.L
 
     def dist_to_gate(self):
         return route_dist(self.cfg, self.arm, self.man, self.x, self.y, self.C)
@@ -292,9 +294,9 @@ class TorchSim:
         ddx = x[:, None, :] - x[:, :, None]  # (B, N_i, N_j) = x_j - x_i
         ddy = y[:, None, :] - y[:, :, None]
         d = torch.hypot(ddx, ddy)
-        valid = self.alive[:, None, :] & (d < cfg.neighbour_vis) & ~self._eye
+        valid = (self.alive | self.wreck)[:, None, :] & (d < cfg.neighbour_vis) & ~self._eye
         d = torch.where(valid, d, math.inf)
-        K = min(K_NEIGHBOURS, N)
+        K = min(cfg.n_neighbours, N)
         idx = torch.topk(d, K, dim=-1, largest=False, sorted=True).indices  # (B, N, K)
 
         def g(a):  # gather neighbour attribute a (B, N) -> (B, N, K)
@@ -312,9 +314,12 @@ class TorchSim:
             g(self.v) / cfg.v_max,
             torch.ones_like(nx),
             g(self.kappa) / cfg.kappa_max,
-            g(self.acc) / cfg.brake_max,
         ]
-        assert len(feats) == NB_FEATURES
+        if cfg.brake_light:  # brake light + hazard lights
+            feats += [(g(self.acc) < BRAKE_ACC).to(self.dtype), g((self.wreck & ~self.parked).to(self.dtype))]
+        else:  # legacy interface: acceleration
+            feats += [g(self.acc) / cfg.brake_max]
+        assert len(feats) == nb_features(cfg)
         f = torch.stack(feats, -1)
         ns = cfg.n_signal
         if ns:
@@ -326,6 +331,8 @@ class TorchSim:
                 sg = torch.zeros(B, N, K, ns, dtype=self.dtype, device=self.device)
             f = torch.cat([f, sg], -1)
         f = f * present[..., None]
+        if K < cfg.n_neighbours:  # fewer slots than neighbour blocks: the rest stay empty
+            f = torch.cat([f, f.new_zeros(B, N, cfg.n_neighbours - K, f.shape[-1])], 2)
         obs = torch.cat([own, f.reshape(B, N, -1)], -1)
         return torch.where(self.alive[..., None], obs, 0.0)
 
@@ -360,7 +367,7 @@ class TorchSim:
         kap = self.kappa + torch.clamp(a[..., 1] * cfg.kappa_max - self.kappa, -dk, dk)
         kg = grip_kappa(cfg, v)
         self.kappa = torch.where(alive, torch.minimum(torch.maximum(kap, -kg), kg), 0.0)
-        self.sig = torch.where(alive[..., None], a[..., 2:], 0.0)
+        self.sig = torch.where(alive[..., None], a[..., 2 : 2 + cfg.n_signal], 0.0)
         th = self.th + v * self.kappa * cfg.dt
         self.acc = torch.where(alive, (v - self.v) / cfg.dt, 0.0)
         self.x = torch.where(alive, self.x + v * torch.cos(th) * cfg.dt, self.x)
@@ -372,6 +379,10 @@ class TorchSim:
         self.t += cfg.dt
         done_kind = torch.zeros(alive.shape, dtype=torch.int8, device=self.device)
         self.done_uid = torch.where(alive, self.uid, -1)
+        ws = wreck_steps(cfg)
+        if ws > 0 or cfg.obstacle_envs > 0:  # wrecks whose time is up disappear (before the collision check)
+            self.wreck_left = self.wreck_left - self.wreck.to(torch.int64)
+            self._remove(self.wreck & (self.wreck_left <= 0))
 
         cr = (-cfg.r_time * cfg.dt) * fa
         dist = self.dist_to_gate()
@@ -396,14 +407,24 @@ class TorchSim:
         # off-road: any disc overlapping the complement of the road
         ox, oy = self._discs()
         off = (corner_dist(ox, oy, cfg.W, cfg.Rc) < cfg.Rc + DISC_R).any(-1) & alive
-        col, vrel = self._collisions(ox, oy, alive)
+        col, vrel, hit_wreck, hit_obst = self._collisions(ox, oy, alive)
         crash = col & ~off
+        if cfg.crash_cost_speed == "own":  # sim.py: own speed at impact
+            vrel = self.v.abs()
+        else:
+            assert cfg.crash_cost_speed == "relative", cfg.crash_cost_speed
         cr = cr + off.to(self.dtype) * (cfg.r_offroad - cfg.r_offroad_speed * self.v) + crash.to(self.dtype) * (cfg.r_crash - cfg.r_crash_speed * vrel)
         done_kind = torch.where(off, DONE_OFFROAD, done_kind).to(torch.int8)
         done_kind = torch.where(crash, DONE_CRASH, done_kind).to(torch.int8)
         self.stats.offroad += off.sum(1)
         self.stats.crashes += crash.sum(1)
-        self._remove(off | crash)
+        self.stats.wreck_hits += (crash & hit_wreck).sum(1)
+        self.stats.obstacle_hits += (crash & hit_obst).sum(1)
+        if ws > 0:  # crashed cars stay as wrecks, off-road cars vanish
+            self._remove(off)
+            self._make_wreck(crash, ws)
+        else:
+            self._remove(off | crash)
 
         timeout = self.alive & (self.age > cfg.max_age)
         cr = cr + cfg.r_timeout * timeout.to(self.dtype)
@@ -412,6 +433,8 @@ class TorchSim:
         self._remove(timeout)
         self.done_kind = done_kind
 
+        if cfg.obstacle_envs > 0:
+            self._obstacles()
         self._arrivals()
         self.car_reward = cr
         self.queue_cost = cfg.r_queue * cfg.dt * self.queue.sum(1).to(self.dtype)
@@ -432,7 +455,7 @@ class TorchSim:
         """Dense (B, N, N) pair check; same result as sim.Sim._collisions."""
         dcx = self.x[:, :, None] - self.x[:, None, :]
         dcy = self.y[:, :, None] - self.y[:, None, :]
-        near = (dcx**2 + dcy**2 < (2 * DISC_OFFSETS[-1] + 2 * DISC_R) ** 2) & alive[:, :, None] & alive[:, None, :]
+        near = (dcx**2 + dcy**2 < (2 * DISC_OFFSETS[-1] + 2 * DISC_R) ** 2) & alive[:, :, None] & (alive | self.wreck)[:, None, :]
         near = near & ~self._eye
         r2 = (2 * DISC_R) ** 2
         hit = torch.zeros_like(near)
@@ -447,10 +470,26 @@ class TorchSim:
         vx, vy = self.v * torch.cos(self.th), self.v * torch.sin(self.th)
         dv = torch.hypot(vx[:, :, None] - vx[:, None, :], vy[:, :, None] - vy[:, None, :])
         vrel = torch.where(hit, dv, 0.0).amax(-1)
-        return col, vrel
+        hit_wreck = (hit & (self.wreck & ~self.obstacle)[:, None, :]).any(-1)
+        hit_obst = (hit & self.obstacle[:, None, :]).any(-1)
+        return col, vrel, hit_wreck, hit_obst
+
+    def _make_wreck(self, mask, ws):
+        """As sim.Sim._make_wreck."""
+        self.alive = self.alive & ~mask
+        self.wreck = self.wreck | mask
+        self.wreck_left = torch.where(mask, ws, self.wreck_left)
+        self.v = torch.where(mask, 0.0, self.v)
+        self.acc = torch.where(mask, 0.0, self.acc)
+        self.kappa = torch.where(mask, 0.0, self.kappa)
+        self.sig = torch.where(mask[..., None], 0.0, self.sig)
 
     def _remove(self, mask):
         self.alive = self.alive & ~mask
+        self.wreck = self.wreck & ~mask
+        self.wreck_left = torch.where(mask, 0, self.wreck_left)
+        self.obstacle = self.obstacle & ~mask
+        self.parked = self.parked & ~mask
         self.v = torch.where(mask, 0.0, self.v)
         self.acc = torch.where(mask, 0.0, self.acc)
         self.sig = torch.where(mask[..., None], 0.0, self.sig)
@@ -459,14 +498,39 @@ class TorchSim:
         self.x = torch.where(mask, 1e4, self.x)
         self.y = torch.where(mask, 1e4, self.y)
 
-    # ------------------------------------------------------------------ spawning
-    def spawn_lats(self):
+    # ------------------------------------------------------------------ obstacles
+    def _obstacles(self):
+        """As sim.Sim._obstacles (masked, no branches)."""
         cfg = self.cfg
-        lo = SPAWN_RIGHT_MIN if cfg.spawn_right else -(cfg.W - SPAWN_CURB_GAP)
-        hi = cfg.W - SPAWN_CURB_GAP
-        m = max(int(round((hi - lo) / SPAWN_LAT_STEP)), 1)
-        return lo + (hi - lo) * np.arange(m + 1) / m
+        if self.rng_mode == "numpy":
+            u = self._t(self.obst_rng.random((self.B, 7)))
+        else:
+            u = torch.rand(self.B, 7, generator=self.gen, device=self.device, dtype=self.dtype)
+        occ = self.alive | self.wreck
+        x, y, th = obstacle_pose(cfg, u)
+        vx, vy = self.v * torch.cos(self.th), self.v * torch.sin(self.th)
+        clear = (obstacle_clear(cfg, x[:, None] - self.x, y[:, None] - self.y, vx, vy) | ~occ).all(1)
+        ok = (self.obst_env & (u[:, 0] < cfg.obstacle_rate * cfg.dt) & (self.obstacle.sum(1) < cfg.obstacle_max)
+              & (~occ).any(1) & clear)
+        n = torch.argmax((~occ).to(torch.int8), 1)  # first free slot
+        sel = ok[:, None] & (self._arange_N[None, :] == n[:, None])
+        self.wreck = self.wreck | sel
+        self.obstacle = self.obstacle | sel
+        self.parked = torch.where(sel, (u[:, 1] < cfg.obstacle_parked)[:, None], self.parked)
+        self.wreck_left = torch.where(sel, obstacle_steps(cfg), self.wreck_left)
+        self.x = torch.where(sel, x[:, None], self.x)
+        self.y = torch.where(sel, y[:, None], self.y)
+        self.th = torch.where(sel, th[:, None], self.th)
+        for name in ("v", "acc", "kappa", "age"):
+            setattr(self, name, torch.where(sel, 0.0, getattr(self, name)))
+        self.sig = torch.where(sel[..., None], 0.0, self.sig)
+        self.arm = torch.where(sel, 0, self.arm)
+        self.man = torch.where(sel, 0, self.man)
+        self.uid = torch.where(sel, -1, self.uid)
+        self.group = torch.where(sel, 0, self.group)
+        self.stats.obstacles += ok
 
+    # ------------------------------------------------------------------ spawning
     def _spawn_clear(self, sx, sy, h, x, y, vx, vy, alive):
         """(B, M) whether candidate spawn points (sx, sy) (M,) keep the clearance to every alive car."""
         cfg = self.cfg
@@ -515,11 +579,7 @@ class TorchSim:
         if not self.fifo_sync:  # CUDA-graph mode: fixed capacity, overflow only flagged (check fifo_overflow)
             self.fifo_overflow |= need > self._qcap
         elif int(need) > self._qcap:  # grow the FIFO (keeps order); one host sync
-            j = (self._qhead[..., None] + torch.arange(self._qcap, device=self.device)) % self._qcap
-            old = torch.gather(self._qbuf, 2, j[..., None].expand(B, 4, self._qcap, 3))
-            self._qbuf = torch.cat([old, torch.zeros_like(old)], 2)
-            self._qhead = torch.zeros_like(self._qhead)
-            self._qcap *= 2
+            self._widen_fifo(2 * self._qcap)
         slot = ((self._qhead + self.queue) % self._qcap)[..., None, None].expand(B, 4, 1, 3)
         vals = torch.stack([u, man.to(self.dtype), grp.to(self.dtype)], -1)[:, :, None, :]
         cur = torch.gather(self._qbuf, 2, slot)
@@ -528,6 +588,7 @@ class TorchSim:
         self.stats.arrived += arrive.sum(1)
         vx, vy = self.v * torch.cos(self.th), self.v * torch.sin(self.th)
         spawned = torch.zeros_like(self.alive)
+        occ = self.alive | self.wreck  # wrecks occupy their slot and block like a standing car
         M = len(self._lats)
         arB, arN = self._arange_B, self._arange_N
         for k in range(4):
@@ -535,9 +596,9 @@ class TorchSim:
             chn, shn = float(np.cos(hn)), float(np.sin(hn))
             # cars do not move during the arrivals: check the clearance to all cars once per arm,
             # then only against the car spawned in the previous pass (same result as rechecking all)
-            clear = self._spawn_clear(px, py, h, self.x, self.y, vx, vy, self.alive)
+            clear = self._spawn_clear(px, py, h, self.x, self.y, vx, vy, occ)
             for p in range(SPAWN_MAX_PER_STEP):
-                cand = (self.queue[:, k] > 0) & (~self.alive).any(1)
+                cand = (self.queue[:, k] > 0) & (~occ).any(1)
                 cnt = clear.sum(1)
                 ok = cand & (cnt > 0)
                 head = self._qhead[:, k]
@@ -547,9 +608,10 @@ class TorchSim:
                 pick = torch.minimum(torch.floor(qu * cnt).to(torch.int64), cnt - 1)
                 jalt = torch.argmax((torch.cumsum(clear, 1) > pick[:, None]).to(torch.int8), 1)
                 j = torch.where(clear[arB, j0], j0, jalt)
-                n = torch.argmax((~self.alive).to(torch.int8), 1)  # first free slot
+                n = torch.argmax((~occ).to(torch.int8), 1)  # first free slot
                 sel = ok[:, None] & (arN[None, :] == n[:, None])
                 self.alive = self.alive | sel
+                occ = occ | sel
                 self.x = torch.where(sel, px[j][:, None], self.x)
                 self.y = torch.where(sel, py[j][:, None], self.y)
                 self.th = torch.where(sel, hn, self.th)
@@ -575,13 +637,10 @@ class TorchSim:
                 svx = torch.full_like(sxn, cfg.spawn_speed * chn)
                 svy = torch.full_like(syn, cfg.spawn_speed * shn)
                 clear = clear & self._spawn_clear(px, py, h, sxn, syn, svx, svy, ok[:, None])
-        head = torch.gather(self._qbuf, 2, self._qhead[..., None, None].expand(B, 4, 1, 3))[:, :, 0]
-        self.queue_u, self.queue_man, self.queue_grp = head[..., 0], head[..., 1].to(torch.int64), head[..., 2].to(torch.int64)
         self._prev_dist = torch.where(spawned, self.dist_to_gate(), self._prev_dist)
 
-    # ------------------------------------------------------------------ CUDA graphs
     def _widen_fifo(self, cap):
-        """Grow the arrival FIFO to capacity cap (keeps the queue order)."""
+        """Grow the arrival FIFO to capacity cap (keeps the queue order; the head moves to 0)."""
         if self._qcap >= cap:
             return
         B = self.B
@@ -591,20 +650,24 @@ class TorchSim:
         self._qhead = torch.zeros_like(self._qhead)
         self._qcap = cap
 
+    # ------------------------------------------------------------------ CUDA graphs
     def reset_inplace(self, seed: int, cfg: SimConfig | None = None):
         """New episode without reallocating: the state of a fresh ``TorchSim(cfg, seed=seed)`` (rng
-        "torch") is copied into the existing tensors, so a captured CUDA graph stays valid. cfg may
-        only differ in ``demand_range`` (must stay set / unset as before); the device generator is
-        not reseeded (its stream continues)."""
+        "torch"), incl. its generator state, is copied into the existing tensors (and generator),
+        so a captured CUDA graph stays valid and the episode is reproducible from the seed (same
+        trajectory as a fresh sim). cfg may only differ in ``demand_range`` (must stay set / unset
+        as before)."""
+        assert self.rng_mode == "torch"
         cfg = cfg or self.cfg
         assert (cfg.demand_range is None) == (self.cfg.demand_range is None)
-        fresh = TorchSim(cfg, self.B, seed, n_scenarios=self.S, device=self.device, dtype=self.dtype, rng="torch")
-        fresh._widen_fifo(self._qcap)
+        fresh = TorchSim(cfg, self.B, seed, n_scenarios=self.S, device=self.device, dtype=self.dtype, rng="torch",
+                         group_probs=self.group_probs, fifo_cap=self._qcap)
         for o, f in ((self, fresh), (self.stats, fresh.stats)):
             fv = vars(f)
             for n, v in vars(o).items():
                 if isinstance(v, torch.Tensor) and n in fv and fv[n].shape == v.shape:
                     v.copy_(fv[n])
+        self.gen.set_state(fresh.gen.get_state())
         self.cfg = cfg
         self.t = 0.0
 
@@ -624,11 +687,12 @@ class TorchSim:
     def cuda_graph(self, fn, generators=(), warmup=3):
         """Capture fn() (observe / policy / step on this sim; all tensors it uses must be
         long-lived) into a CUDA graph and return replay(). Requires rng="torch"; the FIFO gets a
-        fixed capacity (fifo_cap, default 64 -> 256 here; fifo_overflow flags an overflow)."""
+        fixed capacity (at least GRAPH_FIFO_CAP; fifo_overflow flags an overflow)."""
         assert self.device.type == "cuda" and self.rng_mode == "torch"
         if self.fifo_sync:
             self.fifo_sync = False
-            self._widen_fifo(256)  # once, before the addresses are fixed
+            self.fifo_cap = max(self.fifo_cap, GRAPH_FIFO_CAP)  # also after reset()
+            self._widen_fifo(self.fifo_cap)  # once, before the addresses are fixed
         st = torch.cuda.Stream()
         st.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(st):

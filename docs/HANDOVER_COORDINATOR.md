@@ -12,15 +12,14 @@ Owners, damit Kontext frisch ist und GPU-Training möglich wird.
 3. `docs/experiments.md` – Protokoll aller Läufe; nur die letzten Abschnitte im Detail lesen.
 4. `README.md`, `docs/DEPLOY.md` bei Bedarf.
 
-## Schritt 0: lokal einrichten (Windows)
+## Schritt 0: lokal einrichten (Windows; erledigt, Hardware/Versionen in `CLAUDE.md`)
 - `git pull` auf `main` (dort liegt der aktuelle Stand). Neuer Arbeits-Branch für deine Arbeit.
 - Herausfinden, was da ist: Python-Versionen (pyenv-win: `pyenv versions`; Projekt braucht 3.13,
   `.python-version`), Poetry (`poetry --version`), Node (für den JS-Paritätstest), Git, CUDA/GPU
   (`nvidia-smi`). Fehlendes mit dem Owner klären, bevor du etwas global installierst.
-- `poetry install`, dann `poetry run pytest -q` muss grün sein (50 Tests). Auf Windows auf
+- `poetry install`, dann `poetry run pytest -q` muss grün sein. Auf Windows auf
   Pfad-/Encoding-/Multiprocessing-Eigenheiten achten (`spawn` statt `fork`; Trainings nutzen
   `multiprocessing`).
-- Hardware erfassen (CPU-Kerne, RAM, GPU-VRAM) und in `CLAUDE.md` knapp ergänzen.
 - `runs/` (Trainingsläufe) existiert lokal nicht; die Website baut aus `results/`
   (`poetry run python site/build.py`).
 
@@ -34,6 +33,9 @@ Owners, damit Kontext frisch ist und GPU-Training möglich wird.
 - **Selbst evaluieren:** `pytest`, `cli bench` (JSON-Zeile), `cli render` (sheet.png,
   spacetime.png), `analyze.py`, Playwright-Screenshots der Website. Nie Erfolg behaupten ohne
   Beleg; Misserfolge ehrlich berichten.
+- **Vor jedem Training:** Dauerabschätzung + 2-3 Optionen (kurz/mittel/lang), der Owner entscheidet. Der PC des Owners ist ein Spiele-PC: Auf Zuruf sofort stoppen, vor langen Läufen warnen.
+- **Refactoring:** regelmäßig, vom Coordinator zwischen den Runden angesetzt (erst Audit, dann Umbau, Bench identisch).
+- **Token sparen:** einfache Subagent-Aufgaben mit Sonnet.
 - **Training kurz:** während der Entwicklung ≤ ~1 h pro Runde; lange Läufe nur vor einem Merge
   nach `main`. Kein Training ohne Grund starten; der Owner kann „kein Training“ vorgeben.
 - **Belohnung nur für Ergebnisse** (ankommen, Unfall/Abkommen nach Aufpralltempo, Zeit,
@@ -76,23 +78,25 @@ Owners, damit Kontext frisch ist und GPU-Training möglich wird.
   nicht geklappt), dann ein konkreter Vorschlag. Kein Fachjargon ohne Erklärung.
 
 ## Nächste Schritte (Vorschlag, mit dem Owner abstimmen)
-1. Einrichtung (Schritt 0) abschließen und kurz berichten (Hardware, was fehlte, Tests grün).
-2. **Roadmap C – GPU-Port vorbereiten:** Simulation + PPO nach PyTorch (läuft nativ unter
-   Windows mit CUDA) portieren, abgesichert durch einen Paritätstest gegen `sim.py` (wie der
-   bestehende JS-Paritätstest). Erst messen, ob es sich lohnt (Schritte/s CPU vs. GPU bei vielen
-   parallelen Kreuzungen).
-3. **Nächste Trainingsrunde** mit den beschlossenen Änderungen: 1 Lampe statt 2, Bremslicht
-   an/aus statt Beschleunigung der Nachbarn (PLAN.md). Website-Labels und JS-Port mitziehen.
-4. **Roadmap B:** Set-/Attention-Encoder über alle Nachbarn statt der 4 nächsten, optional GRU.
-   Ziel: weniger Unfälle im Verkehr (Hauptproblem: Autos lassen selten vor; ein einzelnes Auto
-   scheitert nie).
-5. **Roadmap D (Forschungsfrage):** Normen-Experimente mit ≥ 20 Seeds pro Konfiguration
+Erledigt (2026-10-11): lokale Einrichtung, GPU-Training (Roadmap C), Runde 1 in der neuen Welt
+(Wracks, Bremslicht, 1 Lampe, Einfahren rechts), Unfall-Diagnose, erster Aufräum-Schritt.
+1. **Runde 2** (Design in PLAN.md): Varianten A/B/C (Exploration, Hindernis-Szenarien, Unfallkosten
+   nach eigener Aufprallgeschwindigkeit), gleich lang, gepaart verglichen; Anhaltetest als Messung.
+2. **Roadmap B:** Set-/Attention-Encoder über alle Nachbarn statt der 4 nächsten, optional GRU;
+   dazu Vergleich breiteres Netz.
+3. **Roadmap D (Forschungsfrage):** Normen-Experimente mit ≥ 20 Seeds pro Konfiguration
    (Fahrseite, Spuren, Vorrangmuster, Lampenbedeutung, Ablationen, getrennte Populationen),
    sobald die Autos ordentlich fahren. GPU macht viele Seeds erst praktikabel.
 
 ## Bekannte Stolpersteine
 - Das monatliche Ausgabenlimit kann Subagents mitten in der Arbeit abbrechen; Zwischenstände
   deshalb oft committen und abgebrochene Agents mit Kontext fortsetzen.
+- Windows: ein lokaler Webserver (`python -m http.server` in `site/public`, z. B. von einem
+  Browser-Check) sperrt das Verzeichnis; `site/build.py` bricht dann mitten im Löschen ab. Vor dem
+  Build solche Server beenden und vor jedem Commit `git status` prüfen.
+- `pytest` nutzt automatisch die GPU, wenn CUDA da ist (Torch-Paritätstests). Während ein Training
+  läuft, Tests nur mit `CUDA_VISIBLE_DEVICES=-1` starten (sonst läuft der GPU-Speicher voll und das
+  Training steht). Besser: CUDA-Tests nur per explizitem Schalter aktivieren (offen).
 - Mehrere CPU-lastige Jobs gleichzeitig (Training + Website-Build) überbuchen die Kerne.
 - Alte Checkpoints laufen über `smartcrossing/policy_compat.py`; bei Änderungen an
   Beobachtung/Aktion prüfen, dass die Website-Gehirne weiter laden (`site/build.py`, Tests).

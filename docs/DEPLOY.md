@@ -8,7 +8,7 @@ läuft komplett im Browser der Besucher, es gibt keinen Server und keine Datenba
 | Ordner | Inhalt | ins Git? |
 |---|---|---|
 | `site/src/` | die handgeschriebenen Seiten (HTML/CSS/JS) | ja |
-| `site/build.py` | Build-Skript: kopiert `site/src/` (inkl. Simulation `js/sim.js`), schreibt `js/sim-config.js` (Zahlen aus `smartcrossing/sim.py`), wählt Gehirne aus `runs/` (oder, ohne `runs/`, aus `results/site/`), misst sie, schreibt die Daten | ja |
+| `site/build.py` | Build-Skript: kopiert `site/src/` (inkl. Simulation `js/sim.js`), schreibt `js/sim-config.js` (Zahlen aus `smartcrossing/sim.py`), wählt Gehirne aus dem Schnappschuss `results/site/` plus `runs/` (zusammengeführt), misst sie, schreibt die Daten | ja |
 | `results/site/` | kompakter Schnappschuss von allem, was der Build aus `runs/` nimmt (benutzte Gehirne, Trainingskette, Lernkurven); schreibt der Build selbst | ja |
 | `site/obs_labels.py` | deutsche Beschriftungen der Sensorwerte | ja |
 | `site/data/bench_cache.json` | Zwischenspeicher der Messungen (damit ein Neubau schnell geht) | ja |
@@ -67,15 +67,16 @@ werden zu `-`). Beispiel: Branch `claude/youthful-ritchie-fc1lad` →
 Nützliche Optionen des Build-Skripts:
 
 ```bash
-poetry run python site/build.py --main runs/es5/final_g310.npz   # bestimmtes Gehirn als "bestes" nehmen
+poetry run python site/build.py --main runs/r1_x3/current.npz    # bestimmtes Gehirn als Hauptgehirn nehmen
 poetry run python site/build.py --source snapshot                # nur results/site/ benutzen (wie ein frischer Clone)
+poetry run python site/build.py --previous ''                    # kein "vorheriges Gehirn" auf Vergleich
 poetry run python site/build.py --bench                          # alle Messungen neu (statt Cache), ~5 min
 poetry run python site/build.py --timeline 8                     # mehr Zwischenstände in der Zeitreise
 poetry run python site/build.py --world wide                     # nur Gehirne der breiten Kreuzung (14 m)
 ```
 
-`--world` wählt, welche Kreuzung die Seite zeigt: `narrow` (Standard, die alte 7-m-Kreuzung),
-`wide` (14 m, Läufe `runs/wide_*`) oder `any`. Ampel und Verkehrsrechner werden immer auf der
+`--world` wählt, welche Kreuzung die Seite zeigt: `any` (Standard, keine Einschränkung),
+`narrow` (die alte 7-m-Kreuzung) oder `wide` (14 m, Läufe `runs/wide_*`). Ampel und Verkehrsrechner werden immer auf der
 Kreuzung des besten Gehirns gemessen und aufgezeichnet.
 
 Der Build nimmt außerdem für die Seite „Vergleich“ kurze Fahrten auf (`public/data/replays.js`,
@@ -83,8 +84,11 @@ ca. 0,4 MB): Ampel, Verkehrsrechner und das beste Gehirn fahren je 90 s mit gena
 Verkehr (wenig / mittel / viel). Die Aufnahme läuft bei jedem Build neu (ca. 20 s), passt sich
 also automatisch an die aktuelle Simulation und das aktuell beste Gehirn an.
 
-Ohne Optionen nimmt der Build pro Methode (Evolution `runs/es*`, PPO `runs/ppo*`) den
-Checkpoint, der bei mittlerem Verkehr am besten fährt. Die Zeitreise folgt der Kette der
+Ohne Optionen ist das Hauptgehirn `DEFAULT_MAIN` in `site/build.py` (aktuell `r1_main_x3/current`,
+= `results/round1_x3.npz`); `--previous` (Standard `wide_s1ft2/ckpt_2650`) ist das Gehirn davor, das
+auf „Vergleich“ daneben steht. Quelle (`--source auto`): Schnappschuss `results/site/` und
+Trainingsläufe aus `runs/` werden zusammengeführt (ein Lauf in `runs/` ersetzt den gleichnamigen im
+Schnappschuss); der Build schreibt den Schnappschuss danach neu. Die Zeitreise folgt der Kette der
 Trainingsläufe, die aufeinander aufbauen (`"init"` in `args.json`). Ändert sich die
 Simulation (`smartcrossing/sim.py`), wird automatisch neu gemessen.
 

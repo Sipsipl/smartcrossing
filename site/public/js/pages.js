@@ -36,7 +36,9 @@
       const om = mainMethod === "ppo" ? "es" : "ppo";
       if (D.best[om]) types.push(SCX.makeType(pol(D.best[om]), `${METHOD_NAMES[om]} (bestes Gehirn)`, { share: 0 }));
     }
-    return types.slice(0, 3);
+    // all cars of one sim share the observation interface (lamp count, neighbour layout) of the first brain
+    const key = (t) => `${t.physics.n_signal}/${t.physics.brake_light}`;
+    return types.filter((t) => key(t) === key(types[0])).slice(0, 3);
   }
 
   // ------------------------------------------------------------------ stage markup
@@ -163,9 +165,18 @@
       $("status").innerHTML = `Bei mittlerem Verkehr (${num(r15.demand_per_min, 0)} Autos pro Minute) schaffen es die besten gelernten Autos
         zu <b>${pct(r15.exit_ok_rate)}</b> heil ans Ziel – <b>${num(r15.throughput_per_min)}</b> Autos pro Minute.
         Eine Ampel schafft ${num(l15.throughput_per_min)} pro Minute, ein zentraler Verkehrsrechner ${num(v15.throughput_per_min)} – beide ohne einen einzigen Unfall.
-        Die Autos lernen also noch. Rechtsverkehr entstand von selbst, Spuren und eine Lampensprache nicht.
+        Die Autos lernen also noch.${prevNote()}
         <a href="vergleich.html">Zum Vergleich →</a>`;
     }
+  }
+
+  /** What is new in the main brain vs the previous one (crash numbers from the bench data). */
+  function prevNote() {
+    const a = D.previous && pol(D.previous) && pol(D.previous).bench["0.15"], b = pol(MAIN_ID) && pol(MAIN_ID).bench["0.15"];
+    if (!a || !b || !(a.crash_cars_per_1000 > 0)) return "";
+    // one traffic seed only: the comparison is noisy, so no exact percentage here
+    return ` Neu beim aktuellen Gehirn: Im Training standen Wracks und parkende Autos im Weg – es bremst viel öfter dahinter ab und reiht sich ein, statt hineinzufahren.
+      Bei mittlerem Verkehr baut es deutlich weniger Unfälle als das vorherige (in unserer Messung ${num(b.crash_cars_per_1000, 0)} statt ${num(a.crash_cars_per_1000, 0)} pro 1000 Autos) – bei dichtem Verkehr kracht es mitten auf der Kreuzung aber noch.`;
   }
 
   // ------------------------------------------------------------------ obs panel ("Was sieht ein Auto?")
@@ -202,7 +213,8 @@
   function renderObsPanel(cx, el) {
     const n = cx.selIndex();
     if (n < 0) { el.innerHTML = ""; return; }
-    const o = cx.obsRow(n), lay = D.layout;
+    const o = cx.obsRow(n), lay = SCX.layoutFor(cx.sim.cfg);
+    if (!lay) { el.innerHTML = ""; return; }
     const ty = cx.typeOf(n), off = unusedInputs(ty && ty.raw);
     const own = lay.groups.filter((g) => g.sub !== "neighbour");
     const nbs = lay.groups.filter((g) => g.sub === "neighbour");
@@ -224,7 +236,7 @@
     const present = nbs.map((g) => o[g.items.find((it) => it.key.endsWith("_present")).i] > 0.5);
     for (let r = 0; r < nItems; r++) {
       const it0 = nbs[0].items[r];
-      const lab = { fwd: "vor mir (m)", left: "links von mir (m)", same: "gleiche Richtung", cross: "kreuzt nach links", speed: "Tempo (km/h)", present: "da?", kappa: "lenkt links (%)", acc: "beschleunigt (m/s²)" }[it0.key.split("_").slice(1).join("_")] || it0.label;
+      const lab = { fwd: "vor mir (m)", left: "links von mir (m)", same: "gleiche Richtung", cross: "kreuzt nach links", speed: "Tempo (km/h)", present: "da?", kappa: "lenkt links (%)", acc: "beschleunigt (m/s²)", brake: "Bremslicht", hazard: "Warnblinker (Wrack)" }[it0.key.split("_").slice(1).join("_")] || it0.label;
       const unused = off.has(it0.i);
       h += `<tr${unused ? ` class="unused" title="${UNUSED_TIP}"` : ""}><td>${lab}${unused ? " (ungenutzt)" : ""}</td>` + nbs.map((g, k) => {
         const it = g.items[r];
@@ -233,7 +245,7 @@
     }
     const lampIdx = nbs.map((g) => g.items.filter((it) => /_lamp\d$/.test(it.key)).map((it) => it.i));
     h += `<tr><td>Lampenfarbe</td>` + nbs.map((_, k) => present[k]
-      ? `<td><span class="lamp" style="background:${cx.sim.cfg.signal_enabled ? SCX.lampRGB(o[lampIdx[k][0]], o[lampIdx[k][1]]) : "rgb(90,90,96)"}"></span></td>`
+      ? `<td><span class="lamp" style="background:${cx.sim.cfg.signal_enabled ? SCX.lampCSS(lampIdx[k].length, o[lampIdx[k][0]], o[lampIdx[k][1]]) : "rgb(90,90,96)"}"></span></td>`
       : `<td class="none">–</td>`).join("") + `</tr>`;
     h += `</tbody></table></div>`;
     el.innerHTML = h;
@@ -246,7 +258,7 @@
       hint: "Tippe ein Auto an",
       onRefresh: (c) => { SCX.renderSelHead(c, $("selhead")); renderObsPanel(c, $("obs")); },
     });
-    $("dim-count").textContent = D.layout.dim;
+    $("dim-count").textContent = (SCX.layoutFor(cx.sim.cfg) || D.layout).dim;
     window.__sc = cx;
   }
 
@@ -293,9 +305,9 @@
           ${bar(a[0], false, c1)}<div class="bar-ends"><span>voll bremsen</span><span>${num(a[0], 2)}</span><span>Vollgas</span></div></div>
         <div class="out"><div class="top-row"><b><i class="line-key" style="border-color:${c2}"></i> Lenkung</b><span class="phys">${radius ? `Kurve nach ${a[1] > 0 ? "links" : "rechts"}, Radius ${num(radius, 0)} m` : "geradeaus"}</span></div>
           ${bar(a[1], true, c2, sc.kappa_rate < 1e5 ? k : undefined)}<div class="bar-ends"><span>links</span><span>${num(a[1], 2)}</span><span>rechts</span></div></div>
-        ${[0, 1].map((q) => `<div class="out"><div class="top-row"><b><i class="line-key" style="border-color:${cols()[2 + q]}"></i> Lampe Kanal ${q + 1}</b><span class="phys">${q === 0 ? "mehr Rot" : "mehr Blau"} bei +1</span></div>
-          ${bar(a[2 + q], false, cols()[2 + q])}<div class="bar-ends"><span>−1</span><span>${num(a[2 + q], 2)}</span><span>+1</span></div></div>`).join("")}
-        <div class="lampbox"><span class="big" style="background:${lampOn ? SCX.lampRGB(a[2], a[3]) : "rgb(90,90,96)"}"></span>
+        ${a.slice(2).map((v, q) => `<div class="out"><div class="top-row"><b><i class="line-key" style="border-color:${cols()[2 + q]}"></i> ${a.length > 3 ? `Lampe Kanal ${q + 1}` : "Lampe"}</b><span class="phys">${a.length > 3 ? (q === 0 ? "mehr Rot" : "mehr Blau") : "heller"} bei +1</span></div>
+          ${bar(v, false, cols()[2 + q])}<div class="bar-ends"><span>−1</span><span>${num(v, 2)}</span><span>+1</span></div></div>`).join("")}
+        <div class="lampbox"><span class="big" style="background:${lampOn ? SCX.lampCSS(a.length - 2, a[2], a[3]) : "rgb(90,90,96)"}"></span>
           <span>So leuchtet die Dachlampe${c.typeOf(n).mute ? " (stumm geschaltet)" : ""}${lampOn ? "" : " – die anderen sehen sie gerade nicht"}.</span></div>
         ${sc.kappa_rate < 1e5 ? `<p class="hint">Der schwarze Strich auf der Lenkung zeigt, wo das Lenkrad gerade steht: es dreht sich nur ${num(sc.kappa_rate / sc.kappa_max, 1)}-mal den vollen Weg pro Sekunde.</p>` : ""}`;
     }
@@ -311,7 +323,7 @@
       ctx.fillStyle = SCX.cssVar("--muted"); ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
       ctx.fillText("+1", 2, 10); ctx.fillText("−1", 2, H - 3); ctx.fillText("jetzt", W - 26, H / 2 - 4); ctx.fillText("vor 10 s", 22, H / 2 - 4);
       const c = cols();
-      for (let q = 0; q < 4; q++) {
+      for (let q = 0; q < Math.min(4, hist.length ? hist[0].length : 0); q++) {
         ctx.strokeStyle = c[q]; ctx.lineWidth = 2; ctx.beginPath();
         hist.forEach((a, i) => {
           const x = W - (hist.length - 1 - i) * (W / 99), y = H / 2 - a[q] * (H / 2 - 4);
@@ -346,7 +358,7 @@
         if (n < 0) return;
         const t = c.typeOf(n);
         if (!net || net.raw !== t.raw) {
-          if (!net) net = new SCX.NetView($("net"), D.layout, t.raw, { onHover: (h) => { tip.textContent = h ? net.describe(h) : "Fahre mit der Maus über einen Kreis (oder tippe darauf)."; } });
+          if (!net) net = new SCX.NetView($("net"), SCX.layoutFor(c.sim.cfg) || D.layout, t.raw, { onHover: (h) => { tip.textContent = h ? net.describe(h) : "Fahre mit der Maus über einen Kreis (oder tippe darauf)."; } });
           else net.setPolicy(t.raw);
         }
         const D_ = SC.obsDim(c.sim.cfg);
@@ -375,7 +387,60 @@
   }
 
   // ------------------------------------------------------------------ learning
+  // ------------------------------------------------------------------ reward scale (lernen)
+  /** Draws the reward rules of the main brain (D.reward, from its training cfg) as a point scale + two example trips. */
+  function drawReward() {
+    const R = D.reward, host = $("reward");
+    if (!R || !host) return;
+    const f = (v, d = 2) => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(d).replace(".", ",");
+    const IMPACT = 6;                                   // example impact speed (m/s)
+    const crashAt = (v) => R.r_crash - R.r_crash_speed * v;
+    const offAt = (v) => R.r_offroad - R.r_offroad_speed * v;
+    const vTop = 10;
+    const route = 2 * R.L;                              // straight through the crossing, entry to exit (m)
+    const lo = Math.min(crashAt(vTop), offAt(vTop), R.r_wrong_exit, R.r_timeout), hi = Math.max(R.r_exit, R.r_progress * 100);
+    const span = hi - lo, zero = (-lo / span) * 100;
+    const x = (v) => (v / span) * 100;                  // value -> % of track width
+    const bar = (a, b, cls) => {                        // bar from a to b (values)
+      const l = Math.min(a, b), w = Math.abs(b - a);
+      return `<i class="rw-bar ${cls}" style="left:${zero + x(l)}%;width:${x(w)}%"></i>`;
+    };
+    const row = (label, sub, bars, valTxt, sign) =>
+      `<div class="rw-row"><div class="lbl">${label}${sub ? `<small>${sub}</small>` : ""}</div><div class="rw-track" style="--zero:${zero}%">${bars}</div><div class="val ${sign}">${valTxt}</div></div>`;
+    const crashSame = R.r_crash === R.r_offroad && R.r_crash_speed === R.r_offroad_speed;
+    const hard = (label, at) => row(label, `ab ${f(at(0), 1)}, bei Tempo ${vTop} m/s ${f(at(vTop), 1)}`,
+      bar(0, at(0), "neg") + bar(at(0), at(vTop), "neg soft"), f(at(IMPACT), 1) + "*", "neg");
+    const rows = [
+      row("Richtige Ausfahrt erreicht", "", bar(0, R.r_exit, "pos"), f(R.r_exit, 1), "pos"),
+      row("Dem Ziel näher kommen", `Lernhilfe: ${f(R.r_progress, 2)} je Meter`, bar(0, R.r_progress * 100, "help"), `${f(R.r_progress * 100, 1)} je 100 m`, "pos"),
+      row("Zeit auf der Straße", "kleine Strafe je Sekunde", bar(0, -R.r_time * 10, "neg"), `${f(-R.r_time * 10, 1)} je 10 s`, "neg"),
+      row("Falsche Ausfahrt", "", bar(0, R.r_wrong_exit, "neg"), f(R.r_wrong_exit, 1), "neg"),
+      row("Zu lange unterwegs", `länger als ${Math.round(R.max_age)} s`, bar(0, R.r_timeout, "neg"), f(R.r_timeout, 1), "neg"),
+      crashSame ? hard("Unfall oder von der Straße abgekommen", crashAt) : hard("Unfall", crashAt) + hard("Von der Straße abgekommen", offAt),
+    ];
+    // example trips (all numbers derived from the same rules)
+    const tSec = route / R.spawn_speed;
+    const trip = (title, lines) => {
+      const tot = lines.reduce((a, l) => a + l[1], 0);
+      return `<div class="card"><h3>${title}</h3>${lines.map((l) => `<div class="ln"><span>${l[0]}</span><span class="${l[1] >= 0 ? "pos" : "neg"}">${f(l[1])}</span></div>`).join("")}
+        <div class="ln tot"><span>Summe</span><span class="${tot >= 0 ? "pos" : "neg"}">${f(tot)}</span></div></div>`;
+    };
+    const half = 0.5;
+    const ex = trip("Eine normale Fahrt", [
+      ["Unterwegs dem Ziel näher gekommen", R.r_progress * route],
+      ["Richtige Ausfahrt erreicht", R.r_exit],
+      [`Zeit (ca. ${Math.round(tSec)} s)`, -R.r_time * tSec],
+    ]) + trip(`Unfall mit ${IMPACT} m/s`, [
+      ["Halbe Strecke geschafft", R.r_progress * route * half],
+      [`Unfall (Aufprall ${IMPACT} m/s)`, crashAt(IMPACT)],
+      [`Zeit (ca. ${Math.round(tSec * half)} s)`, -R.r_time * tSec * half],
+    ]);
+    host.innerHTML = `${rows.join("")}<div class="rw-ex">${ex}</div>`;
+    $("reward-note").innerHTML = `Grün = Pluspunkte, orange = Minuspunkte. *Beim Unfall zählt das Tempo des Aufpralls: je schneller, desto teurer (blasser Teil des Balkens). Bei einem Unfall zahlen <b>alle beteiligten Autos</b>. Die Zeitstrafe und die Strafe fürs Trödeln gibt es, weil Stehenbleiben sonst am sichersten wäre.`;
+  }
+
   function initLernen() {
+    drawReward();
     const methods = Object.keys(D.timelines).sort((a, b) => (a === "es" ? -1 : 1) - (b === "es" ? -1 : 1));
     let method = methods.includes(mainMethod) ? mainMethod : methods[0];
     let idx = 0, extra = null; // extra: a dead-end run shown instead of the timeline
@@ -563,6 +628,7 @@
     const mainWorld = MAIN_ID ? worldOf(pol(MAIN_ID)) : D.main_world || "wide";
     const brains = [];
     if (MAIN_ID) brains.push({ name: "Gelernte Autos", e: pol(MAIN_ID), color: "--c4" });
+    if (D.previous && pol(D.previous)) brains.push({ name: "Vorheriges Gehirn", e: pol(D.previous), color: "--c3" });
     if (D.history && D.history !== MAIN_ID) brains.push({ name: worldOf(pol(D.history)) === mainWorld ? "Gelernt (älter)" : "Gelernt (PPO)", e: pol(D.history), color: "--c3" });
     if (D.best.es && D.best.es !== MAIN_ID) brains.push({ name: "Evolution", e: pol(D.best.es), color: "--c5" });
     const worlds = [mainWorld, ...Object.keys(byWorld).filter((w) => w !== mainWorld)];
@@ -590,6 +656,8 @@
     const mb = MAIN_ID && pol(MAIN_ID).bench, badPct = (d) => mb && mb[d] ? pct(mb[d].crash_cars_per_1000 / 1000) : null;
     if (badPct("0.15")) $("h-mid").textContent = `rund ${badPct("0.15")}`;
     if (badPct("0.05")) $("h-low").textContent = `rund ${badPct("0.05")}`;
+    const pb = D.previous && pol(D.previous) && pol(D.previous).bench["0.15"];
+    if (mb && mb["0.15"] && pb) $("h-prev").textContent = ` Das vorherige Gehirn hatte bei mittlerem Verkehr noch ${num(pb.crash_cars_per_1000, 0)} Unfälle pro 1000 Autos, das aktuelle ${num(mb["0.15"].crash_cars_per_1000, 0)}.`;
     if ($("c-thr-note")) $("c-thr-note").textContent = groups.length > 1 ? `Diagramm: ${WORLD_NAMES[mainWorld].replace(/ \(.*/, "")}. In den Tabellen steht jedes Gehirn neben Ampel und Verkehrsrechner auf der Kreuzung, auf der es trainiert wurde.` : "";
     const draw = () => SCX.lineChart($("c-thr"), {
       series: [

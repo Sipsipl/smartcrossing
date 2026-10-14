@@ -3,16 +3,21 @@
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from .sim import LEFT, RIGHT, STRAIGHT, Sim
+from .sim import BRAKE_ACC, CAR_LENGTH, CAR_WIDTH, LEFT, RIGHT, STRAIGHT, Sim, hazard_on
 
 MAN_COLOURS = {RIGHT: (66, 135, 245), STRAIGHT: (240, 240, 240), LEFT: (245, 166, 35)}
 GROUP_OUTLINE = [(20, 20, 20), (200, 30, 200), (30, 200, 120), (230, 60, 60)]
+OBSTACLE_BODY = (150, 150, 156)  # obstacles (cfg.obstacle_*): no route, drawn grey
 BG = (58, 110, 62)
 ROAD = (70, 70, 74)
 
 
 def _signal_colour(sig):
-    """Map a signal vector in [-1, 1]^k to a colour (first two dims -> red/blue)."""
+    """Map a signal vector in [-1, 1]^k to a colour: one lamp -> dark (-1) ... bright violet-white
+    (+1) (as the website); two lamps (old checkpoints) -> red / blue mix."""
+    if len(sig) == 1:
+        t = (float(np.clip(sig[0], -1, 1)) + 1) / 2
+        return (int(40 + 185 * t), int(40 + 130 * t), int(50 + 205 * t))
     s = np.zeros(2)
     s[: min(2, len(sig))] = sig[:2]
     r = int(127 + 127 * s[0])
@@ -35,8 +40,9 @@ def _legend(d, size, cfg, font):
         d.text((xx + 12, y0), name[:5] if name != "straight" else "str", fill=(230, 230, 230), font=font)
     d.text((x0, y0 + 13), "colour = manoeuvre", fill=(200, 200, 200), font=font)
     if cfg.n_signal > 0:
-        d.ellipse([x0, y0 + 27, x0 + 7, y0 + 34], fill=_signal_colour(np.array([1.0, -1.0])))
-        d.ellipse([x0 + 9, y0 + 27, x0 + 16, y0 + 34], fill=_signal_colour(np.array([-1.0, 1.0])))
+        lo, hi = (np.array([1.0, -1.0]), np.array([-1.0, 1.0])) if cfg.n_signal > 1 else (np.array([-1.0]), np.array([1.0]))
+        d.ellipse([x0, y0 + 27, x0 + 7, y0 + 34], fill=_signal_colour(lo))
+        d.ellipse([x0 + 9, y0 + 27, x0 + 16, y0 + 34], fill=_signal_colour(hi))
         d.text((x0 + 20, y0 + 25), "roof lamp = signal", fill=(200, 200, 200), font=font)
 
 
@@ -64,13 +70,35 @@ def draw_frame(sim: Sim, b: int = 0, size: int = 512, view: float | None = None,
         for pts in trails:
             if len(pts) > 1:
                 d.line([P(*p) for p in pts], fill=(120, 120, 128), width=1)
-    for n in np.nonzero(sim.alive[b])[0]:
+    blink = hazard_on(sim.t)
+    for n in np.nonzero(sim.alive[b] | sim.wreck[b])[0]:
         x, y, th = sim.x[b, n], sim.y[b, n], sim.th[b, n]
         c, s = np.cos(th), np.sin(th)
-        hl, hw = 2.3, 0.9
+        hl, hw = CAR_LENGTH / 2, CAR_WIDTH / 2
         corners = [(hl, hw), (hl, -hw), (-hl, -hw), (-hl, hw)]
         poly = [P(x + c * a - s * bb, y + s * a + c * bb) for a, bb in corners]
-        d.polygon(poly, fill=MAN_COLOURS[int(sim.man[b, n])], outline=GROUP_OUTLINE[int(sim.group[b, n]) % 4])
+        wreck = bool(sim.wreck[b, n])
+        parked = bool(sim.parked[b, n])  # an obstacle without hazard lights: a normal-looking standing car
+        body = OBSTACLE_BODY if sim.obstacle[b, n] else MAN_COLOURS[int(sim.man[b, n])]
+        if wreck and not parked:  # a wreck: dimmed body, blinking hazard lights at the four corners
+            body = tuple(int(0.45 * v + 30) for v in body)
+        d.polygon(poly, fill=body, outline=GROUP_OUTLINE[int(sim.group[b, n]) % 4])
+        r = max(1.5, 0.35 * sc)
+        if parked:  # nose marker only (no lamps lit)
+            nx, ny = P(x + c * 2.0, y + s * 2.0)
+            rr = max(1.5, 0.3 * sc)
+            d.ellipse([nx - rr, ny - rr, nx + rr, ny + rr], fill=(0, 0, 0))
+            continue
+        if wreck:
+            if blink:
+                for a, bb in corners:
+                    hx, hy = P(x + c * a * 0.9 - s * bb * 0.9, y + s * a * 0.9 + c * bb * 0.9)
+                    d.ellipse([hx - r, hy - r, hx + r, hy + r], fill=(255, 170, 0))
+            continue
+        if sim.acc[b, n] < BRAKE_ACC:  # brake lights
+            for bb in (-0.6, 0.6):
+                hx, hy = P(x - c * 2.1 - s * bb, y - s * 2.1 + c * bb)
+                d.ellipse([hx - r, hy - r, hx + r, hy + r], fill=(255, 30, 30))
         # signal lamp on the roof
         if cfg.n_signal > 0:
             lx, ly = P(x - c * 0.6, y - s * 0.6)
@@ -89,7 +117,9 @@ def draw_frame(sim: Sim, b: int = 0, size: int = 512, view: float | None = None,
             d.line([cx - r, cy + r, cx + r, cy - r], fill=col, width=3)
     st = sim.stats
     font = ImageFont.load_default()
-    txt = f"{label} t={sim.t:5.1f}s  exits={st.exits[b]} crash={st.crashes[b]} off={st.offroad[b]} q={sim.queue[b].sum()}"
+    txt = (f"{label} t={sim.t:5.1f}s  exits={st.exits[b]} crash={st.crashes[b]} off={st.offroad[b]} "
+           f"wrecks={(sim.wreck[b] & ~sim.obstacle[b]).sum()} q={sim.queue[b].sum()}"
+           + (f" obst={sim.obstacle[b].sum()}" if sim.obstacle[b].any() or st.obstacles[b] else ""))
     d.rectangle([0, 0, size, 18], fill=(30, 30, 34))
     d.text((6, 4), txt, fill=(255, 255, 255), font=font)
     if legend:

@@ -1,7 +1,8 @@
 import numpy as np
 
 from smartcrossing.policy import PolicyDriver, default_in_scale, forward, layer_sizes, save_npz
-from smartcrossing.ppo import MLP, N_PRIV, Worker, mlp_forward
+from smartcrossing.ppo import MLP, Worker, mlp_forward
+from smartcrossing.ppo_common import N_PRIV
 from smartcrossing.sim import Sim, SimConfig, act_dim, obs_dim
 
 

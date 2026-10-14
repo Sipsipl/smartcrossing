@@ -652,3 +652,129 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
   ones noisy); no qualitative check beyond that. A warm-start check was not possible locally (the
   committed checkpoints hold only the actor; full state.npz files were in the cloud runs/).
 - Limits: torch RNG streams differ from numpy (same distributions); graph-mode arm queue capped at 256.
+
+## Round 1 in the new world: wrecks, brake light, 1 lamp, right-half spawn, crash cost sweep (2026-10-11)
+- **Setup**: warm start from wide_s1ft2 2650 (`--init-policy`, actor transplanted by feature name,
+  brake-light/hazard weights 0, lamp-2 dropped; fresh critic, `--critic-warmup 20`, logstd-init -2).
+  GPU path, 2048 envs x 32, n_slots 40, curriculum ceiling 0.3 / lo 0.15. ~80 it/min, ~480k car-steps/s.
+- **Sweep** (crash+offroad cost x1 / x3 / x10, 5 min each; eval 6 envs x 90 s, 3 seeds; crash+off per
+  1000 / throughput per min): x1 164/26.6 @0.15, 391/39.7 @0.3; x3 190/25.6, 396/39.0; x10 201/24.7,
+  453/33.4; old brain 222/24.9, 495/33.0. Caveat: x1 ran 560 it (shell timeout failed on Windows),
+  x3/x10 300 it; at equal iterations x1 and x3 trained alike. Differences x1/x3 are within noise; x10
+  clearly worse. Chosen x3 (owner: clearly higher cost). Main run to it 1180 (~11 min).
+- **Result** (8 envs x 120 s, 3 seeds; throughput/min, crash+off per 1000, wreck hits, delay s;
+  results/round1_x3.npz, results/round1_x3_eval.jsonl):
+
+  | demand | round1 x3 | old brain (new world) | light | reservation |
+  |---|---|---|---|---|
+  | 0.05 | 11.5 / 25 / 0 / 1.7 | 11.3 / 44 / 0.3 / 1.0 | 11.0 / 0 / 0 / 7.1 | 11.8 / 0 / 0 / 1.6 |
+  | 0.15 | 28.8 / 127 / 8 / 3.9 | 26.2 / 230 / 33 / 1.8 | 24.5 / 0 / 0 / 16.1 | 33.8 / 0 / 0 / 2.1 |
+  | 0.3 | 38.6 / 275 / 47 / 5.5 | 32.5 / 508 / 247 / 2.6 | 28.4 / 0 / 0 / 20.8 | 64.2 / 0 / 0 / 3.5 |
+  | 0.5 | 39.5 / 320 / 78 / 5.9 | 31.2 / 721 / 782 / 2.8 | 29.8 / 0 / 0 / 21.9 | 87.5 / 0 / 0 / 5.4 |
+
+  Crashes roughly halved vs the old brain in the new world, wreck hits down strongly, delay up a bit
+  (slightly more careful). Still far from safe: cars cross the centre one after another without
+  visibly yielding; at 0.3 crashes in the box. Throughput above light only because crashes are accepted.
+- **Next**: longer runs with several seeds and paired sweeps at equal iterations; hard iteration caps
+  (not shell timeouts); curriculum weighted to 0.15-0.3; Roadmap B (attention over all neighbours)
+  for yielding.
+
+## Diagnosis: why cars drive into standing cars / wrecks (2026-10-11, read-only, runs/diag_rearend/)
+- Owner's observation: cars often don't stop for a standing car or wreck ahead; chain pile-ups.
+- Crash taxonomy (share of crash pairs, round1_x3 vs old brain): rear-end into wreck 6% / 13% (new,
+  0.15 / 0.3) vs 30% / 52% (old); crossing in the box 60% / 56% vs 36% / 18%; head-on ~20-26%.
+  Chains (>= 3 cars): new 24% / 46% of crashed cars, old 58% / 82%.
+- **Perception is not the cause**: the obstacle was among the K=4 neighbours at impact in 100% of
+  rear-ends (whole last 3 s: 87%); 119 of 136 wrecks showed the hazard feature >= 1 s before impact.
+- **Braking is the cause**: first seen at ~10 m gap, median TTC 2.8 s, 99-100% could have stopped
+  with full braking; only 61% braked at all (median strongest -0.55 of -1), re-acceleration in the
+  last 0.5 s, 40% never reacted. Old brain worse (braked in ~20%).
+- Solo test (one car, one wreck in its path, v0 6-14 m/s, gap 10-30 m, 0/3 distractors): new brain
+  stopped in 0 of 36 cases (crash or swerve past); old 18/18 crashes.
+- Spawning is not the cause: 0 of ~24,500 entries physically unavoidable (min gap 13 m).
+- What-if "prefer neighbours ahead" (untrained): worse; not conclusive.
+- **Root causes**: (1) training gap: the policy never learned to come to a stop (warm start from a
+  brain that never stops, 1180 it, low exploration logstd -2; standing obstacles are rare in
+  training); (2) no-blame crash cost: stopping in traffic risks being hit from behind; (3) slot-order
+  neighbour inputs (same reaction learned per slot).
+- **Consequences**: add a stop gate (solo car must stop for a wreck/standing car); scenario
+  curriculum with obstacles on the path; more exploration / from-scratch comparison; Roadmap B.
+
+## Round 2: exploration (A), obstacle scenarios (B), own-speed crash cost (C) (2026-10-12)
+- **Setup**: warm start from round1_x3 (`--init-policy`, critic warm-up 20, logstd-init -0.7), GPU 2048 envs x 32,
+  640 iterations per run (hard cap), demand 0.15-0.3, crash/off-road cost x3, n_slots 40. B: obstacle_envs 0.5
+  (wrecks / parked cars on paths, only where braking in time is possible). C: B + crash_cost_speed "own".
+  Done: A_s1, B_s1, C_s1, A_s2; B_s2 and C_s2 skipped (time): ~13-18 min per run instead of the planned 8,
+  because iterations slow down from 0.5 to 1.4 s as more cars survive (and evals ran alongside).
+- **Result** (8 envs x 120 s, seeds 1000/2000/3000, obstacles off; crash+off per 1000 / throughput per min;
+  gate = stop gate, safe / stop rate on feasible cases; results/round2_eval.jsonl):
+
+  | brain | @0.15 | @0.3 | gate safe / stop |
+  |---|---|---|---|
+  | A s1 / s2 | 57 / 56, 29.8 / 29.0 | 188 / 186, 33.5 / 30.6 | 0.52 / 0.50, 0.64 / 0.50 |
+  | B s1 | 31, 29.6 | 105, 34.7 | 0.84 / 0.75 |
+  | C s1 | 52, 30.6 | 166, 37.0 | 0.71 / 0.67 |
+  | round1_x3 | 127, 28.8 | 275, 38.6 | 0.38 / 0.03 |
+  | light | 0, 24.5 | 0, 28.4 | - |
+  | reservation | 0, 33.8 | 0, 64.1 | - |
+
+  At 0.5: B 107 vs round1 320 per 1000.
+- **Reading**: exploration alone (A) halves crashes vs round 1 (seeds agree within 1-2 per 1000). Obstacle
+  scenarios (B) halve them again and lift the gate to 84% safe / 75% stop. Own-speed crash cost (C) is worse
+  than B on one seed each (not confirmed; needs B_s2/C_s2). Best brain: r2_B_s1 -> results/round2_best.npz.
+  Sheets (runs/round2_eval/B_s1_*): cars queue behind standing cars on the arms instead of driving into them;
+  remaining crashes are in the box (entering tightly one after another), long delay at 0.3 (mean 15 s).
+- **Next**: confirm B vs C with seed 2; longer B training; gate still < 95%; crashes in the box -> Roadmap B.
+
+## Round 3: second seeds for B and C, B continued (2026-10-12)
+- r2_B_s2, r2_C_s2: same configs as round 2 with seed 2 (640 it; ~30-35 min each, incl. a ~10 min stall
+  when other agents' pytest runs used the GPU). r3_B_long: r2_B_s1 continued to it 1099 (only 460 it,
+  6 min: the planned ~30 min were not used; --iters is an absolute cap with --init).
+- Result (same protocol as round 2; results/round3_eval.jsonl; crash+off per 1000 / throughput per min):
+
+  | | @0.15 | @0.3 | gate safe / stop |
+  |---|---|---|---|
+  | B (s1, s2) | 45 (31, 60), 29.0 | 116 (106, 126), 31.8 | 0.81 / 0.76 |
+  | C (s1, s2) | 56 (52, 59), 30.2 | 169 (166, 171), 35.1 | 0.78 / 0.73 |
+  | r3_B_long | 39, 31.2 | 122, 36.5 | 0.88 / 0.74 |
+
+- Reading: own-speed crash cost (C) gives more crashes at 0.3 on both seeds (169 vs 116), slightly more
+  throughput; not adopted (recommendation; owner decides). B's seed spread is large (31 vs 60 @0.15):
+  r2_B_s1 is partly a lucky seed. 460 more iterations did not lower crashes (gate slightly better).
+  Best brain stays r2_B_s1 (results/round2_best.npz). Remaining crashes are in the box at 0.3.
+
+## Roadmap B: neighbour set encoder (2026-10-12, branch coordinator/attention)
+- **Design** (`smartcrossing/policy_set.py`, `ppo --arch set`): same observation, no new information. Each
+  neighbour block (10 features incl. brake light, hazard, lamp) goes through a shared tanh MLP phi (32, 32);
+  pooling over the present neighbours (presence = the `present` feature): multi-head attention with the ego
+  features as query (4 heads x 8 dims, default), or DeepSets mean / max (`--set-pool`); trunk MLP (64, 64)
+  on [ego, pooled]. Permutation-invariant over the slots; `SimConfig.n_neighbours` (default 4, an interface
+  value stored in the checkpoint) can grow without new weights. Critic: same architecture with the
+  privileged features appended to the ego part (`--critic-arch same|mlp|set`).
+- **Parameters** (actor / critic): MLP 64x64 8195 / 8321 at K=4 (10755 at K=8, 13315 at K=12); MLP 128x128
+  24579 (K=4); set attn 11811 / 12065, set mean / max 9091 / 9217, independent of K.
+- **Implementation**: numpy forward (PolicyDriver, cli bench / gate, numpy workers), torch forward
+  (rollout_torch incl. CUDA graph; ppo_torch update via autograd, same losses / Adam), JS forward (sim.js).
+  The numpy update stays MLP-only (`--arch set` needs `--update-device` or `--rollout-device` cpu|cuda).
+  Checkpoints: `.npz` field `arch` (JSON) + flat params, `sizes = [obs_dim, *trunk hidden, act_dim]`; MLP
+  files are unchanged (no field). The site build skips set brains for now (brain view / snapshot need layers).
+- **Tests** (tests/test_policy_set.py, test_sim_js_parity.py, test_sim_torch_parity.py): numpy = torch (1e-12,
+  all poolings, with / without critic extras), autograd = finite differences, slot shuffling and junk in absent
+  slots leave the output unchanged, K=4 and K=8 nets share weights, checkpoint round trip incl. a mixed
+  set / MLP driver, committed checkpoints load as before, Worker = TorchRollout with set networks (float64),
+  JS = numpy (all poolings, mixed driver, K=8 observations), sim / TorchSim (cpu + cuda) observation parity at K=10.
+- **Behaviour cloning** (optional, `--init-bc TEACHER.npz`, bc.py): the MLP teacher drives in the training
+  world, the set actor's pre-squash output is fitted by MSE. round2_best -> set attn K=4, 3000 Adam steps on
+  CPU (92 s, 253k car-steps): MSE 0.147 (teacher output variance ~1.2, R^2 ~0.87). Stop gate 0.977 safe /
+  stop on feasible cases (teacher 0.841 / 0.75); bench @0.15 seed 1000 (8 x 120 s): 62 crash+off per 1000,
+  30.1 per min (teacher 12, 30.1 on this seed). Not trained further (runs/bc/bc_k4.npz).
+- **GPU smoke** (round-2 B world: obstacle_envs 0.5, crash/off-road cost x3, n_slots 40; from scratch, 2048 envs
+  x 32, curriculum 0.15-0.3, eval off; runs/smoke_set, runs/smoke_mlp): set 45 it/min over it 2-59 (rollout
+  0.77 s + update 0.56 s; 280k car-steps/s), 36 it/min over it 2-99 as batches grow; MLP 80 it/min (0.55 + 0.20 s;
+  580k car-steps/s). CUDA graph capture works with the set forward. Like every from-scratch smoke run, both
+  settle into "stand and wait" within ~100 it (set: bench @0.15 throughput 0, gate "stops" trivially 0.94);
+  no learning comparison possible from 3 min.
+- **Open for the comparison** (equal wall time, 2 seeds): from scratch vs BC warm start for the set encoder
+  (the MLP baselines were warm-started); K=4 vs K=8 for the set encoder; attn vs mean / max; a wider MLP
+  (128x128) as the "more parameters" control. The set encoder costs ~1.8x per iteration (update ~2.8x), so equal
+  time means ~55 % of the MLP's iterations.

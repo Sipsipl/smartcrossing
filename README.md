@@ -14,8 +14,7 @@ Fragen, die das Projekt untersucht:
 
 - Wie viele Autos pro Minute schaffen lernende Autos über eine regelfreie Kreuzung – und wie
   oft krachen sie dabei?
-- Einigen sie sich von selbst auf Rechts- oder Linksverkehr? *(Ja – welche Seite, hängt vom
-  Zufall beim Trainingsstart ab.)*
+- Wie fahren sie, wenn sie auf der rechten Straßenhälfte starten (Rechtsverkehr ist vorgegeben)?
 - Entsteht über die Lampen eine Art Sprache? *(Bisher nein: die Lampen senden etwas, aber
   niemand hört hin.)*
 - Was passiert, wenn unterschiedlich trainierte Autos gemeinsam fahren?
@@ -41,7 +40,7 @@ cd site/public && python3 -m http.server 8000                            # Websi
 | Pfad | Inhalt |
 |---|---|
 | `smartcrossing/sim.py` | Simulation der Kreuzung (numpy, viele Kreuzungen parallel) |
-| `smartcrossing/ppo.py`, `es.py` | Training: PPO und Evolution Strategies |
+| `smartcrossing/ppo.py` | Training mit PPO (optional auf der GPU: `poetry install --with gpu`, dann `--rollout-device cuda`; siehe `ppo_torch.py`, `sim_torch.py`) |
 | `smartcrossing/baselines.py` | Vergleichsfahrer mit Spuren: Ampel und zentraler Verkehrsrechner |
 | `site/` | die Website; `site/src/js/sim.js` ist die Browser-Version der Simulation |
 | `docs/PLAN.md` | Ziele, Entscheidungen, Architektur |

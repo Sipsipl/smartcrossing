@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from smartcrossing import policy_set
 from smartcrossing.policy import PolicyDriver, default_in_scale, export_json, init_params, layer_sizes, save_npz
 from smartcrossing import sim as simmod
 from smartcrossing.sim import LEFT, NARROW, RIGHT, STRAIGHT, Sim, SimConfig, act_dim, js_constants
@@ -45,6 +46,8 @@ def export_state(sim: Sim) -> dict:
         queues.append(q)
     return {
         "alive": sim.alive[0].tolist(),
+        "wreck": sim.wreck[0].tolist(),
+        "wreck_left": sim.wreck_left[0].tolist(),
         "x": sim.x[0].tolist(),
         "y": sim.y[0].tolist(),
         "th": sim.th[0].tolist(),
@@ -63,7 +66,7 @@ def export_state(sim: Sim) -> dict:
         "t": float(sim.t),
         "stats": {
             k: int(getattr(st, k)[0])
-            for k in ("arrived", "spawned", "exits", "wrong_exits", "crashes", "offroad", "timeouts")
+            for k in ("arrived", "spawned", "exits", "wrong_exits", "crashes", "wreck_hits", "offroad", "timeouts")
         },
     }
 
@@ -121,8 +124,7 @@ def push_queue(sim, k, u, man, grp=0):
 
 # ---------------------------------------------------------------- cases
 def trajectory_cases(seed, cfg, n_steps=160, every=4, acc_range=(-0.6, 1.0)):
-    sim = Sim(cfg, 1, seed=seed)
-    sim.group_probs = np.array([0.5, 0.3, 0.2])
+    sim = Sim(cfg, 1, seed=seed, group_probs=[0.5, 0.3, 0.2])
     rng = np.random.default_rng(seed + 100)
     N, A = cfg.n_slots, act_dim(cfg)
     steer = rng.normal(0, 0.25, N)
@@ -234,6 +236,40 @@ def edge_cases(cfg, tag=""):
     a[:9, 1] = [1.0, 1.0, -1.0, 0.3, 0.8, 0.7, -0.5, 0.0, 0.2]
     a[:9, 0] = [0.5, -0.4, 1.0, -1.0, 0.2, -0.6, -1.0, -1.0, 1.0]
     cases.append(make_case(f"{tag}grip", gp, a))
+    if cfg.wreck_time > 0:
+        cases += wreck_cases(cfg, tag)
+    return cases
+
+
+def wreck_cases(cfg, tag=""):
+    """Wrecks: one expiring this step, one fresh; a car about to hit a wreck, one watching it
+    (hazard feature), a queued car whose spawn spot is blocked by a wreck, a braking neighbour
+    right at the brake-light threshold, and a crash pair that becomes new wrecks."""
+    N, A = cfg.n_slots, act_dim(cfg)
+    L, hp = cfg.L, np.pi / 2
+    ws = Sim(dataclasses.replace(cfg, demand=0.0), 1, seed=4)
+    ws.t = 3.0
+    place(ws, 0, 0.0, 0.0, hp, 0.0)  # wreck, expires now (its slot is free for the queue this step)
+    place(ws, 1, 3.0, -20.0, 0.3, 0.0)  # fresh wreck
+    place(ws, 2, 3.0, -23.4, hp, 8.0)  # drives into wreck 1 within the step
+    place(ws, 3, -4.0, -15.0, hp, 2.0)  # sees wreck 1 (hazard) and car 4 (brake light)
+    place(ws, 4, -4.0, -8.0, hp, 6.0)  # brakes just beyond the threshold
+    place(ws, 5, -3.0, -L + 2.5 + 4.0, hp, 0.0)  # wreck at the entry of arm 0
+    place(ws, 6, 5.0, 20.0, -hp, 7.0, arm=2)  # head-on with car 7: new wrecks
+    place(ws, 7, 5.2, 15.6, hp, 7.0)
+    ws.acc[0, 4] = simmod.BRAKE_ACC - 1e-3
+    ws.acc[0, 3] = simmod.BRAKE_ACC + 1e-3
+    ws._make_wreck(np.isin(np.arange(N), [0, 1, 5])[None])
+    ws.wreck_left[0, 0] = 1
+    ws.wreck_left[0, 1] = simmod.wreck_steps(cfg)
+    push_queue(ws, 0, 0.0, STRAIGHT)
+    push_queue(ws, 0, 0.6, LEFT)
+    a = np.zeros((N, A))
+    a[4, 0] = -0.2
+    cases = [make_case(f"{tag}wrecks", ws, a)]
+    for i in range(2):  # evolve: the hitter is a wreck now
+        ws.step(a[None])
+        cases.append(make_case(f"{tag}wrecks_{i + 1}", ws, a))
     return cases
 
 
@@ -253,13 +289,23 @@ def parity(tmp_path_factory):
     cases += trajectory_cases(1, dataclasses.replace(cfg, demand=0.35, signal_enabled=False, turn_probs=(0.5, 0.2, 0.3)))
     cases += trajectory_cases(2, dataclasses.replace(cfg, demand=0.3, neighbour_vis=55.0), n_steps=80)
     cases += trajectory_cases(3, dataclasses.replace(cfg, demand=0.3, speed_control=True), n_steps=80)
-    # the old 7 m crossing without grip limit, and lane-disciplined arrivals with a strong grip limit
+    # the old 7 m crossing without grip limit, and full-width arrivals with a strong grip limit
     cases += trajectory_cases(4, dataclasses.replace(cfg, demand=0.4, **NARROW), n_steps=80)
-    cases += trajectory_cases(5, dataclasses.replace(cfg, demand=0.4, spawn_right=True, a_lat_max=1.5), n_steps=80)
+    cases += trajectory_cases(5, dataclasses.replace(cfg, demand=0.4, spawn_right=False, a_lat_max=1.5), n_steps=80)
     # mostly braking: cars stop and use the reverse gear
     cases += trajectory_cases(6, dataclasses.replace(cfg, demand=0.4), n_steps=120, acc_range=(-1.0, 0.4))
+    # short wrecks (many appear and vanish within the trajectory)
+    cases += trajectory_cases(7, dataclasses.replace(cfg, demand=0.5, wreck_time=0.8), n_steps=120)
+    # the old checkpoints' interface and world: two lamps, acceleration feature, full-width spawning, no wrecks
+    legacy = dict(n_signal=2, brake_light=False, spawn_right=False, wreck_time=0.0)
+    cases += trajectory_cases(8, dataclasses.replace(cfg, demand=0.4, **legacy), n_steps=80)
+    # more neighbour slots (set-encoder interface)
+    cfg8 = dataclasses.replace(cfg, demand=0.6, n_neighbours=8)
+    k8 = trajectory_cases(9, cfg8, n_steps=80)
+    cases += k8
     cases += edge_cases(cfg)
     cases += edge_cases(dataclasses.replace(cfg, **NARROW), tag="narrow_")
+    cases += edge_cases(dataclasses.replace(cfg, **legacy), tag="legacy_")
 
     # policy: real export format (save_npz -> export_json)
     sizes = layer_sizes(cfg)
@@ -272,13 +318,34 @@ def parity(tmp_path_factory):
     obs = np.concatenate([c["expect"]["obs"] for c in cases[:12]])
     obs = np.concatenate([obs, np.random.default_rng(5).normal(size=(20, obs.shape[1]))])
     # driver with two groups, group 1 muted
-    dsim = Sim(dataclasses.replace(cfg, demand=0.6), 1, seed=3)
-    dsim.group_probs = np.array([0.5, 0.5])
+    dsim = Sim(dataclasses.replace(cfg, demand=0.6), 1, seed=3, group_probs=[0.5, 0.5])
     for _ in range(120):
-        dsim.step(np.tile([0.4, 0.0, 0.5, -0.5], (cfg.n_slots, 1))[None])
+        dsim.step(np.tile([0.4, 0.0, 0.5, -0.5][: act_dim(cfg)], (cfg.n_slots, 1))[None])
     assert len(set(dsim.group[0][dsim.alive[0]])) == 2
     driver = PolicyDriver(dsim, params, sizes, mute=[False, True], in_scale=scale)
     expect_drv = driver.act()[0]
+
+    # set-encoder policies (policy_set.py), one per pooling, on K = 8 observations; a driver mixing
+    # a set brain (group 0) and an MLP of the same interface (group 1, muted)
+    scale8 = default_in_scale(cfg8)
+    sizes8 = layer_sizes(cfg8)
+    obs8 = np.concatenate([c["expect"]["obs"] for c in k8])
+    obs8 = np.concatenate([obs8[np.abs(obs8).sum(1) > 0], np.zeros((1, obs8.shape[1]))])
+    set_pols, expect_set = [], []
+    for i, pool in enumerate(policy_set.POOLS):
+        arch = policy_set.make_arch(cfg8, hidden=(16, 12), phi=(10, 8), pool=pool, heads=2, dk=4, dv=3)
+        p = policy_set.init_params(arch, 10 + i, out_scale=1.0)
+        save_npz(tmp / f"set{i}.npz", p, sizes8, cfg8, in_scale=scale8, arch=arch)
+        set_pols.append(export_json(tmp / f"set{i}.npz"))
+        expect_set.append(np.tanh(policy_set.forward(p, arch, obs8 * scale8)))
+    p_mlp8 = init_params(sizes8, 7, out_scale=1.0)
+    save_npz(tmp / "mlp8.npz", p_mlp8, sizes8, cfg8, in_scale=scale8)
+    dsim8 = Sim(cfg8, 1, seed=4, group_probs=[0.5, 0.5])
+    for _ in range(120):
+        dsim8.step(np.tile([0.4, 0.0, 0.5][: act_dim(cfg8)], (cfg8.n_slots, 1))[None])
+    drv8 = PolicyDriver.load(f"{tmp / 'set0.npz'}+{tmp / 'mlp8.npz'}", dsim8, mute=[False, True])
+    expect_drv8 = drv8.act()[0]
+    pols8 = [set_pols[0], export_json(tmp / "mlp8.npz")]
 
     payload = {
         "cases": [{k: c[k] for k in ("name", "cfg", "state", "action")} for c in cases],
@@ -288,6 +355,13 @@ def parity(tmp_path_factory):
                 "policy": pols[1],
                 "obs": obs[:5].tolist(),
                 "driver": {"cfg": cfg_dict(dsim.cfg), "state": export_state(dsim), "policies": pols, "mute": [False, True]},
+            },
+            *[{"policy": sp, "obs": obs8.tolist()} for sp in set_pols[1:]],
+            {
+                "policy": set_pols[0],
+                "obs": obs8.tolist(),
+                "driver": {"cfg": cfg_dict(dsim8.cfg), "state": export_state(dsim8), "policies": pols8,
+                           "mute": [False, True]},
             },
         ],
     }
@@ -300,7 +374,9 @@ def parity(tmp_path_factory):
     from smartcrossing.policy import forward
 
     expect_pol = [forward(params[0], obs, sizes, scale), forward(params[1], obs[:5], sizes, scale)]
-    return {"cases": cases, "js": js, "expect_pol": expect_pol, "expect_drv": expect_drv, "dsim": dsim}
+    expect_pol += [*expect_set[1:], expect_set[0]]
+    return {"cases": cases, "js": js, "expect_pol": expect_pol, "expect_drv": expect_drv, "dsim": dsim,
+            "expect_drv8": expect_drv8, "dsim8": dsim8}
 
 
 def test_defaults_match_simconfig(parity):
@@ -323,7 +399,7 @@ def test_generated_config(parity):
     np.testing.assert_array_equal(cfg["ARM_U"], simmod.ARM_U)
     ex = parity["js"]["exported"]
     for k in ("RIGHT", "STRAIGHT", "LEFT", "DISC_R", "K_NEIGHBOURS", "NEIGHBOUR_RANGE", "OBS_DIM", "NB_FEATURES",
-              "POS_SCALE", "GOAL_SCALE", "RAY_RANGE"):
+              "NB_FEATURES_LEGACY", "BRAKE_ACC", "POS_SCALE", "GOAL_SCALE", "RAY_RANGE"):
         assert ex[k] == getattr(simmod, k), k
     assert ex["DONE"] == {name: i for i, name in enumerate(simmod.DONE_NAMES)}
     for k in ("SPAWN_LAT_MARGIN", "SPAWN_BACK", "SPAWN_CURB_GAP", "SPAWN_RIGHT_MIN", "SPAWN_LAT_STEP",
@@ -334,7 +410,7 @@ def test_generated_config(parity):
 
 def test_case_coverage(parity):
     """The case set must actually exercise the interesting branches."""
-    tot = {k: 0 for k in ("exits", "wrong_exits", "crashes", "offroad", "timeouts", "spawned")}
+    tot = {k: 0 for k in ("exits", "wrong_exits", "crashes", "wreck_hits", "offroad", "timeouts", "spawned")}
     for c in parity["cases"]:
         b, a = c["state"]["stats"], c["expect"]["state"]["stats"]
         for k in tot:
@@ -342,6 +418,14 @@ def test_case_coverage(parity):
     assert all(v > 0 for v in tot.values()), tot
     assert len(parity["cases"]) >= 40
     assert any(c["cfg"]["W"] == 3.5 for c in parity["cases"]) and any(c["cfg"]["W"] == 7.0 for c in parity["cases"])
+    # wrecks appear, block and vanish; both observation interfaces and lamp counts are covered
+    wrecks = [(sum(c["state"]["wreck"]), sum(c["expect"]["state"]["wreck"])) for c in parity["cases"]]
+    assert any(b < a for b, a in wrecks) and any(b > a for b, a in wrecks)
+    assert {(c["cfg"]["n_signal"], c["cfg"]["brake_light"]) for c in parity["cases"]} == {(1, True), (2, False)}
+    brake = [c for c in parity["cases"] if c["cfg"]["brake_light"]]
+    lit = np.concatenate([np.asarray(c["expect"]["obs"])[:, simmod.OBS_DIM + 7::simmod.NB_FEATURES + 1].ravel() for c in brake])
+    haz = np.concatenate([np.asarray(c["expect"]["obs"])[:, simmod.OBS_DIM + 8::simmod.NB_FEATURES + 1].ravel() for c in brake])
+    assert (lit == 1).any() and (haz == 1).any()
 
 
 def test_observe_parity(parity):
@@ -358,10 +442,12 @@ def test_step_parity(parity):
         assert j["done_uid"] == c["expect"]["done_uid"], name
         assert abs(j["queue_cost"] - c["expect"]["queue_cost"]) < TOL, name
         assert s["alive"] == e["alive"], name  # removals and spawns
+        assert s["wreck"] == e["wreck"] and s["wreck_left"] == e["wreck_left"], name
         alive = np.array(e["alive"])
         for k in ("x", "y", "th", "v", "age", "prev_dist", "kappa", "acc"):
             np.testing.assert_allclose(np.array(s[k]), np.array(e[k]), atol=TOL, err_msg=f"{name}:{k}")
         np.testing.assert_allclose(np.array(s["sig"]), np.array(e["sig"]), atol=TOL, err_msg=f"{name}:sig")
+        alive = alive | np.array(e["wreck"])
         for k in ("arm", "man", "uid", "group"):
             assert np.array_equal(np.array(s[k])[alive], np.array(e[k])[alive]), f"{name}:{k}"
         assert s["next_uid"] == e["next_uid"], name
@@ -390,3 +476,14 @@ def test_policy_parity(parity):
     np.testing.assert_allclose(acted[alive], parity["expect_drv"][alive], atol=TOL)
     muted = alive & (parity["dsim"].group[0] == 1)
     assert muted.any() and np.all(acted[muted, 2:] == 0)
+
+
+def test_set_policy_parity(parity):
+    """Set-encoder forward (all poolings) and a mixed set / MLP driver on K = 8 observations."""
+    js = parity["js"]["policies"]
+    assert len(js) == 2 + len(policy_set.POOLS) == len(parity["expect_pol"])
+    alive = parity["dsim8"].alive[0]
+    acted = np.array(js[-1]["acted"])
+    groups = parity["dsim8"].group[0][alive]
+    assert alive.sum() >= 4 and len(set(groups)) == 2
+    np.testing.assert_allclose(acted[alive], parity["expect_drv8"][alive], atol=TOL)

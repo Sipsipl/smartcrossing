@@ -20,11 +20,13 @@ import json
 
 import numpy as np
 
+from .cli import make_driver
 from .metrics import summarize
-from .policy import PolicyDriver
-from .sim import ARM_U, K_NEIGHBOURS, NB_FEATURES, OBS_DIM, Sim, SimConfig
+from .sim import ARM_U, DONE_NAMES, OBS_DIM, Sim, SimConfig, nb_features
 
 MODES = ("normal", "zero", "shuffle")
+KIND_NAMES = DONE_NAMES[1:]  # outcome kinds of finished cars (DONE_NAMES[0] is "none")
+NB_PRESENT = 5  # index of the `present` flag inside a neighbour block (after rel. pos 2, rel. heading 2, speed)
 
 
 def _intervene(sim: Sim, mode: str, rng):
@@ -34,9 +36,11 @@ def _intervene(sim: Sim, mode: str, rng):
         return
     orig = sim.observe
     S = sim.cfg.n_signal
-    blk = NB_FEATURES + S
-    cols = np.array([OBS_DIM + k * blk + NB_FEATURES + q for k in range(K_NEIGHBOURS) for q in range(S)]).reshape(K_NEIGHBOURS, S)
-    pres = np.array([OBS_DIM + k * blk + 5 for k in range(K_NEIGHBOURS)])
+    nbf = nb_features(sim.cfg)
+    blk = nbf + S
+    K = sim.cfg.n_neighbours
+    cols = np.array([OBS_DIM + k * blk + nbf + q for k in range(K) for q in range(S)]).reshape(K, S)
+    pres = np.array([OBS_DIM + k * blk + NB_PRESENT for k in range(K)])
 
     def observe():
         obs = orig()
@@ -45,7 +49,7 @@ def _intervene(sim: Sim, mode: str, rng):
         else:
             flat = obs.reshape(-1, obs.shape[-1])
             lamps = []
-            for k in range(K_NEIGHBOURS):
+            for k in range(K):
                 rows = np.nonzero(flat[:, pres[k]] > 0.5)[0]
                 lamps.append((k, rows, flat[rows][:, cols[k]]))
             pool = np.concatenate([lv for _, _, lv in lamps]) if lamps else np.zeros((0, S))
@@ -60,13 +64,13 @@ def _intervene(sim: Sim, mode: str, rng):
     sim.observe = observe
 
 
-def run(ckpt, demand, envs, seconds, seed=1000, mode="normal", record=False, cfg_over=None, traj=None):
+def run_policy(ckpt, demand, envs, seconds, seed=1000, mode="normal", record=False, cfg_over=None, traj=None):
     """ckpt: a policy .npz (or 'light' / 'reservation' / 'none' for the baselines).
     record: also return R (rows arm, man, x, y, v, accel action, lamps...). traj: a dict
     that is filled with per-car-step arrays (env, uid, step, arm, man, x, y, v, th, kappa)
     for the wobble analysis. Returns (summary, R, sim)."""
     sim = Sim(SimConfig(demand=demand, **(cfg_over or {})), envs, seed=seed)
-    drv = _make_driver(ckpt, sim)
+    drv = make_driver(ckpt, sim)
     _intervene(sim, mode, np.random.default_rng(seed + 7))
     rec, tr = [], []
     for k in range(int(seconds / sim.cfg.dt)):
@@ -87,17 +91,6 @@ def run(ckpt, demand, envs, seconds, seed=1000, mode="normal", record=False, cfg
     return summarize(sim, seconds), (np.concatenate(rec) if record else None), sim
 
 
-KIND_NAMES = ("exit", "wrong_exit", "crash", "offroad", "timeout")
-
-
-def _make_driver(ckpt, sim):
-    if ckpt in ("light", "reservation", "none"):
-        from .baselines import LaneDriver
-
-        return LaneDriver(sim, ckpt)
-    return PolicyDriver.load(ckpt, sim)
-
-
 def outcome_counts(ckpt, demand, envs=16, seconds=120.0, seed=1000, cfg_over=None, solo=False):
     """Outcome of every car that finished (exit / wrong_exit / crash / offroad / timeout),
     per manoeuvre. solo=True: one car slot per env (every car drives alone; the queue is
@@ -107,7 +100,7 @@ def outcome_counts(ckpt, demand, envs=16, seconds=120.0, seed=1000, cfg_over=Non
         over.update(n_slots=1)
         demand = max(demand, 0.5)
     sim = Sim(SimConfig(demand=demand, **over), envs, seed=seed)
-    drv = _make_driver(ckpt, sim)
+    drv = make_driver(ckpt, sim)
     cnt = {m: dict.fromkeys(KIND_NAMES, 0) for m in ("right", "straight", "left")}
     names = {1: "right", 2: "straight", 3: "left"}
     for _ in range(int(seconds / sim.cfg.dt)):
@@ -254,7 +247,7 @@ def wobble_stats(T, cfg, min_kappa=0.002):
     """Weaving on the straight parts of the arms (between the box + 5 m and the spawn /
     exit line - 5 m): mean |yaw rate| v*kappa (rad/s), sign changes per second of the
     actual curvature (ignoring |kappa| < min_kappa), heading std (deg) relative to the arm
-    axis, and the mean |lateral speed| (m/s). Uses the per-car-step arrays of run(traj=...)."""
+    axis, and the mean |lateral speed| (m/s). Uses the per-car-step arrays of run_policy(traj=...)."""
     if len(T.get("uid", [])) == 0:
         return None
     arm, man = T["arm"].astype(int), T["man"].astype(int)
@@ -351,7 +344,7 @@ def main(argv=None):
     res = {"ckpt": a.ckpt, "demand": a.demand, "bench": {}}
     for mode in modes:
         traj = {} if mode == "normal" else None
-        s, R, sim = run(a.ckpt, a.demand, a.envs, a.seconds, mode=mode, record=mode == "normal", cfg_over=over, traj=traj)
+        s, R, sim = run_policy(a.ckpt, a.demand, a.envs, a.seconds, mode=mode, record=mode == "normal", cfg_over=over, traj=traj)
         res["bench"][mode] = {k: round(s[k], 3) for k in ("throughput_per_min", "exit_ok_rate", "crash_cars_per_1000",
                                                           "crash_cars", "offroad_cars", "delay_mean_s")}
         if mode == "normal":
