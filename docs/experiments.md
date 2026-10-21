@@ -802,3 +802,22 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
   Best: r4_S_s1 -> results/round4_best.npz.
 - Next: S as the site's main brain (needs /gehirn view + build support for set brains); deadlock/timeouts in the
   box at high demand as the next problem (owner: rather a jam than a crash, but not a gridlock).
+
+## (G) Deadlock measurement (2026-10-21, no training; smartcrossing/deadlock.py, cli deadlock, runs/deadlock/)
+- Definition: car "stuck" = within 16 m of the centre and < 1.5 m net movement in 5 s; deadlock = >= 3 stuck
+  cars, >= 2 of them within 9 m (net movement, because cars rock at 0.3-1 m/s instead of standing). Light and
+  reservation: 0 deadlocks.
+- Sweep (round4 brain, 8 envs x 180 s, 3 seeds; thr/min, crash/1000, timeouts/1000, % time deadlocked; cars on
+  map): 0.15: 34.2, 5, 0, 1 %, 5.9 | 0.3: 54.8, 51, 14, 30 %, 18.7 | 0.4: 55.3, 90, 31, 53 %, 27.0 |
+  0.5: 52.6, 121, 36, 63 %, 28.9. Reservation 34.5 / 66.5 / 84.4 / 91.0, light 26-31. Round-2 MLP flattens at ~34
+  and is deadlocked 57-69 % from 0.3 on. Fundamental-diagram data: results/deadlock_fundamental.json.
+- At 0.5: ~240 deadlocks/h, chained (64 % re-form within 10 s; spells median 19 s, p90 51 s); 93 % end by a car
+  moving off, 3 % timeout, 3 % crash. Constellation: 2-3 cars from 2 arms, straight and left only, blocked by
+  crossing/oncoming cars; clean 4-way cycles rare (3 % 3-cycles, 12 % face-to-face); 29 % with a wreck in the box.
+- Action noise in evaluation does NOT dissolve them (trained std makes it worse): physical interlocks in an
+  overfilled box, not symmetric standoffs. Lamp acts as a "where am I" signal (+0.63 approach, -0.84 stuck), does
+  not predict who goes first; zeroing it halves deadlocks but doubles crashes (used for caution).
+- Incentives (training reward, gamma 0.99 ~ 10 s horizon): waiting until max_age removal -1.8, discounted ~ -0.2
+  to -0.3, vs crash -5.1 to -7.5; going ahead pays only below ~12 % crash risk -> deadlocking is the cheapest.
+- Hypotheses: (1) out of training range + no admission control (box overfills); (2) waiting nearly free (short
+  horizon, cheap max_age removal); (3) no memory. Ruled out: symmetry breaking, lamp.
