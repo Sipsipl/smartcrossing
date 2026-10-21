@@ -274,6 +274,8 @@
         let steps = 0;
         while (this.acc >= this.sim.cfg.dt && steps < 40) { this.step(); this.acc -= this.sim.cfg.dt; steps += 1; }
         if (steps === 40) this.acc = 0;
+        if (steps && this.opts.onStepped) this.opts.onStepped(this); // after the sim steps, before drawing
+        if (this.opts.onTick) this.opts.onTick(ts); // display-only easing (brain view)
         this.draw(); // every display frame: cars are interpolated between sim steps
         if (steps && this.opts.onFrame) this.opts.onFrame(this);
       } else this.lastTs = null;
@@ -467,19 +469,20 @@
     }
 
     /** Attention overlay (brain page, set-encoder brains): a line from car n to every neighbour it sees,
-     *  as thick as the attention the brain gives it (opts.attention(n) -> {w: [K], focus: k | null}),
+     *  as thick as the attention the brain gives it (opts.attention(n, crossing) -> {w: [K], label: [K], focus: k | null}, by observation slot; drawn at the interpolated car positions),
      *  plus the slot number as on the brain diagram. */
     _drawAttention(n) {
-      const att = this.opts.attention && this.opts.attention(n);
+      const att = this.opts.attention && this.opts.attention(n, this);
       const sim = this.sim, ctx = this.ctx, cfg = sim.cfg, m = att && SCX.obsMap(cfg);
       if (!m) return;
-      const o = this.obsRow(n), ip = this.ip || this._interp();
-      const x = ip.x[n], y = ip.y[n], th = ip.th[n], ct = Math.cos(th), st = Math.sin(th);
+      const o = this.obsRow(n), ip = this.ip || this._interp(), nbs = this.neighbourSlots(n, m.nbs.length);
+      const x = ip.x[n], y = ip.y[n];
       const lw = 1.6 / (this.px || 4) * (window.devicePixelRatio || 1);
       m.nbs.forEach((nb, k) => {
-        if (o[nb.present.i] < 0.5) return;
-        const f = o[nb.fwd.i] * nb.fwd.scale, l = o[nb.left.i] * nb.left.scale;
-        const nx = x + ct * f - st * l, ny = y + st * f + ct * l, w = Math.max(0, Math.min(1, att.w[k] || 0));
+        const j = nbs[k];
+        if (o[nb.present.i] < 0.5 || j < 0) return;
+        // the neighbour is drawn where its car is drawn (interpolated like the cars), so lines glide with them
+        const nx = ip.x[j], ny = ip.y[j], w = Math.max(0, Math.min(1, att.w[k] || 0));
         ctx.strokeStyle = `rgba(255,196,40,${(0.25 + 0.75 * Math.min(1, w * 1.6)).toFixed(2)})`;
         ctx.lineWidth = lw * (0.7 + 7 * w);
         ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(nx, ny); ctx.stroke();
@@ -492,10 +495,28 @@
         ctx.save(); ctx.translate(nx, ny); ctx.scale(1, -1);
         ctx.fillStyle = "#222"; ctx.font = "bold 2px ui-sans-serif, system-ui, sans-serif";
         ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.fillText(String(k + 1), 0, 0.1);
+        ctx.fillText(String(att.label ? att.label[k] : k + 1), 0, 0.1);
         ctx.restore();
       });
     }
+
+    /** Sim slot of each of the K neighbours car n sees (-1 = none), in observation order: the K nearest
+     *  cars (driving or wrecked) within neighbour_vis, by distance then slot. Mirrors Sim.observe(), so
+     *  it matches the obs row of the current sim state. */
+    neighbourSlots(n, K) {
+      const sim = this.sim, vis = sim.cfg.neighbour_vis, cand = [], out = new Array(K).fill(-1);
+      for (let j = 0; j < sim.N; j++) {
+        if (j === n || !(sim.alive[j] || sim.wreck[j])) continue;
+        const d = Math.hypot(sim.x[j] - sim.x[n], sim.y[j] - sim.y[n]);
+        if (d < vis) cand.push([d, j]);
+      }
+      cand.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      for (let k = 0; k < Math.min(K, cand.length); k++) out[k] = cand[k][1];
+      return out;
+    }
+
+    /** Stable ids (sim.uid) of the neighbours in observation order, -1 for empty slots. */
+    neighbourUids(n, K) { return this.neighbourSlots(n, K).map((j) => (j >= 0 ? this.sim.uid[j] : -1)); }
 
     // ---------------------------------------------------------------- stats
     statsSummary() {

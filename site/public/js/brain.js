@@ -280,6 +280,11 @@
       this.host = host;
       this.opts = Object.assign({ onHover: null, onFocus: null, fmt: null }, opts);
       this.hoverId = null; this.pinned = null; this.tr = null; this.obs = null; this.lastFocus = undefined;
+      // Card identity: the set encoder is permutation-invariant (sum/attention over neighbours), so the
+      // card a car sits on is free to choose. A car keeps its card (and number) while it stays among the
+      // visible neighbours, instead of the distance-sorted slot order shuffling the numbers.
+      this.cardUid = []; this.slotOfCard = []; this.cardOfSlot = [];
+      this.sm = []; this.attTarget = null; this.animTs = null;
       this.setPolicy(pol, layout);
       new ResizeObserver(() => {
         const w = Math.round(host.getBoundingClientRect().width);
@@ -310,13 +315,80 @@
       this.build();
     }
 
-    /** Mean attention per neighbour slot over the heads (0 for absent slots); null before the first update. */
+    /** Assign neighbour slots to cards by car id (uids[slot], -1 = empty): cars that stay keep their card,
+     *  newcomers take a free card, cards of departed cars become free. Without ids: card = slot. */
+    _assign(tr, uids) {
+      const K = this.ar.K;
+      const slotOfCard = new Array(K).fill(-1), cardOfSlot = new Array(K).fill(-1);
+      if (tr && !uids) {
+        for (let k = 0; k < K; k++) if (tr.present[k]) { slotOfCard[k] = k; cardOfSlot[k] = k; }
+      } else if (tr) {
+        const old = this.cardUid, now = new Map();
+        for (let k = 0; k < K; k++) if (tr.present[k] && uids[k] >= 0) now.set(uids[k], k);
+        const cardUid = new Array(K).fill(-1);
+        for (let c = 0; c < K; c++) if (old[c] >= 0 && now.has(old[c])) cardUid[c] = old[c];
+        const kept = new Set(cardUid);
+        for (const u of now.keys()) {
+          if (kept.has(u)) continue;
+          const c = cardUid.indexOf(-1);           // always one free: at most K neighbours
+          cardUid[c] = u; this.sm[c] = 0;          // a newcomer fades its bar in
+        }
+        this.cardUid = cardUid;
+        cardUid.forEach((u, c) => { if (u >= 0) { slotOfCard[c] = now.get(u); cardOfSlot[now.get(u)] = c; } });
+      }
+      this.slotOfCard = slotOfCard; this.cardOfSlot = cardOfSlot;
+    }
+
+    /** Mean attention per card over the heads (0 for free cards); null before the first update. */
     attention() {
       const tr = this.tr;
       if (!tr || !tr.attn) return null;
       const K = this.ar.K, H = tr.attn.length, a = new Array(K).fill(0);
-      for (const h of tr.attn) for (let k = 0; k < K; k++) a[k] += h[k] / H;
+      for (let c = 0; c < K; c++) {
+        const s = this.slotOfCard[c];
+        if (s >= 0) for (const h of tr.attn) a[c] += h[s] / H;
+      }
       return a;
+    }
+
+    /** For the road overlay, by neighbour slot: eased attention, card number and focus slot. */
+    lineInfo() {
+      const K = this.ar.K, w = new Array(K).fill(0), label = new Array(K).fill(0);
+      for (let s = 0; s < K; s++) {
+        const c = this.cardOfSlot[s];
+        if (c >= 0) { w[s] = this.sm[c] || 0; label[s] = c + 1; }
+      }
+      const f = this.focus();
+      return { w, label, focus: f === null ? null : this.slotOfCard[f] };
+    }
+
+    /** Display-only easing (about 150 ms) of bar heights and line thicknesses; call every frame. */
+    animate(ts) {
+      const dt = this.animTs === null ? 16 : Math.max(0, Math.min(100, ts - this.animTs));
+      this.animTs = ts;
+      const tg = this.attTarget;
+      if (!tg) return;
+      const f = 1 - Math.exp(-dt / 50);
+      let moving = false;
+      for (let c = 0; c < tg.length; c++) {
+        const cur = this.sm[c] || 0, d = tg[c] - cur;
+        if (Math.abs(d) > 5e-4) { this.sm[c] = cur + d * f; moving = true; } else this.sm[c] = tg[c];
+      }
+      if (moving) this._paintAtt();
+    }
+
+    _paintAtt() {
+      const L = this.live, tr = this.tr, K = this.ar.K;
+      if (!L || !tr) return;
+      for (let c = 0; c < K; c++) {
+        const a = this.sm[c] || 0, on = this.slotOfCard[c] >= 0;
+        L.bars[c].setAttribute("height", (this.aH * a).toFixed(1));
+        L.bars[c].setAttribute("y", (this.aBase - this.aH * a).toFixed(1));  // grows up from the baseline
+        for (const l of [L.up[c], L.down[K + c]]) {
+          l.style.strokeWidth = (0.6 + 7 * a).toFixed(2);
+          l.style.strokeOpacity = on ? (0.2 + 0.8 * Math.min(1, a * 1.6)).toFixed(2) : "0.06";
+        }
+      }
     }
 
     /** Neighbour shown in the mini-network: hovered, else pinned, else the one with the most attention. */
@@ -327,7 +399,7 @@
       const a = this.attention();
       if (!a) return null;
       let best = null;
-      a.forEach((v, k) => { if (this.tr.present[k] && (best === null || v > a[best])) best = k; });
+      a.forEach((v, k) => { if (this.slotOfCard[k] >= 0 && (best === null || v > a[best])) best = k; });
       return best;
     }
 
@@ -380,7 +452,7 @@
       });
       // 2) neighbour cards
       const cardTop = 62, colW = (X1 - X0) / K, cw = colW - (narrow ? 3 : 5), cellH = narrow ? 9 : 10;
-      text(X0, cardTop - 7, narrow ? `Nachbarn (bis zu ${K}, nach Abstand)` : `Nachbarn: bis zu ${K} Autos in der Nähe, nach Abstand sortiert (je ${F} Zahlen)`, { fill: "var(--fg)", bold: true });
+      text(X0, cardTop - 7, narrow ? `Nachbarn (bis zu ${K})` : `Nachbarn: bis zu ${K} Autos in der Nähe (je ${F} Zahlen)`, { fill: "var(--fg)", bold: true });
       const rows = Math.ceil(F / 2), cardH = 16 + rows * cellH + 4;
       const colX = (k) => X0 + colW * (k + 0.5);
       for (let k = 0; k < K; k++) {
@@ -479,7 +551,8 @@
       this.refresh();
     }
 
-    update(tr, obsRow) { this.tr = tr; this.obs = obsRow; this.refresh(); }
+    /** uids: ids of the cars in the neighbour slots (Crossing.neighbourUids); optional. */
+    update(tr, obsRow, uids) { this.tr = tr; this.obs = obsRow; this._assign(tr, uids); this.refresh(); }
 
     refresh() {
       const L = this.live, tr = this.tr;
@@ -497,26 +570,22 @@
       if (tr) {
         L.ego.forEach((d, i) => fill(d, Math.tanh(tr.x[i])));
         L.ego2.forEach((d, i) => fill(d, Math.tanh(tr.x[i])));
+        this.attTarget = att ? att.slice() : new Array(K).fill(0);
         for (let k = 0; k < K; k++) {
-          const on = tr.present[k];
+          const sl = this.slotOfCard[k], on = sl >= 0;
           L.cards[k].style.opacity = on ? "1" : "0.35";
-          L.nb[k].forEach((d, f) => fill(d, on ? Math.tanh(tr.x[E + k * F + f]) : 0));
-          const a = att ? att[k] : 0;
-          L.bars[k].setAttribute("height", (this.aH * a).toFixed(1));
-          L.bars[k].setAttribute("y", (this.aBase - this.aH * a).toFixed(1));  // grows up from the baseline
-          L.pct[k].textContent = on ? `${Math.round(a * 100)} %` : "–";
-          for (const l of [L.up[k], L.down[K + k]]) {
-            l.style.strokeWidth = (0.6 + 7 * a).toFixed(2);
-            l.style.strokeOpacity = on ? (0.2 + 0.8 * Math.min(1, a * 1.6)).toFixed(2) : "0.06";
-          }
+          L.nb[k].forEach((d, f) => fill(d, on ? Math.tanh(tr.x[E + sl * F + f]) : 0));
+          if (this.sm[k] === undefined) this.sm[k] = this.attTarget[k];
+          L.pct[k].textContent = on ? `${Math.round(this.attTarget[k] * 100)} %` : "–";   // exact, not eased
           L.down[k].style.strokeOpacity = on ? "0.55" : "0.12";
           const card = this.els[`card:${k}`];
           card.style.stroke = k === foc ? "var(--c4)" : "rgba(128,128,128,0.55)";
           card.style.strokeWidth = k === foc ? "2.2" : "1";
         }
-        const on = foc !== null && tr.present[foc];
-        L.phi[0].forEach((d, f) => fill(d, on ? Math.tanh(tr.x[E + foc * F + f]) : 0));
-        for (let l = 1; l < L.phi.length; l++) L.phi[l].forEach((d, j) => fill(d, on ? tr.phi[foc][l - 1][j] : 0));
+        this._paintAtt();
+        const fsl = foc === null ? -1 : this.slotOfCard[foc], on = fsl >= 0;
+        L.phi[0].forEach((d, f) => fill(d, on ? Math.tanh(tr.x[E + fsl * F + f]) : 0));
+        for (let l = 1; l < L.phi.length; l++) L.phi[l].forEach((d, j) => fill(d, on ? tr.phi[fsl][l - 1][j] : 0));
         this.focusTxt.textContent = on ? `${this.W < 460 ? "" : "zeigt gerade: "}Nachbar ${foc + 1}` : this.W < 460 ? "niemand da" : "gerade kein Nachbar in Sicht";
         L.mix.forEach((d, j) => fill(d, Math.tanh(tr.pooled[j])));
         L.trunk.forEach((ds, l) => ds.forEach((d, j) => fill(d, tr.trunk[l][j])));
@@ -556,7 +625,7 @@
       if (kind === "ego") { const it = this.ownItems[+a]; return it ? `Ich · ${it.group} · ${it.label}: ${fmt(it)}` : ""; }
       const k = +a;
       if (kind === "nb" || kind === "card" || kind === "att") {
-        if (tr && !tr.present[k]) return `Nachbar ${k + 1}: gerade niemand in Sicht (zählt nicht mit)`;
+        if (tr && this.slotOfCard[k] < 0) return `Nachbar ${k + 1}: gerade niemand in Sicht (zählt nicht mit)`;
         const items = this.nbItems[k] || [];
         if (kind === "nb") {
           const it = items[+b];
@@ -564,11 +633,11 @@
         }
         const by = (key) => items.find((it) => it.key.endsWith("_" + key));
         const pos = by("fwd") && by("left") ? ` · ${fmt(by("fwd"))} vor, ${fmt(by("left"))} links von mir · ${fmt(by("speed"))}` : "";
-        const heads = tr && tr.attn ? ` (${tr.attn.length} „Köpfe“: ${tr.attn.map((h) => Math.round(h[k] * 100) + " %").join(", ")})` : "";
+        const sl = this.slotOfCard[k], heads = tr && tr.attn && sl >= 0 ? ` (${tr.attn.length} „Köpfe“: ${tr.attn.map((h) => Math.round(h[sl] * 100) + " %").join(", ")})` : "";
         return `Nachbar ${k + 1}: Aufmerksamkeit ${att ? Math.round(att[k] * 100) : 0} %${heads}${pos}`;
       }
       if (kind === "phi") {
-        const f = this.focus(), v = tr && f !== null && tr.present[f] ? (+a === 0 ? Math.tanh(tr.x[E + f * F + +b]) : tr.phi[f][+a - 1][+b]) : null;
+        const f = this.focus(), fsl = f === null ? -1 : this.slotOfCard[f], v = tr && fsl >= 0 ? (+a === 0 ? Math.tanh(tr.x[E + fsl * F + +b]) : tr.phi[fsl][+a - 1][+b]) : null;
         const what = +a === 0 ? `Eingang „${NB_SHORT[(this.nbItems[0][+b] || { key: "" }).key.split("_").slice(1).join("_")] || +b + 1}“` : `Schicht ${a}, Neuron ${+b + 1}`;
         return `Mini-Netz · ${what}${v !== null ? ` = ${sgn(v)} (für Nachbar ${f + 1})` : ""}`;
       }
