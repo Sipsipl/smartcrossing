@@ -17,11 +17,11 @@ Links kommen die Sensorwerte rein, rechts kommen Gas, Lenkung und Lampe raus. Da
 
 <div class="brain-pick" id="brain-pick-box" hidden><span class="muted small">Gehirn:</span> <div class="seg" role="radiogroup" aria-label="Welches Gehirn" id="brain-pick"></div></div>
 
-<div class="sim-layout wide-panel">
+<div class="sim-layout wide-panel big" id="brain-layout">
   <section id="stage" aria-label="Live-Simulation"></section>
   <aside class="panel">
     <div class="group" id="brainnote">
-      <div id="selhead"></div>
+      <div class="brain-head"><div id="selhead"></div><button type="button" class="btn" id="brain-big" aria-pressed="true">Klein anzeigen</button></div>
       <div class="brain-box"><canvas id="net" aria-label="Netzdiagramm mit Live-Aktivierungen"></canvas><div id="setnet" hidden></div></div>
       <div class="tip" id="tip">Fahre mit der Maus über einen Kreis (oder tippe darauf).</div>
       <div class="legend small">

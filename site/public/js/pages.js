@@ -446,6 +446,12 @@
       }));
       $("brain-pick-box").hidden = false;
     }
+    const bigBtn = $("brain-big"), lay = $("brain-layout");
+    if (bigBtn && lay) bigBtn.addEventListener("click", () => {
+      const big = lay.classList.toggle("big");
+      bigBtn.textContent = big ? "Klein anzeigen" : "Groß anzeigen";
+      bigBtn.setAttribute("aria-pressed", String(big));
+    });
     describeBrain();
     window.__sc = cx;
   }

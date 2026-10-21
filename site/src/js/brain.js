@@ -78,20 +78,22 @@
       const W = Math.max(280, box.width);
       const narrow = W < 520;
       const groups = this.layout.groups;
-      const row = narrow ? 11 : 12.5, gap = narrow ? 5 : 7;
-      const H = Math.round(this.sizes[0] * row + (groups.length - 1) * gap + 30);
+      const s = narrow ? 1 : Math.max(1, Math.min(1.7, W / 640));   // enlarged view: scale rows, dots and text
+      this.s = s;
+      const row = (narrow ? 11 : 12.5) * s, gap = (narrow ? 5 : 7) * s;
+      const H = Math.round(this.sizes[0] * row + (groups.length - 1) * gap + 30 * s);
       this.canvas.style.height = H + "px";
       this.canvas.width = Math.round(W * dpr);
       this.canvas.height = Math.round(H * dpr);
       this.W = W; this.H = H; this.dpr = dpr; this.narrow = narrow;
       // node positions
-      const labelW = narrow ? 92 : 170, outLabelW = narrow ? 64 : 120;
+      const labelW = narrow ? 92 : 170 * s, outLabelW = narrow ? 64 : 120 * s;
       const x0 = labelW, x3 = W - outLabelW;
       const xs = this.sizes.map((_, k) => x0 + ((x3 - x0) * k) / (this.sizes.length - 1));
       const pos = [];
       // inputs: grouped rows
       const inp = [];
-      let y = 15;
+      let y = 15 * s;
       this.groupY = [];
       groups.forEach((g, gi) => {
         const yStart = y;
@@ -103,7 +105,7 @@
       for (let k = 1; k < this.sizes.length; k++) {
         const n = this.sizes[k], list = [];
         const last = k === this.sizes.length - 1;
-        const top = last ? H * 0.3 : 15, bot = last ? H * 0.7 : H - 15;
+        const top = last ? H * 0.3 : 15 * s, bot = last ? H * 0.7 : H - 15 * s;
         for (let j = 0; j < n; j++) list.push([xs[k], n === 1 ? (top + bot) / 2 : top + ((bot - top) * j) / (n - 1)]);
         pos.push(list);
       }
@@ -148,7 +150,7 @@
           }
           if (this.hoverN && !this._touches(this.hoverN, li, e)) alpha *= 0.25;
           ctx.strokeStyle = `rgba(${col[0]},${col[1]},${col[2]},${alpha.toFixed(3)})`;
-          ctx.lineWidth = 0.6 + 1.6 * e.n;
+          ctx.lineWidth = (0.6 + 1.6 * e.n) * Math.sqrt(this.s || 1);
           ctx.beginPath();
           ctx.moveTo(A[e.i][0], A[e.i][1]);
           ctx.lineTo(B[e.o][0], B[e.o][1]);
@@ -157,7 +159,7 @@
       }
       // nodes
       for (let k = 0; k < this.pos.length; k++) {
-        const r = k === 0 ? (this.narrow ? 3.6 : 4.3) : k === this.pos.length - 1 ? 9 : (this.narrow ? 4.2 : 5);
+        const r = (k === 0 ? (this.narrow ? 3.6 : 4.3) : k === this.pos.length - 1 ? 9 : (this.narrow ? 4.2 : 5)) * (this.s || 1);
         this.pos[k].forEach(([x, y], j) => {
           const a = tr ? tr[k][j] : 0;
           ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI);
@@ -170,7 +172,9 @@
       }
       // labels
       ctx.fillStyle = muted;
-      ctx.font = `${this.narrow ? 11 : 12.5}px ui-sans-serif, system-ui, sans-serif`;
+      const S = this.s || 1;
+      const fnt = (n, nr, f) => `${(this.narrow ? nr : n) * S}px ${f || "ui-sans-serif, system-ui, sans-serif"}`;
+      ctx.font = fnt(12.5, 11);
       ctx.textBaseline = "middle"; ctx.textAlign = "right";
       const lx = this.pos[0][0][0] - 10;
       for (const g of this.groupY) {
@@ -186,19 +190,19 @@
       const names = this.layout.actions;
       ctx.fillStyle = fg;
       outs.forEach(([x, y], j) => {
-        ctx.fillText((this.narrow ? (names[j] || "").replace("Gas / Bremse", "Gas") : names[j]) || `Ausgang ${j + 1}`, x + 14, y - (tr ? 7 : 0));
+        ctx.fillText((this.narrow ? (names[j] || "").replace("Gas / Bremse", "Gas") : names[j]) || `Ausgang ${j + 1}`, x + 14 * S, y - (tr ? 7 * S : 0));
         if (tr) {
           ctx.fillStyle = muted;
-          ctx.font = `${this.narrow ? 11 : 12}px ui-monospace, Menlo, monospace`;
-          ctx.fillText((tr[tr.length - 1][j] >= 0 ? "+" : "") + tr[tr.length - 1][j].toFixed(2), x + 14, y + 8);
-          ctx.font = `${this.narrow ? 11 : 12.5}px ui-sans-serif, system-ui, sans-serif`;
+          ctx.font = fnt(12, 11, "ui-monospace, Menlo, monospace");
+          ctx.fillText((tr[tr.length - 1][j] >= 0 ? "+" : "") + tr[tr.length - 1][j].toFixed(2), x + 14 * S, y + 8 * S);
+          ctx.font = fnt(12.5, 11);
           ctx.fillStyle = fg;
         }
       });
       // column captions
-      ctx.fillStyle = muted; ctx.textAlign = "center"; ctx.font = `11px ui-sans-serif, system-ui, sans-serif`;
+      ctx.fillStyle = muted; ctx.textAlign = "center"; ctx.font = `${11 * S}px ui-sans-serif, system-ui, sans-serif`;
       const caps = ["Eingänge", "Schicht 1", "Schicht 2", "Ausgänge"];
-      this.pos.forEach((col, k) => ctx.fillText(this.narrow && k === 0 ? "" : caps[k] || "", col[0][0], this.H - 6));
+      this.pos.forEach((col, k) => ctx.fillText(this.narrow && k === 0 ? "" : caps[k] || "", col[0][0], this.H - 6 * S));
     }
 
     _touches(h, li, e) {
@@ -209,7 +213,7 @@
     _hover(ev) {
       const r = this.canvas.getBoundingClientRect();
       const mx = ev.clientX - r.left, my = ev.clientY - r.top;
-      let best = null, bd = 12;
+      let best = null, bd = 12 * (this.s || 1);
       this.pos.forEach((col, k) => col.forEach(([x, y], j) => {
         const d = Math.hypot(x - mx, y - my);
         if (d < bd) { bd = d; best = [k, j]; }
@@ -329,11 +333,13 @@
 
     build() {
       const host = this.host, ar = this.ar, K = ar.K, F = ar.F, E = ar.n_ego;
-      const W = Math.max(300, Math.round(host.getBoundingClientRect().width || 300));
-      this.W = W;
+      const hostW = Math.max(300, Math.round(host.getBoundingClientRect().width || 300));
+      this.W = hostW;
+      const W = Math.min(hostW, 700);                      // design width; wider hosts just scale the drawing up
+      const shown = Math.min(hostW, 1000);                 // displayed width (enlarged view)
       const narrow = W < 460, fs = narrow ? 11 : 12;
       host.innerHTML = "";
-      const svg = svgEl("svg", { width: W, class: "setnet", role: "img", "aria-label": "Aufbau des Gehirns mit Live-Werten" }, host);
+      const svg = svgEl("svg", { width: shown, class: "setnet", role: "img", "aria-label": "Aufbau des Gehirns mit Live-Werten" }, host);
       const gE = svgEl("g", {}, svg), gL = svgEl("g", {}, svg), gN = svgEl("g", {}, svg), gT = svgEl("g", {}, svg);
       const els = (this.els = {});
       const live = (this.live = { ego: [], nb: [], cards: [], phi: [], bars: [], pct: [], down: [], up: [], mix: [], ego2: [], trunk: [], out: [], outTxt: [] });
@@ -467,7 +473,7 @@
         live.outTxt.push(text(x, y + 39, "", { anchor: "middle", size: narrow ? 10 : 11 }));
       });
       const H = outY + 46;
-      svg.setAttribute("height", H);
+      svg.setAttribute("height", Math.round(H * shown / W));
       svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
       this.lastFocus = undefined;
       this.refresh();
