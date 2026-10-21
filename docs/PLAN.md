@@ -121,7 +121,7 @@ crashes in the box; lamp unused so far.
    Same step: keep the start page's "Flackern (Störung)" slider (lamp noise, never used in training;
    an intervention tool: do cars rely on the lamp?) but explain it in one plain sentence (owner: option a).
 2. Refactoring step (due after rounds 2-4: set encoder + site build grew).
-2b. English (owner, 2026-10-21): the whole website in German AND English with a language toggle top
+2b. [done 2026-10-21] English (owner, 2026-10-21): the whole website in German AND English with a language toggle top
    right (DE/EN; remembers the choice, default by browser language, German stays the primary text);
    all page texts incl. the data-driven sentences in pages.js, labels from obs_labels, run notes,
    chart labels. README.md in English only. Do it after the refactoring step (site build is cleaner
