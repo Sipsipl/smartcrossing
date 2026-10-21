@@ -22,7 +22,9 @@
 
   /**
    * box: container element. opts: {series:[{name, color (css), points:[[x,y]], dash, width, dots}],
-   *   xLabel, yLabel, xMin, xMax, yMin, yMax, yFmt, xFmt, markers:[{x, label}], height, directLabels}
+   *   xLabel, yLabel, xMin, xMax, yMin, yMax, yFmt, xFmt, markers:[{x, label}], height, directLabels,
+   *   peaks:[{x, y, color, label}] (ringed maxima), clouds:[{color, points:[[x,y]], r, opacity}] (pale scatter behind the lines), compact (small chart: no legend)}
+   * Returns the svg; svg.scales = {X, Y} maps data to svg user units (to overlay live elements).
    */
   SCX.lineChart = function (box, opts) {
     box.innerHTML = "";
@@ -34,12 +36,12 @@
       sp.innerHTML = `<i class="line-key${s.dash ? " dash" : ""}" style="border-color:${s.color}"></i>${s.name}`;
       legend.appendChild(sp);
     }
-    if (opts.series.length > 1) box.appendChild(legend);
+    if (opts.series.length > 1 && !opts.compact) box.appendChild(legend);
     const W = Math.max(300, box.clientWidth || 600), H = opts.height || 260;
     const m = { l: 46, r: opts.directLabels ? 92 : 14, t: opts.phases && opts.phases.length ? 34 : 14, b: 40 };
     if (W < 420 && opts.directLabels) m.r = 14; // phone: legend only
-    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img", "aria-label": opts.aria || opts.yLabel || "Diagramm" }, box);
-    const all = opts.series.flatMap((s) => s.points);
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img", "aria-label": opts.aria || opts.yLabel || SCX.t("chart.fallback") }, box);
+    const all = [...opts.series, ...(opts.clouds || [])].flatMap((s) => s.points);
     const xMin = opts.xMin ?? Math.min(...all.map((p) => p[0])), xMax = opts.xMax ?? Math.max(...all.map((p) => p[0]));
     const yMin = opts.yMin ?? 0, yMax = opts.yMax ?? Math.max(...all.map((p) => p[1])) * 1.08;
     const X = (x) => m.l + ((x - xMin) / (xMax - xMin || 1)) * (W - m.l - m.r);
@@ -82,6 +84,11 @@
       const tx = el("text", { x: cx, y: cy + 4, "text-anchor": "middle" }, g); tx.textContent = String(ph.n);
       if (ph.title) { const ti = el("title", {}, g); ti.textContent = ph.title; }
     }
+    // scatter clouds (single measurements) behind the lines: pale dots
+    for (const cl of opts.clouds || []) {
+      const g = el("g", { class: "cloud", fill: cl.color, opacity: cl.opacity ?? 0.28 }, svg);
+      for (const p of cl.points) el("circle", { cx: X(p[0]).toFixed(1), cy: Y(p[1]).toFixed(1), r: cl.r ?? 2.4 }, g);
+    }
     const lastYs = [];
     for (const s of opts.series) {
       if (!s.points.length) continue;
@@ -99,6 +106,15 @@
         const t = el("text", { x: X(p[0]) + 8, y, "text-anchor": "start" }, svg); t.textContent = s.name;
       }
     }
+    for (const pk of opts.peaks || []) {
+      el("circle", { cx: X(pk.x), cy: Y(pk.y), r: 7, fill: "none", stroke: pk.color, "stroke-width": 2 }, svg);
+      if (pk.label) {
+        // left of the ring: the right side is where the direct label of the curve's last point sits
+        const t = el("text", { x: X(pk.x) - 10, y: Y(pk.y) - 9, "text-anchor": "end", class: "peak-label" }, svg);
+        t.textContent = pk.label;
+      }
+    }
+    svg.scales = { X, Y, m, W, H };
     // hover: crosshair + tooltip with the nearest point of every series
     const tip = document.createElement("div");
     tip.className = "chart-tip";

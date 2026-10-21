@@ -802,3 +802,48 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
   Best: r4_S_s1 -> results/round4_best.npz.
 - Next: S as the site's main brain (needs /gehirn view + build support for set brains); deadlock/timeouts in the
   box at high demand as the next problem (owner: rather a jam than a crash, but not a gridlock).
+
+## (G) Deadlock measurement (2026-10-21, no training; smartcrossing/deadlock.py, cli deadlock, runs/deadlock/)
+- Definition: car "stuck" = within 16 m of the centre and < 1.5 m net movement in 5 s; deadlock = >= 3 stuck
+  cars, >= 2 of them within 9 m (net movement, because cars rock at 0.3-1 m/s instead of standing). Light and
+  reservation: 0 deadlocks.
+- Sweep (round4 brain, 8 envs x 180 s, 3 seeds; thr/min, crash/1000, timeouts/1000, % time deadlocked; cars on
+  map): 0.15: 34.2, 5, 0, 1 %, 5.9 | 0.3: 54.8, 51, 14, 30 %, 18.7 | 0.4: 55.3, 90, 31, 53 %, 27.0 |
+  0.5: 52.6, 121, 36, 63 %, 28.9. Reservation 34.5 / 66.5 / 84.4 / 91.0, light 26-31. Round-2 MLP flattens at ~34
+  and is deadlocked 57-69 % from 0.3 on. Fundamental-diagram data: results/deadlock_fundamental.json.
+- At 0.5: ~240 deadlocks/h, chained (64 % re-form within 10 s; spells median 19 s, p90 51 s); 93 % end by a car
+  moving off, 3 % timeout, 3 % crash. Constellation: 2-3 cars from 2 arms, straight and left only, blocked by
+  crossing/oncoming cars; clean 4-way cycles rare (3 % 3-cycles, 12 % face-to-face); 29 % with a wreck in the box.
+- Action noise in evaluation does NOT dissolve them (trained std makes it worse): physical interlocks in an
+  overfilled box, not symmetric standoffs. Lamp acts as a "where am I" signal (+0.63 approach, -0.84 stuck), does
+  not predict who goes first; zeroing it halves deadlocks but doubles crashes (used for caution).
+- Incentives (training reward, gamma 0.99 ~ 10 s horizon): waiting until max_age removal -1.8, discounted ~ -0.2
+  to -0.3, vs crash -5.1 to -7.5; going ahead pays only below ~12 % crash risk -> deadlocking is the cheapest.
+- Hypotheses: (1) out of training range + no admission control (box overfills); (2) waiting nearly free (short
+  horizon, cheap max_age removal); (3) no memory. Ruled out: symmetry breaking, lamp.
+
+## Round 5: (G) step 4 - dense traffic, costly waiting, crash cost x6 (2026-10-21)
+- All arms continue r4_S_s1 (`--init`, set/attention K=8, obstacles 0.5), 12 min each, 2 seeds (DWX: 1 seed,
+  GPU window ended; K_s1 stopped after ~10 min). K = control (demand 0.15-0.3); D = demand 0.05-0.5; DW = D +
+  r_timeout -4.5 (= crash base); DWX = DW + crash/off-road cost x6.
+- CAVEAT: equal wall time != equal updates. Dense traffic makes iterations ~3x slower (K 2 s/it, D-family
+  6-8 s/it): K got 294/340 iterations, D/DW/DWX 87-124. The D-family is undertrained relative to K.
+- Result (evalset + deadlock sweep, 3 seeds; thr/min / crash+off per 1000 / timeouts per 1000 / % deadlocked;
+  mean over seeds; results/round5_eval.jsonl, results/round5_deadlock.jsonl):
+
+  | arm | 0.15 | 0.3 | 0.4 | 0.5 | gate |
+  |---|---|---|---|---|---|
+  | r4 ref | 33.5/7/0/2 | 52.6/46/7/27 | 53.5/94/23/48 | 51.0/120/32/55 | 0.99 |
+  | K | 33.9/4/1/2 | 63.1/9/1/6 | 71.6/46/10/25 | 70.0/88/18/42 | 0.71, 0.69 |
+  | D | 33.3/6/5/3 | 50.9/19/28/28 | 48.9/44/73/50 | 46.2/37/112/58 | 0.77, 0.72 |
+  | DW | 33.4/7/3/3 | 55.1/18/13/19 | 55.2/33/40/43 | 54.0/45/57/53 | 0.71, 0.94 |
+  | DWX (1 seed) | 33.1/8/1/3 | 54.5/17/17/23 | 52.0/23/53/45 | 51.4/29/70/53 | 0.81 |
+
+- Reading: plain continued training (K) raises capacity clearly (peak ~72/min, stays ~70 at 0.5), crashes at
+  0.3 down 5x, deadlock time roughly halved; but large seed spread at 0.5 (crash 46 vs 129) and the STOP GATE
+  DECAYS during continued training (K_s1: 1.0 at it 225 -> 0.71 at 375+); earlier checkpoints keep the gate but
+  lose most traffic gains. D/DW/DWX trade crashes for timeouts/deadlocks at r4-level throughput (confounded by
+  fewer updates). No new best brain (gate < 0.95).
+- Next: (1) equal-UPDATES comparison (fixed iterations, not minutes) for K vs D; (2) keep the stop skill while
+  training on: more obstacle envs and/or periodic gate-based checkpoint selection (gate >= 0.95 as a hard
+  filter); (3) longer runs.

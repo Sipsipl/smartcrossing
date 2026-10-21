@@ -62,7 +62,7 @@ SOURCE = {"kind": "runs", "manifest": None, "runs": set()}  # set in main(): "ru
 FOUND = {}  # discovered checkpoints (set in main(); init_of matches transplanted warm starts against it)
 MP_START = "fork" if "fork" in mp.get_all_start_methods() else "spawn"  # Windows has no fork
 
-DEMANDS = [0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 1.0]  # up to the start page slider maximum
+DEMANDS = [0.05, 0.1, 0.15, 0.2, 0.3, 0.5]  # up to the start page slider maximum (0.5 /s/arm = 120 cars/min)
 # the site's main brain (wide crossing) and the end of the older line whose training history is
 # shown before it (narrow crossing); override with --main / --history
 # Checkpoints are named <run>/<file stem> (found in runs/ or in the snapshot); a path to an
@@ -200,11 +200,137 @@ STEP_INFO = {
 }
 
 
+# English names / notes of the runs: run id -> (label, note); same keys as RUN_INFO.
+RUN_INFO_EN = {
+    "es1": ("Evolution, attempt 1: standing still",
+            "Dead end: the cars learned to just stand still – standing cost nothing, crashes did."),
+    "es2": ("Evolution, attempt 2: standing now costs",
+            "First success: cars drive to their goal, but turning right never works (they all end up on the curb)."),
+    "es3": ("Evolution, attempt 3: trying more",
+            "Bigger random changes: hardly any progress, the right turn stays the problem."),
+    "es4": ("Evolution, attempt 4: blocking the entrance",
+            "Dead end: the cars blocked the entrance – a car that never enters can't crash."),
+    "es5": ("Evolution, attempt 5: measuring progress along the road",
+            "Progress is measured along the road and waiting cars lose points: now all three directions mostly work."),
+    "ppo1a": ("PPO attempt 1: creeping",
+              "Dead end: the cars only crawl along and hardly ever arrive."),
+    "ppo1b": ("PPO attempt 1b: learning faster",
+              "Dead end: bigger learning steps – the cars still stand still."),
+    "ppo2": ("PPO attempt 2: wrong exit",
+             "Dead end: over half simply take the most convenient exit, because the wrong exit was cheaper than turning."),
+    "ppo3": ("PPO attempt 3: tougher penalties",
+             "Dead end: bigger penalty for crashes – the cars still take the wrong exit."),
+    "ppo4": ("PPO attempt 4: more cars per round",
+             "Dead end: more simulations per round – the same wrong-exit problem."),
+    "ppo5": ("PPO attempt 5: wrong exit costs more",
+             "The wrong exit costs more now – but most cars end up on the curb instead."),
+    "ppo6": ("More points for progress",
+             "Breakthrough: twice the points for every metre towards the exit – most cars arrive."),
+    "ppo7": ("PPO attempt 7: starting fresh",
+             "Same settings as “Calmer experimenting”, but learned from scratch; ends at the same point."),
+    "ppo8": ("Calmer experimenting",
+             "Less random twitching while practising. Good in light traffic, but it only practised on nearly empty roads."),
+    "ppo9": ("Dense traffic while practising",
+             "Practising with many more cars at once: encounters get more frequent, crashes drop clearly."),
+    "ppo10": ("PPO attempt 10: crashes twice as costly",
+              "No gain, stopped early."),
+    "ppo11": ("PPO attempt 11: looking further (60 m)",
+              "The cars see others from 60 instead of 30 m – needed time to adjust, no clear gain."),
+    "ppo12": ("PPO attempt 12: crashes 2.5 times as costly",
+              "Slightly more braking, but no fewer crashes."),
+    "ppo13": ("Fine-tuning with smaller learning steps",
+              "Smaller learning steps: slowly but steadily fewer crashes."),
+    "ppo14": ("PPO attempt 14: 60 m view, from scratch",
+              "Dead end: the far-away cars flood the brain with big numbers – everyone ends up on the curb."),
+    "ppo15": ("PPO attempt 15: 60 m view, scaled properly",
+              "Learns just as well as with 30 m – the viewing distance was not the problem."),
+    "ppo16": ("PPO attempt 16: target speed instead of gas pedal",
+              "The brain picks a target speed instead of gas/brake. More careful at first, equally good in the end."),
+    "ppo17": ("Even finer, more foresight",
+              "Even smaller learning steps and a longer look at the consequences: the best result on the old, narrow crossing."),
+    "wide_s1": ("Wide crossing: learned anew",
+                "New crossing: roads twice as wide, tyres slip in corners taken too fast. Learned from scratch."),
+    "wide_s1r": ("Wide crossing: with reverse gear",
+                 "The cars may now also drive backwards – but they hardly ever do."),
+    "wide_s1ft": ("Wide crossing: fine-tuning",
+                  "Smaller learning steps: fewer crashes."),
+    "wide_s1ft2": ("Wide crossing: fine-tuning for longer",
+                   "Another hour of fine-tuning: only a little better – the main brain before round 1."),
+    "r1_x3": ("Round 1: new rules, old brain keeps learning",
+              "New rules: wrecks with hazard lights, brake light, one lamp, entering only from the right. The old brain keeps learning, crashes now cost three times as much."),
+    "r1_main_x3": ("Round 1: learned for longer",
+                   "About 40% fewer crashes than the brain before, but still many in dense traffic – the main brain before round 2."),
+    "r2_B_s1": ("Round 2: practised with obstacles",
+                "Wrecks and parked cars stood in the way during training: it brakes behind them far more often and queues up instead of driving into them – the main brain before round 4."),
+    "r2_A_s1": ("Round 2, test: just more experimenting",
+                "Without obstacles in training: already clearly fewer crashes than before, but far less safe around obstacles."),
+    "r2_A_s2": ("Round 2, test: just more experimenting, second run",
+                "Different random start, almost the same result."),
+    "r2_C_s1": ("Round 2, test: crashes penalised by own speed",
+                "With obstacles and a speed-dependent penalty: slightly worse than without the penalty (not certain from one run)."),
+    "r3_B_long": ("Round 3: obstacle brain trained for longer",
+                  "Kept learning: hardly any fewer crashes – more of the same didn't help."),
+    "r2_B_s2": ("Round 2: with obstacles, second run",
+                "Same recipe, different random start: clearly more crashes – the first run was also lucky."),
+    "r2_C_s2": ("Round 2, test: speed-dependent penalty, second run",
+                "Confirmed: with the speed-dependent penalty there are more crashes in dense traffic."),
+    "r4_S_s1": ("Round 4: a mini-network for every neighbour + attention",
+                "The current brain: looks at up to 8 neighbours, each goes through the same small network, then an “attention” decides who matters right now. "
+                "It first imitated the previous brain, then kept learning for 12 minutes."),
+    "r4_S_s2": ("Round 4: mini-network + attention, second run",
+                "Different random start, similarly good – but in very dense traffic more cars get stuck in the middle of the crossing."),
+    "r4_M_s1": ("Round 4, comparison: previous network trained further",
+                "Trained further for the same time (12 minutes) with the previous network (64 × 64): not better than before, rather more crashes in dense traffic."),
+    "r4_M_s2": ("Round 4, comparison: previous network, second run",
+                "Different random start, similar."),
+    "r4_W_s1": ("Round 4, comparison: network twice as wide",
+                "More neurons (128 × 128) help too – but not as much as the mini-network per neighbour."),
+    "r4_W_s2": ("Round 4, comparison: wide network, second run",
+                "Different random start, similar."),
+    "r1_x1": ("Round 1, test: crashes as costly as before",
+              "Short test: about as good as with triple penalty – the difference is chance."),
+    "r1_x10": ("Round 1, test: crashes ten times as costly",
+               "Short test: too much penalty – fewer cars get through, and crashes aren't any rarer."),
+    "wide_s0": ("Wide crossing, second run",
+                "Same recipe, different random start (still without reverse gear)."),
+    "wide_s0r": ("Second run: with reverse gear",
+                 "Different random start, kept learning with reverse gear."),
+    "wide_s0ft": ("Second run: fine-tuning",
+                  "Different random start, fine-tuned the same way: also drives on the right, a few more crashes."),
+    "wide_noman_s0": ("Without turn wish",
+                      "The cars aren't told whether they want to go left, right or straight – only where the goal is. Learns more slowly."),
+}
+
+# English version of STEP_INFO (same keys).
+STEP_INFO_EN = {
+    "es2": "Start with a random brain; standing still costs points → the cars set off, but turning right ends on the curb",
+    "es3": "Bigger random changes → hardly any progress",
+    "es5": "Progress is measured along the road, waiting costs → all three directions mostly work",
+    "ppo6": "Start from zero; points for every metre towards the goal → most cars arrive",
+    "ppo8": "Calmer experimenting, less twitching → good, but only practised on nearly empty roads",
+    "ppo9": "Practising with much denser traffic → the curve drops at first because it gets harder; then fewer crashes",
+    "ppo13": "Smaller learning steps → steadily better; towards the end even more traffic, so slightly more crashes again",
+    "ppo17": "Even smaller steps, more look at the consequences → best result on the old, narrow crossing",
+    "wide_s1": "New crossing: road twice as wide, tyres slip in corners taken too fast → learned from scratch, the curve starts low again",
+    "wide_s1r": "Reverse gear added → hardly used, it keeps climbing",
+    "wide_s1ft": "Smaller learning steps → fewer crashes",
+    "wide_s1ft2": "Fine-tuning for longer → only a little better: the main brain up to round 1",
+    "r1_x3": "New rules: wrecks with hazard lights, brake light, one lamp, entering only from the right; crashes cost three times as much, practising with denser traffic → the curve drops at first, then the old brain relearns",
+    "r1_main_x3": "Kept learning for longer → about 40% fewer crashes than before: the main brain up to round 2",
+    "r2_B_s1": "Plus obstacles in training (wrecks, parked cars) → brakes behind them far more often and queues up; still crashes in the middle of the crossing in dense traffic",
+    "r4_S_s1": "New brain: one shared mini-network for each of the up to 8 neighbours plus attention; first imitated the previous brain, then kept learning → fewest crashes in the comparison (trained for the same time as the previous one and a network twice as wide)",
+}
+
+
 def run_info(run: str | None) -> dict:
+    """Names / notes of a run for the pages: German in label / note / step, English in *_en."""
     short, label, note = RUN_INFO.get(run, (run, run, None)) if run else (None, None, None)
-    return {"short": short, "label": label, "note": note, "step": STEP_INFO.get(run) if run else None}
+    label_en, note_en = RUN_INFO_EN.get(run, (label, None)) if run else (None, None)
+    return {"short": short, "label": label, "label_en": label_en, "note": note, "note_en": note_en,
+            "step": STEP_INFO.get(run) if run else None, "step_en": STEP_INFO_EN.get(run) if run else None}
 
 
+# nav entries: (file, German label); the English labels are js/i18n-en.js nav.<file>
 PAGES = [
     ("index.html", "Start"),
     ("sehen.html", "Was sieht ein Auto?"),
@@ -480,7 +606,7 @@ def run_bench(entries: list[tuple[str, str, object, dict, list]], force: bool, w
     for key, kind, payload, physics, demands in entries:
         out.setdefault(key, {})
         for d in demands:
-            out[key][f"{d:g}"] = _mean_results([cache[_bench_ck(key, physics, d, sd, sim_src)] for sd in BENCH_SEEDS])  # as JS String(d): "1" for 1.0
+            out[key][f"{d:g}"] = _mean_results([cache[_bench_ck(key, physics, d, sd, sim_src)] for sd in BENCH_SEEDS])  # as JS String(d)
     return out
 
 
@@ -784,17 +910,21 @@ LOGO = (
 
 
 def header_html(current: str) -> str:
+    """Header: logo, page links and the DE / EN toggle (js/i18n.js)."""
     items = []
     for href, label in PAGES:
         cur = ' aria-current="page"' if href == current else ""
-        items.append(f'<a href="{href}"{cur}>{label}</a>')
-    nav = '<nav class="nav" aria-label="Seiten">' + "".join(items) + "</nav>"
-    return f'<header class="top"><a class="brand" href="index.html">{LOGO}Smart Crossing</a>{nav}</header>'
+        items.append(f'<a href="{href}"{cur} data-i18n="nav.{href[:-5]}">{label}</a>')
+    nav = '<nav class="nav" aria-label="Seiten" data-i18n-attr="aria-label=nav.aria">' + "".join(items) + "</nav>"
+    lang = ('<div class="lang" role="group" aria-label="Sprache / Language">'
+            '<button type="button" data-lang="de" aria-pressed="true" lang="de">DE</button>'
+            '<button type="button" data-lang="en" aria-pressed="false" lang="en">EN</button></div>')
+    return f'<header class="top"><a class="brand" href="index.html">{LOGO}Smart Crossing</a>{nav}{lang}</header>'
 
 
 REPO = "https://github.com/Sipsipl/smartcrossing"
 FOOTER = (
-    '<footer>Smart Crossing – ein Hobbyprojekt. Alles läuft direkt in deinem Browser, '
+    '<footer data-i18n="footer">Smart Crossing – ein Hobbyprojekt. Alles läuft direkt in deinem Browser, '
     'es werden keine Daten gesammelt. Stand: {built}. '
     f'<a href="{REPO}">Code auf GitHub</a></footer>'
 )
@@ -886,7 +1016,7 @@ def collect(found: dict, a) -> dict:
         c = found[cid]
         if cid not in policies:
             policies[cid] = {
-                "id": cid, "run": c["run"], "run_label": run_info(c["run"])["label"], "file": c["file"], "method": c["method"], "gen": c["gen"],
+                "id": cid, "run": c["run"], "run_label": run_info(c["run"])["label"], "run_label_en": run_info(c["run"])["label_en"], "file": c["file"], "method": c["method"], "gen": c["gen"],
                 "physics": c["physics"], "adapted": c["adapted"], "policy": Brain(c["policy"]).rounded(4),
                 "bench": {},
             }
@@ -974,6 +1104,40 @@ def bench(found: dict, sel: dict, cfg: SimConfig, a) -> dict:
     return {"baselines_by_world": by_world, "main_world": main_world, "base_phys": base_worlds[main_world]}
 
 
+FUNDAMENTAL = ROOT / "results" / "deadlock_fundamental.json"
+FUNDAMENTAL_DRIVERS = ("brain", "light", "reservation")  # curves of the fundamental diagram on the site
+START_DEMAND_MAX = 0.5  # max of the start page demand slider
+FUNDAMENTAL_FIELDS = ("demand", "density", "throughput", "density_veh_per_km", "demand_per_min")
+
+
+def fundamental_data():
+    """Fundamental diagram (throughput vs cars on the map per driver and demand) from the deadlock study's
+    results/deadlock_fundamental.json, reduced to what the site plots; None if the file is missing."""
+    if not FUNDAMENTAL.exists():
+        return None
+    raw = json.loads(FUNDAMENTAL.read_text(encoding="utf-8"))
+    drivers = {k: [{f: p[f] for f in FUNDAMENTAL_FIELDS} for p in raw["drivers"][k]["points"]]
+               for k in FUNDAMENTAL_DRIVERS if k in raw["drivers"]}
+    out = {"drivers": drivers, "cloud": cloud_data()}
+    if "brain" in drivers:  # start value of the traffic slider = the brain's capacity: its maximum mean throughput
+        cap = max(p["throughput"] for p in drivers["brain"])
+        out["max_throughput"] = round(cap, 1)
+        out["start_demand"] = min(round(cap / 240, 2), START_DEMAND_MAX)  # cars/min -> arrivals /s/arm, slider step 0.01
+    return out
+
+
+CLOUD = ROOT / "results" / "fundamental_cloud.json"
+
+
+def cloud_data():
+    """Scatter cloud behind the fundamental diagram (single measured 60-s windows per driver, from
+    results/fundamental_cloud.json: [density, throughput] pairs); {} if the file is missing."""
+    if not CLOUD.exists():
+        return {}
+    raw = json.loads(CLOUD.read_text(encoding="utf-8"))
+    return {k: [[p[0], p[1]] for p in v["points"]] for k, v in raw["drivers"].items() if k in FUNDAMENTAL_DRIVERS}
+
+
 def write_site(found: dict, sel: dict, bres: dict, cfg: SimConfig, kind: str, a):
     """Write phase: site data (observation layouts, policies, curves, baselines, ...), the side-by-side
     replays, the snapshot (runs / merge) and the public/ folder."""
@@ -1008,6 +1172,7 @@ def write_site(found: dict, sel: dict, bres: dict, cfg: SimConfig, kind: str, a)
         # reward rules the main brain was trained with (from its checkpoint's training cfg; drawn on /lernen)
         "reward": reward_of(found[main_id]["policy"].get("cfg") or {}) if main_id else None,
         "demands": DEMANDS,
+        "fundamental": fundamental_data(),
         "bench_setup": {"envs": BENCH_ENVS, "seconds": BENCH_SECONDS, "seeds": len(BENCH_SEEDS)},
     }
     # side-by-side replays (same traffic) of the two rule-based drivers and the best policy

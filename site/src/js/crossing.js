@@ -8,7 +8,7 @@
   const SCX = (window.SCX = window.SCX || {});
 
   const MAN_COLOURS = { 1: "#4287f5", 2: "#f0f0f0", 3: "#f5a623" };
-  const MAN_NAMES = { 1: "rechts", 2: "geradeaus", 3: "links" };
+  const MAN_KEYS = { 1: "man.right", 2: "man.straight", 3: "man.left" };  // texts via SCX.t
   const TYPE_COLOURS = ["#22d3ee", "#ef4fd0", "#a3e635"];
   const SCENE = { verge: "#3b5640", road: "#46484d", edge: "#8d938f", gate: "rgba(255,255,255,0.35)", text: "rgba(255,255,255,0.85)" };
   const OVL = { ray: "#ffe066", hit: "#ff5d5d", nb: "#ffffff", goal: "#ff6bd5", vel: "#7fe3ff" };
@@ -20,7 +20,7 @@
   SCX.IFACE_KEYS = IFACE_KEYS;
 
   SCX.MAN_COLOURS = MAN_COLOURS;
-  SCX.MAN_NAMES = MAN_NAMES;
+  SCX.MAN_NAMES = (m) => SCX.t(MAN_KEYS[m]);
   SCX.TYPE_COLOURS = TYPE_COLOURS;
   SCX.OVL = OVL;
   SCX.lampRGB = (s0, s1) => `rgb(${Math.round(127 + 127 * clamp1(s0))},40,${Math.round(127 + 127 * clamp1(s1))})`;
@@ -386,7 +386,7 @@
         const u = W + 2.2, v = -L + 4;
         const [sx, sy] = toScreen(c * u - s * v, s * u + c * v);
         ctx.textAlign = k === 0 || k === 3 ? "left" : "right";
-        ctx.fillText(`+${q} warten`, sx, sy);
+        ctx.fillText(SCX.t("canvas.waiting", { q }), sx, sy);
       }
       const bx = 12 * dpr, by = S - 14 * dpr, len = 10 * px;
       ctx.fillRect(bx, by, len, 2 * dpr);
@@ -676,8 +676,8 @@
   SCX.layoutFor = function (cfg) {
     const D = window.SC_DATA;
     if (!D) return null;
-    if (!cfg) return D.layout;
-    return (D.layouts && D.layouts[SCX.ifaceKey(cfg)]) || null;
+    if (!cfg) return SCX.localizeLayout(D.layout);
+    return SCX.localizeLayout((D.layouts && D.layouts[SCX.ifaceKey(cfg)]) || null);
   };
 
   /** Observation entry {i, scale, unit, ...} by feature key for a sim config (see layoutFor), or null. */
@@ -733,7 +733,7 @@
     const lay = SCX.layoutFor(cfg) || (cfg && SCX.layoutFor());
     const dim = SC.obsDim(cfg);
     if (!lay || lay.dim !== dim || lay.own_dim !== SC.OBS_DIM || (lay.key && lay.key !== SCX.ifaceKey(cfg))) {
-      const msg = `Beschriftung passt nicht zum Simulator (Labels: ${lay && lay.dim}, sim.js: ${dim}). Bitte site/build.py neu laufen lassen.`;
+      const msg = SCX.t("layout.mismatch", { labels: lay && lay.dim, sim: dim });
       console.error(msg);
       return msg;
     }
@@ -765,7 +765,7 @@
         seg.append(inp, lab);
       }
     }
-    const upd = () => { if (play) play.textContent = cx.running ? "Pause" : "Weiter"; };
+    const upd = () => { if (play) play.textContent = SCX.t(cx.running ? "ui.pause" : "ui.resume"); };
     if (play) play.addEventListener("click", () => { cx.setRunning(!cx.running); upd(); });
     if (reset) reset.addEventListener("click", () => cx.reset());
     if (trails) trails.addEventListener("change", () => { cx.showTrails = trails.checked; cx.draw(); });
@@ -798,18 +798,13 @@
     const n = cx.selIndex(), sim = cx.sim;
     if (n < 0) {
       const f = cx.fate;
-      const txt = !f ? "Tippe ein Auto an, um es auszuwählen."
-        : f.kind === "exit" ? "Dein Auto ist angekommen. Gleich wird ein neues ausgewählt."
-          : f.kind === "crash" ? "Dein Auto hatte einen Unfall. Gleich wird ein neues ausgewählt."
-            : f.kind === "offroad" ? "Dein Auto ist von der Straße abgekommen. Gleich wird ein neues ausgewählt."
-              : f.kind === "wrong_exit" ? "Dein Auto hat die falsche Ausfahrt genommen."
-                : "Dein Auto hat zu lange gebraucht und wurde entfernt.";
+      const txt = SCX.t(!f ? "fate.none" : ["exit", "crash", "offroad", "wrong_exit"].includes(f.kind) ? "fate." + f.kind : "fate.timeout");
       el.innerHTML = `<div class="fate ${f && f.kind === "exit" ? "ok" : f ? "bad" : ""}">${txt}</div>`;
       return;
     }
     const ty = cx.typeOf(n);
     const g = sim.group[n] % TYPE_COLOURS.length;
     el.innerHTML = `<div class="sel-head"><span class="carbadge" style="background:${MAN_COLOURS[sim.man[n]]};border-color:${TYPE_COLOURS[g]}"></span>
-      <b>Auto Nr. ${sim.uid[n]}</b><span class="muted small">will ${MAN_NAMES[sim.man[n]] === "geradeaus" ? "geradeaus" : MAN_NAMES[sim.man[n]] + " abbiegen"} · ${(sim.v[n] * 3.6).toFixed(0)} km/h · ${sim.age[n].toFixed(1)} s unterwegs${ty && cx.types.length > 1 ? " · Gehirn: " + ty.name : ""}</span></div>`;
+      <b>${SCX.t("sel.car", { id: sim.uid[n] })}</b><span class="muted small">${SCX.t(sim.man[n] === 2 ? "sel.wants.straight" : "sel.wants.turn", { dir: SCX.t(MAN_KEYS[sim.man[n]]) })} · ${(sim.v[n] * 3.6).toFixed(0)} km/h · ${SCX.t("sel.age", { s: sim.age[n].toFixed(1) })}${ty && cx.types.length > 1 ? " · " + SCX.t("sel.brain", { name: ty.name }) : ""}</span></div>`;
   };
 })();

@@ -1,54 +1,54 @@
 # Smart Crossing
 
-<p align="center"><a href="https://smartcrossing.pages.dev"><img src="results/readme/crossing.gif" width="420" alt="Selbst lernende Autos überqueren eine Kreuzung ohne Ampeln"></a></p>
-<p align="center"><em>Ein Netz steuert alle Autos, ohne Ampel und Spuren (Farbe = Abbiegerichtung, doppelte Geschwindigkeit) – <a href="https://smartcrossing.pages.dev">live im Browser ausprobieren</a>.</em></p>
+<p align="center"><a href="https://smartcrossing.pages.dev"><img src="results/readme/crossing.gif" width="420" alt="Self-learning cars crossing an intersection without traffic lights"></a></p>
+<p align="center"><em>One network steers all the cars, with no traffic light and no lanes (colour = turning direction, double speed) – <a href="https://smartcrossing.pages.dev">try it live in your browser</a>.</em></p>
 
-**Live ansehen: https://smartcrossing.pages.dev**
+**Live demo: https://smartcrossing.pages.dev** (German and English, toggle top right)
 
-Eine Kreuzung ohne Ampeln, ohne Spuren und ohne Vorfahrtsregeln, über die nur selbstfahrende
-Autos fahren. Jedes Auto hat ein kleines neuronales Netz, sieht seine Umgebung (Fahrbahnrand,
-die nächsten Autos und deren Dachlampe) und lernt selbst, zu lenken, Gas zu geben, zu bremsen
-und mit seiner Lampe zu "sprechen". Was die Lampe bedeutet, ist nicht vorgegeben.
+A crossing with no traffic lights, no lanes and no right-of-way rules, used only by self-driving
+cars. Each car has a small neural network, senses its surroundings (road edge, the nearest cars
+and their roof lamps) and learns by itself to steer, accelerate, brake and "talk" with its lamp.
+What the lamp means is not predefined.
 
-Fragen, die das Projekt untersucht:
+Questions the project looks at:
 
-- Wie viele Autos pro Minute schaffen lernende Autos über eine regelfreie Kreuzung – und wie
-  oft krachen sie dabei?
-- Wie fahren sie, wenn sie auf der rechten Straßenhälfte starten (Rechtsverkehr ist vorgegeben)?
-- Entsteht über die Lampen eine Art Sprache? *(Bisher nein: die Lampen senden etwas, aber
-  niemand hört hin.)*
-- Was passiert, wenn unterschiedlich trainierte Autos gemeinsam fahren?
+- How many cars per minute can learning cars get through a rule-free crossing – and how often
+  do they crash while doing so?
+- How do they drive when they start in the right half of the road (driving on the right is given)?
+- Does a kind of language emerge through the lamps? *(So far no: the lamps send something, but
+  nobody listens.)*
+- What happens when differently trained cars drive together?
 
-Die Website erklärt Schritt für Schritt, was ein Auto sieht, was es tun kann, wie sein
-"Gehirn" aussieht und wie es lernt. Alles läuft direkt im Browser.
+The website explains step by step what a car sees, what it can do, what its "brain" looks like and
+how it learns. Everything runs directly in the browser.
 
-## Selbst ausprobieren
+## Try it yourself
 
-Voraussetzungen: Python 3.13 und [Poetry](https://python-poetry.org/).
+Requirements: Python 3.13 and [Poetry](https://python-poetry.org/).
 
 ```bash
 poetry install
-poetry run pytest -q                                                      # Tests
-poetry run python -m smartcrossing.cli bench --driver reservation --demand 0.15   # Kennzahlen
-poetry run python -m smartcrossing.cli render --driver light --out runs/light     # Bilder + GIF
-poetry run python -m smartcrossing.cli evalset --driver policy:results/round4_best.npz --out runs/eval.jsonl   # Standard-Auswertung
-poetry run python site/build.py                                          # Website bauen
-cd site/public && python3 -m http.server 8000                            # Website lokal ansehen
+poetry run pytest -q                                                      # tests
+poetry run python -m smartcrossing.cli bench --driver reservation --demand 0.15   # key figures
+poetry run python -m smartcrossing.cli render --driver light --out runs/light     # images + GIF
+poetry run python -m smartcrossing.cli evalset --driver policy:results/round4_best.npz --out runs/eval.jsonl   # standard evaluation
+poetry run python site/build.py                                          # build the website
+cd site/public && python3 -m http.server 8000                            # view the website locally
 ```
 
-## Aufbau
+## Structure
 
-| Pfad | Inhalt |
+| Path | Contents |
 |---|---|
-| `smartcrossing/sim.py` | Simulation der Kreuzung (numpy, viele Kreuzungen parallel) |
-| `smartcrossing/ppo.py` | Training mit PPO (optional auf der GPU: `poetry install --with gpu`, dann `--rollout-device cuda`; siehe `ppo_torch.py`, `sim_torch.py`) |
-| `smartcrossing/baselines.py` | Vergleichsfahrer mit Spuren: Ampel und zentraler Verkehrsrechner |
-| `smartcrossing/policy.py`, `policy_set.py` | das Gehirn: einfaches Netz (MLP) bzw. Netz mit Mini-Netz pro Nachbar + Aufmerksamkeit; `policy_compat.py` lädt alte Gehirne |
-| `smartcrossing/bc.py` | Nachahmen: ein neues Gehirn lernt erst vom alten (`ppo --init-bc`) |
-| `smartcrossing/gates.py` | Anhaltetest: hält ein Auto vor einem Hindernis an? |
-| `smartcrossing/evalset.py` | Standard-Auswertung (`cli evalset`): mehrere Verkehrsdichten und Zufalls-Seeds + Anhaltetest |
-| `site/` | die Website; `site/src/js/sim.js` ist die Browser-Version der Simulation |
-| `docs/PLAN.md` | Ziele, Entscheidungen, Architektur |
-| `docs/experiments.md` | Protokoll aller Trainingsläufe |
+| `smartcrossing/sim.py` | Simulation of the crossing (numpy, many crossings in parallel) |
+| `smartcrossing/ppo.py` | Training with PPO (optionally on the GPU: `poetry install --with gpu`, then `--rollout-device cuda`; see `ppo_torch.py`, `sim_torch.py`) |
+| `smartcrossing/baselines.py` | Reference drivers with lanes: traffic light and central traffic controller |
+| `smartcrossing/policy.py`, `policy_set.py` | the brain: plain network (MLP) or a network with a mini-network per neighbour + attention; `policy_compat.py` loads old brains |
+| `smartcrossing/bc.py` | Imitation: a new brain first learns from the old one (`ppo --init-bc`) |
+| `smartcrossing/gates.py` | Stopping test: does a car stop in front of an obstacle? |
+| `smartcrossing/evalset.py` | Standard evaluation (`cli evalset`): several traffic densities and random seeds + the stopping test |
+| `site/` | the website (German + English, `site/src/js/i18n*.js`); `site/src/js/sim.js` is the browser version of the simulation |
+| `docs/PLAN.md` | Goals, decisions, architecture |
+| `docs/experiments.md` | Log of all training runs |
 
-Ein Hobbyprojekt, entwickelt größtenteils mit [Claude Code](https://claude.com/claude-code).
+A hobby project, developed mostly with [Claude Code](https://claude.com/claude-code).

@@ -121,7 +121,7 @@ crashes in the box; lamp unused so far.
    Same step: keep the start page's "Flackern (Störung)" slider (lamp noise, never used in training;
    an intervention tool: do cars rely on the lamp?) but explain it in one plain sentence (owner: option a).
 2. Refactoring step (due after rounds 2-4: set encoder + site build grew).
-2b. English (owner, 2026-10-21): the whole website in German AND English with a language toggle top
+2b. [done 2026-10-21] English (owner, 2026-10-21): the whole website in German AND English with a language toggle top
    right (DE/EN; remembers the choice, default by browser language, German stays the primary text);
    all page texts incl. the data-driven sentences in pages.js, labels from obs_labels, run notes,
    chart labels. README.md in English only. Do it after the refactoring step (site build is cleaner
@@ -137,7 +137,10 @@ crashes in the box; lamp unused so far.
 4. (G) Deadlock fixes, one variable at a time with 2+ seeds each. First candidate: train with dense
    traffic too (curriculum so far only up to 0.3 /s/arm = ~72 cars/min; above ~80/min the brain breaks
    down - out of its training range): demand range up to 0.5 /s/arm (= the new slider max, 120/min),
-   compare with an arm up to 1.0 if cheap; keep sampling lower demands so normal traffic isn't forgotten. Goal: stay on the plateau above capacity instead of collapsing,
+   compare with an arm up to 1.0 if cheap; keep sampling lower demands so normal traffic isn't forgotten.
+   Second variable (owner, 2026-10-21: still too many crashes): crash/off-road cost x3 vs x6 with the
+   set brain (round 1 showed x10 worse, x1 = x3, but without obstacles/attention). Measure crashes,
+   throughput AND deadlocks/timeouts: a higher cost may trade crashes for gridlock. Goal: stay on the plateau above capacity instead of collapsing,
    then raise capacity towards the reservation's via emergent coordination (alternating streams,
    platoons, lamp negotiation).
 5. Then (D) norm experiments (lamp language, priority patterns) - (G) feeds directly into them.

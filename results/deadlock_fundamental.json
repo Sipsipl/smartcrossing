@@ -1,0 +1,1075 @@
+{
+ "meta": {
+  "density": "cars_map_mean = mean number of driving cars on the map (box + 4 arms of L = 50 m, both directions) per environment after a 30 s warm-up; density_veh_per_km = cars_map_mean / 0.2 km of road (4 x 50 m, both directions); cars_box_mean = cars within max(|x|,|y|) <= 16 m",
+  "throughput": "throughput_per_min = exits per minute over the whole run (as cli bench); throughput_steady_per_min = after the 30 s warm-up",
+  "demand": "demand (arrivals /s/arm, x 240 = cars/min); demand_per_min = measured arrivals",
+  "protocol": "8 envs x 180 s, traffic seeds [1000, 2000, 3000], default world (cli bench)",
+  "deadlock": "deadlock = >= 3 cars standing (|v| < 0.3 m/s) in the box zone for >= 5 s with no car driving out of the zone (smartcrossing/deadlock.py)"
+ },
+ "drivers": {
+  "light": {
+   "label": "light",
+   "points": [
+    {
+     "demand": 0.05,
+     "density": 3.189,
+     "throughput": 12.15,
+     "demand_per_min": 12.472,
+     "cars_map_mean": 3.189,
+     "cars_box_mean": 0.611,
+     "density_veh_per_km": 15.943,
+     "throughput_per_min": 11.333,
+     "throughput_steady_per_min": 12.15,
+     "queue_end_per_env": 0.04,
+     "timeouts_per_1000": 0.0,
+     "crash_cars_per_1000": 0.0,
+     "delay_mean_s": 7.552,
+     "deadlocks_per_hour": 0.0,
+     "deadlock_time_frac": 0.0,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.0
+    },
+    {
+     "demand": 0.1,
+     "density": 8.937,
+     "throughput": 22.95,
+     "demand_per_min": 24.625,
+     "cars_map_mean": 8.937,
+     "cars_box_mean": 1.175,
+     "density_veh_per_km": 44.683,
+     "throughput_per_min": 20.972,
+     "throughput_steady_per_min": 22.95,
+     "queue_end_per_env": 1.33,
+     "timeouts_per_1000": 1.353,
+     "crash_cars_per_1000": 0.0,
+     "delay_mean_s": 13.69,
+     "deadlocks_per_hour": 0.0,
+     "deadlock_time_frac": 0.0,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.0
+    },
+    {
+     "demand": 0.15,
+     "density": 14.857,
+     "throughput": 28.617,
+     "demand_per_min": 36.445,
+     "cars_map_mean": 14.857,
+     "cars_box_mean": 1.448,
+     "density_veh_per_km": 74.283,
+     "throughput_per_min": 26.069,
+     "throughput_steady_per_min": 28.617,
+     "queue_end_per_env": 13.163,
+     "timeouts_per_1000": 7.597,
+     "crash_cars_per_1000": 1.006,
+     "delay_mean_s": 18.609,
+     "deadlocks_per_hour": 0.0,
+     "deadlock_time_frac": 0.0,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.083
+    },
+    {
+     "demand": 0.2,
+     "density": 17.913,
+     "throughput": 31.3,
+     "demand_per_min": 47.931,
+     "cars_map_mean": 17.913,
+     "cars_box_mean": 1.566,
+     "density_veh_per_km": 89.567,
+     "throughput_per_min": 28.542,
+     "throughput_steady_per_min": 31.3,
+     "queue_end_per_env": 38.753,
+     "timeouts_per_1000": 0.0,
+     "crash_cars_per_1000": 0.0,
+     "delay_mean_s": 21.578,
+     "deadlocks_per_hour": 0.0,
+     "deadlock_time_frac": 0.0,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.0
+    },
+    {
+     "demand": 0.3,
+     "density": 19.273,
+     "throughput": 32.05,
+     "demand_per_min": 71.431,
+     "cars_map_mean": 19.273,
+     "cars_box_mean": 1.604,
+     "density_veh_per_km": 96.363,
+     "throughput_per_min": 29.708,
+     "throughput_steady_per_min": 32.05,
+     "queue_end_per_env": 105.5,
+     "timeouts_per_1000": 0.0,
+     "crash_cars_per_1000": 0.0,
+     "delay_mean_s": 23.562,
+     "deadlocks_per_hour": 0.0,
+     "deadlock_time_frac": 0.0,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.0
+    },
+    {
+     "demand": 0.4,
+     "density": 19.978,
+     "throughput": 32.867,
+     "demand_per_min": 96.25,
+     "cars_map_mean": 19.978,
+     "cars_box_mean": 1.647,
+     "density_veh_per_km": 99.89,
+     "throughput_per_min": 30.75,
+     "throughput_steady_per_min": 32.867,
+     "queue_end_per_env": 176.167,
+     "timeouts_per_1000": 0.0,
+     "crash_cars_per_1000": 0.0,
+     "delay_mean_s": 24.09,
+     "deadlocks_per_hour": 0.0,
+     "deadlock_time_frac": 0.0,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.0
+    },
+    {
+     "demand": 0.5,
+     "density": 19.896,
+     "throughput": 32.633,
+     "demand_per_min": 120.32,
+     "cars_map_mean": 19.896,
+     "cars_box_mean": 1.631,
+     "density_veh_per_km": 99.48,
+     "throughput_per_min": 30.75,
+     "throughput_steady_per_min": 32.633,
+     "queue_end_per_env": 248.207,
+     "timeouts_per_1000": 0.0,
+     "crash_cars_per_1000": 0.0,
+     "delay_mean_s": 24.239,
+     "deadlocks_per_hour": 0.0,
+     "deadlock_time_frac": 0.0,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.0
+    }
+   ],
+   "per_seed": [
+    {
+     "demand": 0.05,
+     "seed": 1000,
+     "density": 3.675,
+     "throughput": 13.15
+    },
+    {
+     "demand": 0.05,
+     "seed": 2000,
+     "density": 2.976,
+     "throughput": 11.35
+    },
+    {
+     "demand": 0.05,
+     "seed": 3000,
+     "density": 2.916,
+     "throughput": 11.95
+    },
+    {
+     "demand": 0.1,
+     "seed": 1000,
+     "density": 10.035,
+     "throughput": 23.25
+    },
+    {
+     "demand": 0.1,
+     "seed": 2000,
+     "density": 8.31,
+     "throughput": 22.1
+    },
+    {
+     "demand": 0.1,
+     "seed": 3000,
+     "density": 8.466,
+     "throughput": 23.5
+    },
+    {
+     "demand": 0.15,
+     "seed": 1000,
+     "density": 15.326,
+     "throughput": 27.4
+    },
+    {
+     "demand": 0.15,
+     "seed": 2000,
+     "density": 14.001,
+     "throughput": 28.45
+    },
+    {
+     "demand": 0.15,
+     "seed": 3000,
+     "density": 15.243,
+     "throughput": 30.0
+    },
+    {
+     "demand": 0.2,
+     "seed": 1000,
+     "density": 17.577,
+     "throughput": 30.75
+    },
+    {
+     "demand": 0.2,
+     "seed": 2000,
+     "density": 17.569,
+     "throughput": 31.15
+    },
+    {
+     "demand": 0.2,
+     "seed": 3000,
+     "density": 18.594,
+     "throughput": 32.0
+    },
+    {
+     "demand": 0.3,
+     "seed": 1000,
+     "density": 19.288,
+     "throughput": 33.0
+    },
+    {
+     "demand": 0.3,
+     "seed": 2000,
+     "density": 18.792,
+     "throughput": 31.2
+    },
+    {
+     "demand": 0.3,
+     "seed": 3000,
+     "density": 19.739,
+     "throughput": 31.95
+    },
+    {
+     "demand": 0.4,
+     "seed": 1000,
+     "density": 19.973,
+     "throughput": 33.05
+    },
+    {
+     "demand": 0.4,
+     "seed": 2000,
+     "density": 19.91,
+     "throughput": 32.85
+    },
+    {
+     "demand": 0.4,
+     "seed": 3000,
+     "density": 20.052,
+     "throughput": 32.7
+    },
+    {
+     "demand": 0.5,
+     "seed": 1000,
+     "density": 19.955,
+     "throughput": 32.7
+    },
+    {
+     "demand": 0.5,
+     "seed": 2000,
+     "density": 19.81,
+     "throughput": 32.75
+    },
+    {
+     "demand": 0.5,
+     "seed": 3000,
+     "density": 19.924,
+     "throughput": 32.45
+    }
+   ]
+  },
+  "brain_r2": {
+   "label": "round2_best",
+   "points": [
+    {
+     "demand": 0.05,
+     "density": 1.845,
+     "throughput": 12.233,
+     "demand_per_min": 12.472,
+     "cars_map_mean": 1.845,
+     "cars_box_mean": 0.642,
+     "density_veh_per_km": 9.223,
+     "throughput_per_min": 11.736,
+     "throughput_steady_per_min": 12.233,
+     "queue_end_per_env": 0.08,
+     "timeouts_per_1000": 0.0,
+     "crash_cars_per_1000": 4.797,
+     "delay_mean_s": 1.541,
+     "deadlocks_per_hour": 0.0,
+     "deadlock_time_frac": 0.0,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.0
+    },
+    {
+     "demand": 0.1,
+     "density": 4.744,
+     "throughput": 24.233,
+     "demand_per_min": 24.625,
+     "cars_map_mean": 4.744,
+     "cars_box_mean": 1.951,
+     "density_veh_per_km": 23.72,
+     "throughput_per_min": 22.806,
+     "throughput_steady_per_min": 24.233,
+     "queue_end_per_env": 0.123,
+     "timeouts_per_1000": 1.203,
+     "crash_cars_per_1000": 13.956,
+     "delay_mean_s": 4.004,
+     "deadlocks_per_hour": 8.333,
+     "deadlock_time_frac": 0.015,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.333
+    },
+    {
+     "demand": 0.15,
+     "density": 9.664,
+     "throughput": 33.083,
+     "demand_per_min": 36.445,
+     "cars_map_mean": 9.664,
+     "cars_box_mean": 4.209,
+     "density_veh_per_km": 48.327,
+     "throughput_per_min": 31.014,
+     "throughput_steady_per_min": 33.083,
+     "queue_end_per_env": 1.083,
+     "timeouts_per_1000": 11.473,
+     "crash_cars_per_1000": 35.809,
+     "delay_mean_s": 7.399,
+     "deadlocks_per_hour": 58.333,
+     "deadlock_time_frac": 0.117,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.623
+    },
+    {
+     "demand": 0.2,
+     "density": 16.063,
+     "throughput": 36.183,
+     "demand_per_min": 47.931,
+     "cars_map_mean": 16.063,
+     "cars_box_mean": 7.041,
+     "density_veh_per_km": 80.313,
+     "throughput_per_min": 34.305,
+     "throughput_steady_per_min": 36.183,
+     "queue_end_per_env": 10.88,
+     "timeouts_per_1000": 23.067,
+     "crash_cars_per_1000": 69.475,
+     "delay_mean_s": 11.978,
+     "deadlocks_per_hour": 130.0,
+     "deadlock_time_frac": 0.284,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.744
+    },
+    {
+     "demand": 0.3,
+     "density": 22.409,
+     "throughput": 34.033,
+     "demand_per_min": 71.431,
+     "cars_map_mean": 22.409,
+     "cars_box_mean": 9.158,
+     "density_veh_per_km": 112.043,
+     "throughput_per_min": 33.57,
+     "throughput_steady_per_min": 34.033,
+     "queue_end_per_env": 67.167,
+     "timeouts_per_1000": 64.163,
+     "crash_cars_per_1000": 117.905,
+     "delay_mean_s": 16.362,
+     "deadlocks_per_hour": 244.167,
+     "deadlock_time_frac": 0.567,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.83
+    },
+    {
+     "demand": 0.4,
+     "density": 23.446,
+     "throughput": 33.15,
+     "demand_per_min": 96.25,
+     "cars_map_mean": 23.446,
+     "cars_box_mean": 9.544,
+     "density_veh_per_km": 117.23,
+     "throughput_per_min": 32.68,
+     "throughput_steady_per_min": 33.15,
+     "queue_end_per_env": 143.75,
+     "timeouts_per_1000": 75.5,
+     "crash_cars_per_1000": 117.045,
+     "delay_mean_s": 18.623,
+     "deadlocks_per_hour": 301.667,
+     "deadlock_time_frac": 0.687,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.863
+    },
+    {
+     "demand": 0.5,
+     "density": 23.659,
+     "throughput": 34.3,
+     "demand_per_min": 120.32,
+     "cars_map_mean": 23.659,
+     "cars_box_mean": 9.559,
+     "density_veh_per_km": 118.297,
+     "throughput_per_min": 33.931,
+     "throughput_steady_per_min": 34.3,
+     "queue_end_per_env": 211.583,
+     "timeouts_per_1000": 73.923,
+     "crash_cars_per_1000": 113.907,
+     "delay_mean_s": 18.463,
+     "deadlocks_per_hour": 285.0,
+     "deadlock_time_frac": 0.643,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.825
+    }
+   ],
+   "per_seed": [
+    {
+     "demand": 0.05,
+     "seed": 1000,
+     "density": 2.008,
+     "throughput": 13.3
+    },
+    {
+     "demand": 0.05,
+     "seed": 2000,
+     "density": 1.771,
+     "throughput": 11.6
+    },
+    {
+     "demand": 0.05,
+     "seed": 3000,
+     "density": 1.755,
+     "throughput": 11.8
+    },
+    {
+     "demand": 0.1,
+     "seed": 1000,
+     "density": 4.778,
+     "throughput": 26.25
+    },
+    {
+     "demand": 0.1,
+     "seed": 2000,
+     "density": 3.96,
+     "throughput": 22.8
+    },
+    {
+     "demand": 0.1,
+     "seed": 3000,
+     "density": 5.494,
+     "throughput": 23.65
+    },
+    {
+     "demand": 0.15,
+     "seed": 1000,
+     "density": 9.313,
+     "throughput": 35.55
+    },
+    {
+     "demand": 0.15,
+     "seed": 2000,
+     "density": 7.801,
+     "throughput": 31.8
+    },
+    {
+     "demand": 0.15,
+     "seed": 3000,
+     "density": 11.879,
+     "throughput": 31.9
+    },
+    {
+     "demand": 0.2,
+     "seed": 1000,
+     "density": 15.666,
+     "throughput": 36.2
+    },
+    {
+     "demand": 0.2,
+     "seed": 2000,
+     "density": 15.853,
+     "throughput": 36.15
+    },
+    {
+     "demand": 0.2,
+     "seed": 3000,
+     "density": 16.67,
+     "throughput": 36.2
+    },
+    {
+     "demand": 0.3,
+     "seed": 1000,
+     "density": 21.952,
+     "throughput": 33.1
+    },
+    {
+     "demand": 0.3,
+     "seed": 2000,
+     "density": 22.406,
+     "throughput": 37.1
+    },
+    {
+     "demand": 0.3,
+     "seed": 3000,
+     "density": 22.868,
+     "throughput": 31.9
+    },
+    {
+     "demand": 0.4,
+     "seed": 1000,
+     "density": 23.456,
+     "throughput": 32.3
+    },
+    {
+     "demand": 0.4,
+     "seed": 2000,
+     "density": 23.248,
+     "throughput": 36.55
+    },
+    {
+     "demand": 0.4,
+     "seed": 3000,
+     "density": 23.635,
+     "throughput": 30.6
+    },
+    {
+     "demand": 0.5,
+     "seed": 1000,
+     "density": 23.703,
+     "throughput": 33.05
+    },
+    {
+     "demand": 0.5,
+     "seed": 2000,
+     "density": 23.762,
+     "throughput": 37.3
+    },
+    {
+     "demand": 0.5,
+     "seed": 3000,
+     "density": 23.513,
+     "throughput": 32.55
+    }
+   ]
+  },
+  "brain": {
+   "label": "round4_best",
+   "points": [
+    {
+     "demand": 0.05,
+     "density": 1.712,
+     "throughput": 12.3,
+     "demand_per_min": 12.472,
+     "cars_map_mean": 1.712,
+     "cars_box_mean": 0.565,
+     "density_veh_per_km": 8.563,
+     "throughput_per_min": 11.833,
+     "throughput_steady_per_min": 12.3,
+     "queue_end_per_env": 0.08,
+     "timeouts_per_1000": 0.0,
+     "crash_cars_per_1000": 2.338,
+     "delay_mean_s": 0.905,
+     "deadlocks_per_hour": 0.0,
+     "deadlock_time_frac": 0.0,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.0
+    },
+    {
+     "demand": 0.1,
+     "density": 3.619,
+     "throughput": 24.45,
+     "demand_per_min": 24.625,
+     "cars_map_mean": 3.619,
+     "cars_box_mean": 1.289,
+     "density_veh_per_km": 18.097,
+     "throughput_per_min": 23.291,
+     "throughput_steady_per_min": 24.45,
+     "queue_end_per_env": 0.123,
+     "timeouts_per_1000": 0.0,
+     "crash_cars_per_1000": 5.379,
+     "delay_mean_s": 1.538,
+     "deadlocks_per_hour": 2.5,
+     "deadlock_time_frac": 0.006,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.0
+    },
+    {
+     "demand": 0.15,
+     "density": 5.926,
+     "throughput": 36.1,
+     "demand_per_min": 36.445,
+     "cars_map_mean": 5.926,
+     "cars_box_mean": 2.303,
+     "density_veh_per_km": 29.633,
+     "throughput_per_min": 34.167,
+     "throughput_steady_per_min": 36.1,
+     "queue_end_per_env": 0.207,
+     "timeouts_per_1000": 0.0,
+     "crash_cars_per_1000": 5.215,
+     "delay_mean_s": 2.334,
+     "deadlocks_per_hour": 4.167,
+     "deadlock_time_frac": 0.012,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.0
+    },
+    {
+     "demand": 0.2,
+     "density": 9.159,
+     "throughput": 45.983,
+     "demand_per_min": 47.931,
+     "cars_map_mean": 9.159,
+     "cars_box_mean": 3.825,
+     "density_veh_per_km": 45.797,
+     "throughput_per_min": 43.389,
+     "throughput_steady_per_min": 45.983,
+     "queue_end_per_env": 1.163,
+     "timeouts_per_1000": 5.0,
+     "crash_cars_per_1000": 14.051,
+     "delay_mean_s": 3.624,
+     "deadlocks_per_hour": 16.667,
+     "deadlock_time_frac": 0.057,
+     "jam_time_frac": 0.003,
+     "timeouts_in_zone_frac": 0.267
+    },
+    {
+     "demand": 0.3,
+     "density": 18.701,
+     "throughput": 57.233,
+     "demand_per_min": 71.431,
+     "cars_map_mean": 18.701,
+     "cars_box_mean": 8.325,
+     "density_veh_per_km": 93.503,
+     "throughput_per_min": 54.806,
+     "throughput_steady_per_min": 57.233,
+     "queue_end_per_env": 16.5,
+     "timeouts_per_1000": 13.54,
+     "crash_cars_per_1000": 50.77,
+     "delay_mean_s": 7.585,
+     "deadlocks_per_hour": 112.5,
+     "deadlock_time_frac": 0.301,
+     "jam_time_frac": 0.005,
+     "timeouts_in_zone_frac": 0.774
+    },
+    {
+     "demand": 0.4,
+     "density": 26.951,
+     "throughput": 56.55,
+     "demand_per_min": 96.25,
+     "cars_map_mean": 26.951,
+     "cars_box_mean": 11.747,
+     "density_veh_per_km": 134.753,
+     "throughput_per_min": 55.278,
+     "throughput_steady_per_min": 56.55,
+     "queue_end_per_env": 70.96,
+     "timeouts_per_1000": 30.927,
+     "crash_cars_per_1000": 89.97,
+     "delay_mean_s": 12.127,
+     "deadlocks_per_hour": 203.333,
+     "deadlock_time_frac": 0.529,
+     "jam_time_frac": 0.008,
+     "timeouts_in_zone_frac": 0.857
+    },
+    {
+     "demand": 0.5,
+     "density": 28.887,
+     "throughput": 53.633,
+     "demand_per_min": 120.32,
+     "cars_map_mean": 28.887,
+     "cars_box_mean": 12.401,
+     "density_veh_per_km": 144.437,
+     "throughput_per_min": 52.611,
+     "throughput_steady_per_min": 53.633,
+     "queue_end_per_env": 145.087,
+     "timeouts_per_1000": 36.263,
+     "crash_cars_per_1000": 120.714,
+     "delay_mean_s": 14.837,
+     "deadlocks_per_hour": 238.333,
+     "deadlock_time_frac": 0.627,
+     "jam_time_frac": 0.025,
+     "timeouts_in_zone_frac": 0.811
+    }
+   ],
+   "per_seed": [
+    {
+     "demand": 0.05,
+     "seed": 1000,
+     "density": 1.839,
+     "throughput": 13.4
+    },
+    {
+     "demand": 0.05,
+     "seed": 2000,
+     "density": 1.655,
+     "throughput": 11.65
+    },
+    {
+     "demand": 0.05,
+     "seed": 3000,
+     "density": 1.641,
+     "throughput": 11.85
+    },
+    {
+     "demand": 0.1,
+     "seed": 1000,
+     "density": 3.893,
+     "throughput": 26.3
+    },
+    {
+     "demand": 0.1,
+     "seed": 2000,
+     "density": 3.389,
+     "throughput": 23.25
+    },
+    {
+     "demand": 0.1,
+     "seed": 3000,
+     "density": 3.576,
+     "throughput": 23.8
+    },
+    {
+     "demand": 0.15,
+     "seed": 1000,
+     "density": 6.419,
+     "throughput": 37.8
+    },
+    {
+     "demand": 0.15,
+     "seed": 2000,
+     "density": 5.412,
+     "throughput": 34.5
+    },
+    {
+     "demand": 0.15,
+     "seed": 3000,
+     "density": 5.948,
+     "throughput": 36.0
+    },
+    {
+     "demand": 0.2,
+     "seed": 1000,
+     "density": 9.087,
+     "throughput": 47.5
+    },
+    {
+     "demand": 0.2,
+     "seed": 2000,
+     "density": 7.886,
+     "throughput": 45.3
+    },
+    {
+     "demand": 0.2,
+     "seed": 3000,
+     "density": 10.505,
+     "throughput": 45.15
+    },
+    {
+     "demand": 0.3,
+     "seed": 1000,
+     "density": 18.289,
+     "throughput": 58.0
+    },
+    {
+     "demand": 0.3,
+     "seed": 2000,
+     "density": 17.119,
+     "throughput": 56.7
+    },
+    {
+     "demand": 0.3,
+     "seed": 3000,
+     "density": 20.694,
+     "throughput": 57.0
+    },
+    {
+     "demand": 0.4,
+     "seed": 1000,
+     "density": 26.82,
+     "throughput": 55.05
+    },
+    {
+     "demand": 0.4,
+     "seed": 2000,
+     "density": 26.2,
+     "throughput": 58.8
+    },
+    {
+     "demand": 0.4,
+     "seed": 3000,
+     "density": 27.832,
+     "throughput": 55.8
+    },
+    {
+     "demand": 0.5,
+     "seed": 1000,
+     "density": 28.896,
+     "throughput": 50.25
+    },
+    {
+     "demand": 0.5,
+     "seed": 2000,
+     "density": 29.048,
+     "throughput": 54.8
+    },
+    {
+     "demand": 0.5,
+     "seed": 3000,
+     "density": 28.717,
+     "throughput": 55.85
+    }
+   ]
+  },
+  "reservation": {
+   "label": "reservation",
+   "points": [
+    {
+     "demand": 0.05,
+     "density": 1.846,
+     "throughput": 12.417,
+     "demand_per_min": 12.472,
+     "cars_map_mean": 1.846,
+     "cars_box_mean": 0.584,
+     "density_veh_per_km": 9.227,
+     "throughput_per_min": 11.875,
+     "throughput_steady_per_min": 12.417,
+     "queue_end_per_env": 0.04,
+     "timeouts_per_1000": 0.0,
+     "crash_cars_per_1000": 0.0,
+     "delay_mean_s": 1.552,
+     "deadlocks_per_hour": 0.0,
+     "deadlock_time_frac": 0.0,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.0
+    },
+    {
+     "demand": 0.1,
+     "density": 3.706,
+     "throughput": 24.733,
+     "demand_per_min": 24.625,
+     "cars_map_mean": 3.706,
+     "cars_box_mean": 1.158,
+     "density_veh_per_km": 18.533,
+     "throughput_per_min": 23.528,
+     "throughput_steady_per_min": 24.733,
+     "queue_end_per_env": 0.083,
+     "timeouts_per_1000": 0.0,
+     "crash_cars_per_1000": 0.0,
+     "delay_mean_s": 1.774,
+     "deadlocks_per_hour": 0.0,
+     "deadlock_time_frac": 0.0,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.0
+    },
+    {
+     "demand": 0.15,
+     "density": 5.691,
+     "throughput": 36.45,
+     "demand_per_min": 36.445,
+     "cars_map_mean": 5.691,
+     "cars_box_mean": 1.744,
+     "density_veh_per_km": 28.453,
+     "throughput_per_min": 34.528,
+     "throughput_steady_per_min": 36.45,
+     "queue_end_per_env": 0.163,
+     "timeouts_per_1000": 0.0,
+     "crash_cars_per_1000": 0.0,
+     "delay_mean_s": 2.045,
+     "deadlocks_per_hour": 0.0,
+     "deadlock_time_frac": 0.0,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.0
+    },
+    {
+     "demand": 0.2,
+     "density": 7.731,
+     "throughput": 47.65,
+     "demand_per_min": 47.931,
+     "cars_map_mean": 7.731,
+     "cars_box_mean": 2.308,
+     "density_veh_per_km": 38.653,
+     "throughput_per_min": 45.139,
+     "throughput_steady_per_min": 47.65,
+     "queue_end_per_env": 0.413,
+     "timeouts_per_1000": 0.0,
+     "crash_cars_per_1000": 0.0,
+     "delay_mean_s": 2.368,
+     "deadlocks_per_hour": 0.0,
+     "deadlock_time_frac": 0.0,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.0
+    },
+    {
+     "demand": 0.3,
+     "density": 12.901,
+     "throughput": 70.767,
+     "demand_per_min": 71.431,
+     "cars_map_mean": 12.901,
+     "cars_box_mean": 3.532,
+     "density_veh_per_km": 64.507,
+     "throughput_per_min": 66.542,
+     "throughput_steady_per_min": 70.767,
+     "queue_end_per_env": 1.42,
+     "timeouts_per_1000": 0.0,
+     "crash_cars_per_1000": 0.0,
+     "delay_mean_s": 3.458,
+     "deadlocks_per_hour": 0.0,
+     "deadlock_time_frac": 0.0,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.0
+    },
+    {
+     "demand": 0.4,
+     "density": 18.874,
+     "throughput": 90.133,
+     "demand_per_min": 96.25,
+     "cars_map_mean": 18.874,
+     "cars_box_mean": 4.57,
+     "density_veh_per_km": 94.373,
+     "throughput_per_min": 84.417,
+     "throughput_steady_per_min": 90.133,
+     "queue_end_per_env": 15.96,
+     "timeouts_per_1000": 0.0,
+     "crash_cars_per_1000": 0.0,
+     "delay_mean_s": 4.835,
+     "deadlocks_per_hour": 0.0,
+     "deadlock_time_frac": 0.0,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.0
+    },
+    {
+     "demand": 0.5,
+     "density": 21.82,
+     "throughput": 97.167,
+     "demand_per_min": 120.32,
+     "cars_map_mean": 21.82,
+     "cars_box_mean": 4.962,
+     "density_veh_per_km": 109.1,
+     "throughput_per_min": 91.028,
+     "throughput_steady_per_min": 97.167,
+     "queue_end_per_env": 65.207,
+     "timeouts_per_1000": 0.0,
+     "crash_cars_per_1000": 0.0,
+     "delay_mean_s": 5.672,
+     "deadlocks_per_hour": 0.0,
+     "deadlock_time_frac": 0.0,
+     "jam_time_frac": 0.0,
+     "timeouts_in_zone_frac": 0.0
+    }
+   ],
+   "per_seed": [
+    {
+     "demand": 0.05,
+     "seed": 1000,
+     "density": 1.983,
+     "throughput": 13.5
+    },
+    {
+     "demand": 0.05,
+     "seed": 2000,
+     "density": 1.78,
+     "throughput": 11.8
+    },
+    {
+     "demand": 0.05,
+     "seed": 3000,
+     "density": 1.775,
+     "throughput": 11.95
+    },
+    {
+     "demand": 0.1,
+     "seed": 1000,
+     "density": 4.031,
+     "throughput": 26.6
+    },
+    {
+     "demand": 0.1,
+     "seed": 2000,
+     "density": 3.538,
+     "throughput": 23.6
+    },
+    {
+     "demand": 0.1,
+     "seed": 3000,
+     "density": 3.549,
+     "throughput": 24.0
+    },
+    {
+     "demand": 0.15,
+     "seed": 1000,
+     "density": 6.029,
+     "throughput": 38.35
+    },
+    {
+     "demand": 0.15,
+     "seed": 2000,
+     "density": 5.456,
+     "throughput": 34.95
+    },
+    {
+     "demand": 0.15,
+     "seed": 3000,
+     "density": 5.589,
+     "throughput": 36.05
+    },
+    {
+     "demand": 0.2,
+     "seed": 1000,
+     "density": 7.912,
+     "throughput": 48.45
+    },
+    {
+     "demand": 0.2,
+     "seed": 2000,
+     "density": 7.551,
+     "throughput": 46.6
+    },
+    {
+     "demand": 0.2,
+     "seed": 3000,
+     "density": 7.729,
+     "throughput": 47.9
+    },
+    {
+     "demand": 0.3,
+     "seed": 1000,
+     "density": 12.963,
+     "throughput": 70.6
+    },
+    {
+     "demand": 0.3,
+     "seed": 2000,
+     "density": 12.208,
+     "throughput": 68.5
+    },
+    {
+     "demand": 0.3,
+     "seed": 3000,
+     "density": 13.532,
+     "throughput": 73.2
+    },
+    {
+     "demand": 0.4,
+     "seed": 1000,
+     "density": 19.115,
+     "throughput": 91.65
+    },
+    {
+     "demand": 0.4,
+     "seed": 2000,
+     "density": 18.099,
+     "throughput": 88.65
+    },
+    {
+     "demand": 0.4,
+     "seed": 3000,
+     "density": 19.409,
+     "throughput": 90.1
+    },
+    {
+     "demand": 0.5,
+     "seed": 1000,
+     "density": 21.791,
+     "throughput": 96.5
+    },
+    {
+     "demand": 0.5,
+     "seed": 2000,
+     "density": 21.751,
+     "throughput": 98.35
+    },
+    {
+     "demand": 0.5,
+     "seed": 3000,
+     "density": 21.918,
+     "throughput": 96.65
+    }
+   ]
+  }
+ }
+}

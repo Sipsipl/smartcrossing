@@ -178,7 +178,7 @@
       ctx.textBaseline = "middle"; ctx.textAlign = "right";
       const lx = this.pos[0][0][0] - 10;
       for (const g of this.groupY) {
-        const name = g.name.replace("Abstand zum Fahrbahnrand", "Abstand Rand").replace("Weg zur Ausfahrt", this.narrow ? "zur Ausfahrt" : "Weg zur Ausfahrt");
+        const name = g.name.replace(SCX.t("brain.edge.long"), SCX.t("brain.edge.short")).replace(SCX.t("brain.exit.long"), this.narrow ? SCX.t("brain.exit.short") : SCX.t("brain.exit.long"));
         ctx.fillText(name, lx, (g.y0 + g.y1) / 2);
         if (g.y1 - g.y0 > 14) {
           ctx.strokeStyle = "rgba(128,128,128,0.45)"; ctx.lineWidth = 1;
@@ -190,7 +190,7 @@
       const names = this.layout.actions;
       ctx.fillStyle = fg;
       outs.forEach(([x, y], j) => {
-        ctx.fillText((this.narrow ? (names[j] || "").replace("Gas / Bremse", "Gas") : names[j]) || `Ausgang ${j + 1}`, x + 14 * S, y - (tr ? 7 * S : 0));
+        ctx.fillText((this.narrow ? (names[j] || "").replace(SCX.t("brain.out.accbrake"), SCX.t("brain.out.acc")) : names[j]) || SCX.t("brain.output", { n: j + 1 }), x + 14 * S, y - (tr ? 7 * S : 0));
         if (tr) {
           ctx.fillStyle = muted;
           ctx.font = fnt(12, 11, "ui-monospace, Menlo, monospace");
@@ -201,7 +201,7 @@
       });
       // column captions
       ctx.fillStyle = muted; ctx.textAlign = "center"; ctx.font = `${11 * S}px ui-sans-serif, system-ui, sans-serif`;
-      const caps = ["Eingänge", "Schicht 1", "Schicht 2", "Ausgänge"];
+      const caps = [SCX.t("brain.cap.in"), SCX.t("brain.cap.l1"), SCX.t("brain.cap.l2"), SCX.t("brain.cap.out")];
       this.pos.forEach((col, k) => ctx.fillText(this.narrow && k === 0 ? "" : caps[k] || "", col[0][0], this.H - 6 * S));
     }
 
@@ -230,10 +230,10 @@
       const v = tr ? tr[k][j] : null;
       const val = v === null ? "" : ` = ${(v >= 0 ? "+" : "") + v.toFixed(2)}`;
       if (k === 0) {
-        for (const g of this.layout.groups) for (const it of g.items) if (it.i === j) return `Eingang: ${g.name} · ${it.label}${val} (skaliert)`;
+        for (const g of this.layout.groups) for (const it of g.items) if (it.i === j) return SCX.t("brain.d.input", { name: g.name, label: it.label, val });
       }
-      if (k === this.pos.length - 1) return `Ausgang: ${this.layout.actions[j]}${val}`;
-      return `Neuron ${j + 1} in Schicht ${k}${val}`;
+      if (k === this.pos.length - 1) return SCX.t("brain.d.output", { name: this.layout.actions[j], val });
+      return SCX.t("brain.d.neuron", { n: j + 1, layer: k, val });
     }
   }
 
@@ -252,9 +252,8 @@
     if (parent) parent.appendChild(e);
     return e;
   }
-  const NB_SHORT = { fwd: "vor mir", left: "links von mir", same: "gleiche Richtung", cross: "fährt quer", speed: "Tempo",
-    present: "da?", kappa: "lenkt", brake: "Bremslicht", hazard: "Warnblinker", acc: "beschleunigt", lamp1: "Lampe", lamp2: "Lampe 2" };
-  const sgn = (v) => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(2).replace(".", ",");
+  const nbShort = (key) => { const k = "nb." + key; const s = SCX.t(k); return s === k ? null : s; };  // short names of the neighbour features
+  const sgn = (v) => (v >= 0 ? "+" : "−") + SCX.num(Math.abs(v), 2);
 
   /** Strongest `per` incoming weights per output neuron of a row-major W (nin x nout). */
   function topEdges(W, nin, nout, per, inScale) {
@@ -411,7 +410,7 @@
       const shown = Math.min(hostW, 1000);                 // displayed width (enlarged view)
       const narrow = W < 460, fs = narrow ? 11 : 12;
       host.innerHTML = "";
-      const svg = svgEl("svg", { width: shown, class: "setnet", role: "img", "aria-label": "Aufbau des Gehirns mit Live-Werten" }, host);
+      const svg = svgEl("svg", { width: shown, class: "setnet", role: "img", "aria-label": SCX.t("brain.set.aria") }, host);
       const gE = svgEl("g", {}, svg), gL = svgEl("g", {}, svg), gN = svgEl("g", {}, svg), gT = svgEl("g", {}, svg);
       const els = (this.els = {});
       const live = (this.live = { ego: [], nb: [], cards: [], phi: [], bars: [], pct: [], down: [], up: [], mix: [], ego2: [], trunk: [], out: [], outTxt: [] });
@@ -442,7 +441,7 @@
       const pad = 6, gut = 14, X0 = pad + gut, X1 = W - pad;
       const busX = pad + 4;
       // 1) own values
-      text(X0, 13, narrow ? "Ich: eigene Werte (19)" : `Ich: eigene Werte (${E} Zahlen)`, { fill: "var(--fg)", bold: true });
+      text(X0, 13, SCX.t(narrow ? "brain.set.ego.short" : "brain.set.ego", { E }), { fill: "var(--fg)", bold: true });
       const nG = this.ownGroups.length, unit = (X1 - X0) / (E + 0.7 * (nG - 1));
       const rE = Math.min(5, unit * 0.36);
       let gx = X0, idx = 0;
@@ -452,7 +451,7 @@
       });
       // 2) neighbour cards
       const cardTop = 62, colW = (X1 - X0) / K, cw = colW - (narrow ? 3 : 5), cellH = narrow ? 9 : 10;
-      text(X0, cardTop - 7, narrow ? `Nachbarn (bis zu ${K})` : `Nachbarn: bis zu ${K} Autos in der Nähe (je ${F} Zahlen)`, { fill: "var(--fg)", bold: true });
+      text(X0, cardTop - 7, SCX.t(narrow ? "brain.set.nb.short" : "brain.set.nb", { K, F }), { fill: "var(--fg)", bold: true });
       const rows = Math.ceil(F / 2), cardH = 16 + rows * cellH + 4;
       const colX = (k) => X0 + colW * (k + 0.5);
       for (let k = 0; k < K; k++) {
@@ -480,7 +479,7 @@
       }
       const box = svgEl("rect", { x: bx0, y: bTop, width: bx1 - bx0, height: bBot - bTop, rx: 7 }, gE);
       box.style.fill = "var(--panel)"; box.style.stroke = "rgba(128,128,128,0.75)";
-      text(bx0 + 8, bTop + 15, narrow ? "Mini-Netz (für alle gleich)" : `Mini-Netz – dasselbe für jeden Nachbarn (×${K})`, { fill: "var(--fg)", bold: true });
+      text(bx0 + 8, bTop + 15, SCX.t(narrow ? "brain.set.mini.short" : "brain.set.mini", { K }), { fill: "var(--fg)", bold: true });
       this.focusTxt = text(bx1 - 8, bTop + 15, "", { anchor: "end" });
       for (let k = 0; k < K; k++) {
         const l = svgEl("line", { x1: colX(k), y1: cardBot, x2: bMid + (colX(k) - bMid) * 0.45, y2: bTop - 9 }, gL);
@@ -494,7 +493,7 @@
       // 4) attention per neighbour
       const aTitle = bBot + 20, aTop = bBot + 30, aH = 44, aBase = aTop + aH;
       this.aH = aH; this.aBase = aBase;
-      text(X0, aTitle, narrow ? "Aufmerksamkeit: wer zählt gerade?" : "Aufmerksamkeit – ich frage: welcher Nachbar zählt gerade?", { fill: "var(--fg)", bold: true, halo: true });
+      text(X0, aTitle, SCX.t(narrow ? "brain.set.att.short" : "brain.set.att"), { fill: "var(--fg)", bold: true, halo: true });
       const bw = Math.min(18, colW * 0.5);
       for (let k = 0; k < K; k++) {
         const l = svgEl("line", { x1: bMid + (colX(k) - bMid) * 0.45, y1: bBot, x2: colX(k), y2: aTop }, gL);
@@ -528,8 +527,8 @@
       const rIn = Math.min(3.6, uIn * 0.4);
       egoPos.forEach(([x, y], j) => live.ego2.push(dot(x, y, rIn, `ego:${j}`)));
       mixPos.forEach(([x, y], j) => live.mix.push(dot(x, y, rIn, `mix:${j}`)));
-      text((X0 + egoX1) / 2, mixY + 16, narrow ? "ich" : "ich (eigene Werte)", { anchor: "middle", size: narrow ? 10 : 11 });
-      text(mixMid, mixY + 16, narrow ? "Mischung der Nachbarn" : "Mischung der Nachbarn (nach Aufmerksamkeit)", { anchor: "middle", size: narrow ? 10 : 11 });
+      text((X0 + egoX1) / 2, mixY + 16, SCX.t(narrow ? "brain.set.me.short" : "brain.set.me"), { anchor: "middle", size: narrow ? 10 : 11 });
+      text(mixMid, mixY + 16, SCX.t(narrow ? "brain.set.mix.short" : "brain.set.mix"), { anchor: "middle", size: narrow ? 10 : 11 });
       const trunkPos = [[...egoPos, ...mixPos]];
       let ty = mixY + 44;
       ar.hidden.forEach((n) => { trunkPos.push(row(n, X0, X1, ty)); ty += 34; });
@@ -541,7 +540,7 @@
       const names = this.layout.actions;
       outPos.forEach(([x, y], j) => {
         live.out.push(dot(x, y, 9, `out:${j}`));
-        text(x, y + 24, names[j] || `Ausgang ${j + 1}`, { anchor: "middle", fill: "var(--fg)" });
+        text(x, y + 24, names[j] || SCX.t("brain.output", { n: j + 1 }), { anchor: "middle", fill: "var(--fg)" });
         live.outTxt.push(text(x, y + 39, "", { anchor: "middle", size: narrow ? 10 : 11 }));
       });
       const H = outY + 46;
@@ -586,11 +585,11 @@
         const fsl = foc === null ? -1 : this.slotOfCard[foc], on = fsl >= 0;
         L.phi[0].forEach((d, f) => fill(d, on ? Math.tanh(tr.x[E + fsl * F + f]) : 0));
         for (let l = 1; l < L.phi.length; l++) L.phi[l].forEach((d, j) => fill(d, on ? tr.phi[fsl][l - 1][j] : 0));
-        this.focusTxt.textContent = on ? `${this.W < 460 ? "" : "zeigt gerade: "}Nachbar ${foc + 1}` : this.W < 460 ? "niemand da" : "gerade kein Nachbar in Sicht";
+        this.focusTxt.textContent = on ? SCX.t(this.W < 460 ? "brain.focus.short" : "brain.focus", { n: foc + 1 }) : SCX.t(this.W < 460 ? "brain.nofocus.short" : "brain.nofocus");
         L.mix.forEach((d, j) => fill(d, Math.tanh(tr.pooled[j])));
         L.trunk.forEach((ds, l) => ds.forEach((d, j) => fill(d, tr.trunk[l][j])));
         L.out.forEach((d, j) => fill(d, tr.out[j]));
-        const word = [(v) => (v >= 0 ? "Gas" : "Bremse"), (v) => (Math.abs(v) < 0.02 ? "geradeaus" : v > 0 ? "links" : "rechts"), (v) => (v >= 0 ? "hell" : "dunkel")];
+        const word = [(v) => SCX.t(v >= 0 ? "brain.w.acc" : "brain.w.brake"), (v) => SCX.t(Math.abs(v) < 0.02 ? "man.straight" : v > 0 ? "man.left" : "man.right"), (v) => SCX.t(v >= 0 ? "brain.w.bright" : "brain.w.dark")];
         L.outTxt.forEach((t, j) => { t.textContent = `${sgn(tr.out[j])} · ${(word[j] || (() => ""))(tr.out[j])}`; });
       }
       for (const [id, el] of Object.entries(this.els)) {
@@ -622,28 +621,28 @@
       const raw = (i) => (this.obs ? this.obs[i] : null);
       const fmt = (it) => (this.opts.fmt && raw(it.i) !== null ? this.opts.fmt(it, raw(it.i)) : tr ? sgn(tr.x[it.i]) : "");
       const att = this.attention();
-      if (kind === "ego") { const it = this.ownItems[+a]; return it ? `Ich · ${it.group} · ${it.label}: ${fmt(it)}` : ""; }
+      if (kind === "ego") { const it = this.ownItems[+a]; return it ? SCX.t("brain.d.ego", { group: it.group, label: it.label, v: fmt(it) }) : ""; }
       const k = +a;
       if (kind === "nb" || kind === "card" || kind === "att") {
-        if (tr && this.slotOfCard[k] < 0) return `Nachbar ${k + 1}: gerade niemand in Sicht (zählt nicht mit)`;
+        if (tr && this.slotOfCard[k] < 0) return SCX.t("brain.d.nb.none", { n: k + 1 });
         const items = this.nbItems[k] || [];
         if (kind === "nb") {
           const it = items[+b];
-          return it ? `Nachbar ${k + 1} · ${NB_SHORT[it.key.split("_").slice(1).join("_")] || it.label}: ${fmt(it)}` : "";
+          return it ? SCX.t("brain.d.nb.item", { n: k + 1, what: nbShort(it.key.split("_").slice(1).join("_")) || it.label, v: fmt(it) }) : "";
         }
         const by = (key) => items.find((it) => it.key.endsWith("_" + key));
-        const pos = by("fwd") && by("left") ? ` · ${fmt(by("fwd"))} vor, ${fmt(by("left"))} links von mir · ${fmt(by("speed"))}` : "";
-        const sl = this.slotOfCard[k], heads = tr && tr.attn && sl >= 0 ? ` (${tr.attn.length} „Köpfe“: ${tr.attn.map((h) => Math.round(h[sl] * 100) + " %").join(", ")})` : "";
-        return `Nachbar ${k + 1}: Aufmerksamkeit ${att ? Math.round(att[k] * 100) : 0} %${heads}${pos}`;
+        const pos = by("fwd") && by("left") ? SCX.t("brain.d.nb.pos", { fwd: fmt(by("fwd")), left: fmt(by("left")), speed: fmt(by("speed")) }) : "";
+        const sl = this.slotOfCard[k], heads = tr && tr.attn && sl >= 0 ? SCX.t("brain.d.heads", { n: tr.attn.length, list: tr.attn.map((h) => SCX.pctInt(Math.round(h[sl] * 100))).join(", ") }) : "";
+        return SCX.t("brain.d.nb.att", { n: k + 1, p: SCX.pctInt(att ? Math.round(att[k] * 100) : 0), heads, pos });
       }
       if (kind === "phi") {
         const f = this.focus(), fsl = f === null ? -1 : this.slotOfCard[f], v = tr && fsl >= 0 ? (+a === 0 ? Math.tanh(tr.x[E + fsl * F + +b]) : tr.phi[fsl][+a - 1][+b]) : null;
-        const what = +a === 0 ? `Eingang „${NB_SHORT[(this.nbItems[0][+b] || { key: "" }).key.split("_").slice(1).join("_")] || +b + 1}“` : `Schicht ${a}, Neuron ${+b + 1}`;
-        return `Mini-Netz · ${what}${v !== null ? ` = ${sgn(v)} (für Nachbar ${f + 1})` : ""}`;
+        const what = +a === 0 ? SCX.t("brain.d.phi.input", { what: nbShort((this.nbItems[0][+b] || { key: "" }).key.split("_").slice(1).join("_")) || +b + 1 }) : SCX.t("brain.d.layerneuron", { layer: a, n: +b + 1 });
+        return SCX.t("brain.d.phi", { what, v: v !== null ? SCX.t("brain.d.phi.v", { v: sgn(v), n: f + 1 }) : "" });
       }
-      if (kind === "mix") return `Mischung ${+a + 1}${tr ? ` = ${sgn(tr.pooled[+a])}` : ""}: Summe über die Nachbarn, jeder gewichtet mit seiner Aufmerksamkeit`;
-      if (kind === "tr") return `Schicht ${+a + 1}, Neuron ${+b + 1}${tr ? ` = ${sgn(tr.trunk[+a][+b])}` : ""}`;
-      if (kind === "out") return `Ausgang: ${this.layout.actions[+a]}${tr ? ` = ${sgn(tr.out[+a])}` : ""}`;
+      if (kind === "mix") return SCX.t("brain.d.mix", { n: +a + 1, val: tr ? ` = ${sgn(tr.pooled[+a])}` : "" });
+      if (kind === "tr") return SCX.t("brain.d.layerneuron", { layer: +a + 1, n: +b + 1 }) + (tr ? ` = ${sgn(tr.trunk[+a][+b])}` : "");
+      if (kind === "out") return SCX.t("brain.d.output", { name: this.layout.actions[+a], val: tr ? ` = ${sgn(tr.out[+a])}` : "" });
       return "";
     }
   }

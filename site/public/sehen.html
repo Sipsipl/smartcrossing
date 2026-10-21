@@ -3,64 +3,67 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Was sieht ein Auto? – Smart Crossing</title>
-<meta name="description" content="Die Sensoren eines selbstfahrenden Autos an der Kreuzung ohne Regeln – live.">
+<title data-i18n="see.was-sieht-ein-auto">Was sieht ein Auto? – Smart Crossing</title>
+<meta data-i18n-attr="content=see.meta-die-sensoren-eines" name="description" content="Die Sensoren eines selbstfahrenden Autos an der Kreuzung ohne Regeln – live.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/site.css?v=3fccb579">
+<link rel="stylesheet" href="css/site.css?v=fc98ab36">
 </head>
 <body data-page="sehen">
 <div class="wrap">
-<header class="top"><a class="brand" href="index.html"><svg viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="5" fill="#3b5640"/><path d="M9 0h6v24H9zM0 9h24v6H0z" fill="#46484d"/><rect x="5" y="10.2" width="6" height="3.6" rx="1" fill="#f5a623"/><rect x="10.2" y="14" width="3.6" height="6" rx="1" fill="#4287f5"/></svg>Smart Crossing</a><nav class="nav" aria-label="Seiten"><a href="index.html">Start</a><a href="sehen.html" aria-current="page">Was sieht ein Auto?</a><a href="tun.html">Was kann es tun?</a><a href="gehirn.html">Das Gehirn</a><a href="lernen.html">Wie lernen sie?</a><a href="vergleich.html">Vergleich</a></nav></header>
-<h1>Was sieht ein Auto?</h1>
-<p class="lead">Ein Auto hat keine Kamera und keine Karte. Sein Gehirn bekommt in jedem Moment genau <b id="dim-count">48</b> Zahlen –
+<header class="top"><a class="brand" href="index.html"><svg viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="5" fill="#3b5640"/><path d="M9 0h6v24H9zM0 9h24v6H0z" fill="#46484d"/><rect x="5" y="10.2" width="6" height="3.6" rx="1" fill="#f5a623"/><rect x="10.2" y="14" width="3.6" height="6" rx="1" fill="#4287f5"/></svg>Smart Crossing</a><nav class="nav" aria-label="Seiten" data-i18n-attr="aria-label=nav.aria"><a href="index.html" data-i18n="nav.index">Start</a><a href="sehen.html" aria-current="page" data-i18n="nav.sehen">Was sieht ein Auto?</a><a href="tun.html" data-i18n="nav.tun">Was kann es tun?</a><a href="gehirn.html" data-i18n="nav.gehirn">Das Gehirn</a><a href="lernen.html" data-i18n="nav.lernen">Wie lernen sie?</a><a href="vergleich.html" data-i18n="nav.vergleich">Vergleich</a></nav><div class="lang" role="group" aria-label="Sprache / Language"><button type="button" data-lang="de" aria-pressed="true" lang="de">DE</button><button type="button" data-lang="en" aria-pressed="false" lang="en">EN</button></div></header>
+<h1 data-i18n="see.was-sieht-ein-auto-2">Was sieht ein Auto?</h1>
+<p data-i18n="see.ein-auto-hat-keine" class="lead">Ein Auto hat keine Kamera und keine Karte. Sein Gehirn bekommt in jedem Moment genau <b id="dim-count">48</b> Zahlen –
 und sonst nichts. Hier siehst du sie als Linien auf der Kreuzung und als Liste daneben.</p>
 
 <div class="sim-layout">
-  <section id="stage" aria-label="Live-Simulation mit Sensoranzeige"></section>
+  <section data-i18n-attr="aria-label=see.aria-live-simulation-mit" id="stage" aria-label="Live-Simulation mit Sensoranzeige"></section>
   <aside class="panel" id="panel">
     <div class="group">
       <div id="selhead"></div>
       <div class="legend small">
-        <span class="line-key" style="border-color:#ffe066"></span><span>5 Strahlen: Abstand zum Fahrbahnrand (<span style="color:#e5484d">●</span> = Rand getroffen)</span>
-        <span class="line-key" style="border-color:#9aa3a0"></span><span>Linien zu den <span data-nbk>8</span> nächsten Autos, Kreis = deren Lampenfarbe</span>
-        <span class="line-key dash" style="border-color:#ff6bd5"></span><span>Richtung zur eigenen Ausfahrt</span>
-        <span class="line-key" style="border-color:#7fe3ff"></span><span>eigenes Tempo: so weit kommt es in 1 Sekunde</span>
+        <span class="line-key" style="border-color:#ffe066"></span><span data-i18n="see.strahlen-abstand-zum-fahrbahnrand">5 Strahlen: Abstand zum Fahrbahnrand (<span style="color:#e5484d">●</span> = Rand getroffen)</span>
+        <span class="line-key" style="border-color:#9aa3a0"></span><span data-i18n="see.linien-zu-den-naechsten">Linien zu den <span data-nbk>8</span> nächsten Autos, Kreis = deren Lampenfarbe</span>
+        <span class="line-key dash" style="border-color:#ff6bd5"></span><span data-i18n="see.richtung-zur-eigenen-ausfahrt">Richtung zur eigenen Ausfahrt</span>
+        <span class="line-key" style="border-color:#7fe3ff"></span><span data-i18n="see.eigenes-tempo-so-weit">eigenes Tempo: so weit kommt es in 1 Sekunde</span>
       </div>
     </div>
     <div class="group">
-      <h3>Das bekommt sein Gehirn gerade</h3>
+      <h3 data-i18n="see.das-bekommt-sein-gehirn">Das bekommt sein Gehirn gerade</h3>
       <div id="obs"></div>
     </div>
   </aside>
 </div>
 
-<h2>Was es <em>nicht</em> sieht – und warum</h2>
+<h2 data-i18n="see.was-es-nicht-sieht">Was es <em>nicht</em> sieht – und warum</h2>
 <div class="card unseen">
-  <div><span class="x">✕</span><span><b>Wohin die anderen wollen.</b> Ob das Auto vor mir gleich abbiegt, weiß ich nicht. Das ist Absicht:
+  <div><span class="x">✕</span><span data-i18n="see.wohin-die-anderen-wollen"><b>Wohin die anderen wollen.</b> Ob das Auto vor mir gleich abbiegt, weiß ich nicht. Das ist Absicht:
     Wenn die Autos es sich mitteilen wollen, müssen sie dafür ihre Lampe benutzen. Genau so könnte eine „Sprache“ entstehen.</span></div>
-  <div><span class="x">✕</span><span><b>Spuren, Mittellinie, Vorfahrt.</b> Gibt es nicht. Die Straße ist einfach eine graue Fläche. Ob man rechts oder links fährt,
+  <div><span class="x">✕</span><span data-i18n="see.spuren-mittellinie-vorfahrt-gibt"><b>Spuren, Mittellinie, Vorfahrt.</b> Gibt es nicht. Die Straße ist einfach eine graue Fläche. Ob man rechts oder links fährt,
     müssen die Autos selbst herausfinden.</span></div>
-  <div><span class="x">✕</span><span><b>Autos, die weiter als 30 m weg sind – und alle außer den <span data-nbk>8</span> nächsten.</b> Wie ein Mensch achtet es nur auf das Naheliegende. (Ältere Gehirne sahen nur die 4 nächsten.)</span></div>
-  <div><span class="x">✕</span><span><b>Die Vergangenheit.</b> Das Gehirn hat kein Gedächtnis: Es sieht nur den jetzigen Augenblick, zehnmal pro Sekunde neu.</span></div>
+  <div><span class="x">✕</span><span data-i18n="see.autos-die-weiter-als"><b>Autos, die weiter als 30 m weg sind – und alle außer den <span data-nbk>8</span> nächsten.</b> Wie ein Mensch achtet es nur auf das Naheliegende. (Ältere Gehirne sahen nur die 4 nächsten.)</span></div>
+  <div><span class="x">✕</span><span data-i18n="see.die-vergangenheit-das-gehirn"><b>Die Vergangenheit.</b> Das Gehirn hat kein Gedächtnis: Es sieht nur den jetzigen Augenblick, zehnmal pro Sekunde neu.</span></div>
 </div>
 
-<h2>Wie man die Zahlen liest</h2>
+<h2 data-i18n="see.wie-man-die-zahlen">Wie man die Zahlen liest</h2>
 <ul class="plain">
-  <li><b>Alles ist aus Sicht des Autos.</b> „Vor mir“ und „links von mir“ drehen sich mit dem Auto mit. Position und Richtung sind so gedreht,
+  <li data-i18n="see.alles-ist-aus-sicht"><b>Alles ist aus Sicht des Autos.</b> „Vor mir“ und „links von mir“ drehen sich mit dem Auto mit. Position und Richtung sind so gedreht,
     als käme jedes Auto von unten (Süden). Dadurch gilt alles Gelernte für alle vier Zufahrten gleich, und keine Seite ist bevorzugt.</li>
-  <li><b>Die Nachbarn sind nach Abstand sortiert:</b> Nachbar 1 ist immer das nächste Auto. Gibt es weniger als <span data-nbk>8</span> in der Nähe, sind die übrigen Felder leer (0).</li>
-  <li><b>Die Lampen der Nachbarn</b> sind Zahlen (beim aktuellen Gehirn eine: hell/dunkel; ältere Gehirne sahen zwei: Rot- und Blauanteil). Was sie bedeuten, weiß am Anfang niemand.</li>
-  <li><b>Was man an echten Autos sieht:</b> Das aktuelle Gehirn sieht von einem Nachbarn nur sein <b>Bremslicht</b> (an/aus) und ob er als
+  <li data-i18n="see.die-nachbarn-sind-nach"><b>Die Nachbarn sind nach Abstand sortiert:</b> Nachbar 1 ist immer das nächste Auto. Gibt es weniger als <span data-nbk>8</span> in der Nähe, sind die übrigen Felder leer (0).</li>
+  <li data-i18n="see.die-lampen-der-nachbarn"><b>Die Lampen der Nachbarn</b> sind Zahlen (beim aktuellen Gehirn eine: hell/dunkel; ältere Gehirne sahen zwei: Rot- und Blauanteil). Was sie bedeuten, weiß am Anfang niemand.</li>
+  <li data-i18n="see.was-man-an-echten"><b>Was man an echten Autos sieht:</b> Das aktuelle Gehirn sieht von einem Nachbarn nur sein <b>Bremslicht</b> (an/aus) und ob er als
     <b>Wrack mit Warnblinker</b> steht – wie bei echten Autos. Ältere Gehirne sahen stattdessen, wie stark er beschleunigt oder bremst.</li>
-  <li>Für das Netz werden alle Werte – auch die Lampen – auf ungefähr −1 bis +1 gebracht. Die Balken rechts zeigen genau diese Werte, daneben steht die verständliche Einheit.</li>
+  <li data-i18n="see.fuer-das-netz-werden">Für das Netz werden alle Werte – auch die Lampen – auf ungefähr −1 bis +1 gebracht. Die Balken rechts zeigen genau diese Werte, daneben steht die verständliche Einheit.</li>
 </ul>
-<p><a href="tun.html">Weiter: Was kann ein Auto tun? →</a></p>
-<footer>Smart Crossing – ein Hobbyprojekt. Alles läuft direkt in deinem Browser, es werden keine Daten gesammelt. Stand: 2026-10-21. <a href="https://github.com/Sipsipl/smartcrossing">Code auf GitHub</a></footer>
+<p><a data-i18n="see.weiter-was-kann-ein" href="tun.html">Weiter: Was kann ein Auto tun? →</a></p>
+<footer data-i18n="footer">Smart Crossing – ein Hobbyprojekt. Alles läuft direkt in deinem Browser, es werden keine Daten gesammelt. Stand: 2026-10-21. <a href="https://github.com/Sipsipl/smartcrossing">Code auf GitHub</a></footer>
 </div>
-<script src="data/site-data.js?v=3fccb579"></script>
-<script src="js/sim-config.js?v=3fccb579"></script>
-<script src="js/sim.js?v=3fccb579"></script>
-<script src="js/crossing.js?v=3fccb579"></script>
-<script src="js/pages.js?v=3fccb579"></script>
+<script src="data/site-data.js?v=fc98ab36"></script>
+<script src="js/i18n-de.js?v=fc98ab36"></script>
+<script src="js/i18n-en.js?v=fc98ab36"></script>
+<script src="js/i18n.js?v=fc98ab36"></script>
+<script src="js/sim-config.js?v=fc98ab36"></script>
+<script src="js/sim.js?v=fc98ab36"></script>
+<script src="js/crossing.js?v=fc98ab36"></script>
+<script src="js/pages.js?v=fc98ab36"></script>
 </body>
 </html>
