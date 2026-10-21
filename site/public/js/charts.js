@@ -23,7 +23,7 @@
   /**
    * box: container element. opts: {series:[{name, color (css), points:[[x,y]], dash, width, dots}],
    *   xLabel, yLabel, xMin, xMax, yMin, yMax, yFmt, xFmt, markers:[{x, label}], height, directLabels,
-   *   peaks:[{x, y, color, label}] (ringed maxima), compact (small chart: no legend)}
+   *   peaks:[{x, y, color, label}] (ringed maxima), clouds:[{color, points:[[x,y]], r, opacity}] (pale scatter behind the lines), compact (small chart: no legend)}
    * Returns the svg; svg.scales = {X, Y} maps data to svg user units (to overlay live elements).
    */
   SCX.lineChart = function (box, opts) {
@@ -41,7 +41,7 @@
     const m = { l: 46, r: opts.directLabels ? 92 : 14, t: opts.phases && opts.phases.length ? 34 : 14, b: 40 };
     if (W < 420 && opts.directLabels) m.r = 14; // phone: legend only
     const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img", "aria-label": opts.aria || opts.yLabel || SCX.t("chart.fallback") }, box);
-    const all = opts.series.flatMap((s) => s.points);
+    const all = [...opts.series, ...(opts.clouds || [])].flatMap((s) => s.points);
     const xMin = opts.xMin ?? Math.min(...all.map((p) => p[0])), xMax = opts.xMax ?? Math.max(...all.map((p) => p[0]));
     const yMin = opts.yMin ?? 0, yMax = opts.yMax ?? Math.max(...all.map((p) => p[1])) * 1.08;
     const X = (x) => m.l + ((x - xMin) / (xMax - xMin || 1)) * (W - m.l - m.r);
@@ -83,6 +83,11 @@
       el("circle", { cx, cy, r: 8.5 }, g);
       const tx = el("text", { x: cx, y: cy + 4, "text-anchor": "middle" }, g); tx.textContent = String(ph.n);
       if (ph.title) { const ti = el("title", {}, g); ti.textContent = ph.title; }
+    }
+    // scatter clouds (single measurements) behind the lines: pale dots
+    for (const cl of opts.clouds || []) {
+      const g = el("g", { class: "cloud", fill: cl.color, opacity: cl.opacity ?? 0.28 }, svg);
+      for (const p of cl.points) el("circle", { cx: X(p[0]).toFixed(1), cy: Y(p[1]).toFixed(1), r: cl.r ?? 2.4 }, g);
     }
     const lastYs = [];
     for (const s of opts.series) {

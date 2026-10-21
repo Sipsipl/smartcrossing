@@ -108,3 +108,13 @@ def test_incentives_order():
     assert o["go_exit_4s"] > o["wait_to_timeout_age20"]
     assert o["wait_to_timeout_age20_disc"] > o["wait_to_timeout_age20"]
     assert 0 < inc["break_even_p_crash"] < 1 and inc["horizon_s"] == 10.0
+
+
+def test_cloud_windows_and_json_shape():
+    """Cloud cell: 60-s sliding windows every 10 s per env, only after the 30 s warm-up; [density, throughput, demand]."""
+    pts = deadlock.cloud_job(("light", None, 0.1, 7, 2, 110.0))
+    assert len(pts) == 2 * 3  # windows ending at 90, 100, 110 s, 2 envs
+    assert all(len(p) == 3 and p[2] == 0.1 and p[0] > 0 and p[1] >= 0 for p in pts)
+    out = deadlock.cloud({"light": "light"}, demands=(0.1,), envs=2, seconds=110.0, per_demand=4, log=lambda *_: None)
+    assert len(out["drivers"]["light"]["points"]) == 4  # thinned
+    assert {"density", "throughput", "points", "protocol"} <= set(out["meta"])

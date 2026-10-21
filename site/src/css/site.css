@@ -290,12 +290,15 @@ ol.phases li.world { display: block; font-weight: 650; margin-top: 6px; color: v
 .chart .curve-label { fill: var(--c4); font-style: italic; }
 .chart .live-label { fill: var(--fg); }
 .chart .live-trail circle { fill: var(--fg); }
+.chart .cloud circle { pointer-events: none; }
 .chart .live-dot .halo { transform-box: fill-box; transform-origin: center; animation: fd-pulse 2s ease-out infinite; }
 @keyframes fd-pulse { 0% { transform: scale(0.7); opacity: 0.35; } 100% { transform: scale(1.7); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .chart .live-dot .halo { animation: none; } }
 .fd-legend { font-size: 13px; color: var(--muted); gap: 4px 14px; margin: 2px 0 4px; }
 .fd-legend > span { align-items: flex-start; }
+.fd-legend .fd-leg-text, .fd-legend .fd-leg-text span { display: inline; }
 .fd-key-line { border-color: var(--c4); margin-top: 8px; flex: none; }
+.fd-key-cloud { width: 10px; height: 10px; border-radius: 50%; background: var(--c4); opacity: 0.4; margin: 4px 6px 0 6px; flex: none; }
 .fd-key-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--fg); margin: 4px 6px 0 6px; flex: none; }
 .chart .live-dot .core { fill: var(--fg); stroke: var(--panel); stroke-width: 2; }
 .fd-now { margin: 2px 0 6px; font-size: 14px; min-height: 1.4em; font-variant-numeric: tabular-nums; }

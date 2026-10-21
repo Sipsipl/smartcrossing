@@ -1106,6 +1106,7 @@ def bench(found: dict, sel: dict, cfg: SimConfig, a) -> dict:
 
 FUNDAMENTAL = ROOT / "results" / "deadlock_fundamental.json"
 FUNDAMENTAL_DRIVERS = ("brain", "light", "reservation")  # curves of the fundamental diagram on the site
+START_DEMAND_MAX = 0.5  # max of the start page demand slider
 FUNDAMENTAL_FIELDS = ("demand", "density", "throughput", "density_veh_per_km", "demand_per_min")
 
 
@@ -1117,7 +1118,24 @@ def fundamental_data():
     raw = json.loads(FUNDAMENTAL.read_text(encoding="utf-8"))
     drivers = {k: [{f: p[f] for f in FUNDAMENTAL_FIELDS} for p in raw["drivers"][k]["points"]]
                for k in FUNDAMENTAL_DRIVERS if k in raw["drivers"]}
-    return {"drivers": drivers}
+    out = {"drivers": drivers, "cloud": cloud_data()}
+    if "brain" in drivers:  # start value of the traffic slider = the brain's capacity: its maximum mean throughput
+        cap = max(p["throughput"] for p in drivers["brain"])
+        out["max_throughput"] = round(cap, 1)
+        out["start_demand"] = min(round(cap / 240, 2), START_DEMAND_MAX)  # cars/min -> arrivals /s/arm, slider step 0.01
+    return out
+
+
+CLOUD = ROOT / "results" / "fundamental_cloud.json"
+
+
+def cloud_data():
+    """Scatter cloud behind the fundamental diagram (single measured 60-s windows per driver, from
+    results/fundamental_cloud.json: [density, throughput] pairs); {} if the file is missing."""
+    if not CLOUD.exists():
+        return {}
+    raw = json.loads(CLOUD.read_text(encoding="utf-8"))
+    return {k: [[p[0], p[1]] for p in v["points"]] for k, v in raw["drivers"].items() if k in FUNDAMENTAL_DRIVERS}
 
 
 def write_site(found: dict, sel: dict, bres: dict, cfg: SimConfig, kind: str, a):

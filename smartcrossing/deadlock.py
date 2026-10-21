@@ -591,6 +591,68 @@ def incentives(cfg_d: dict, gamma: float = 0.99, ages=(20.0, 40.0), go_s: float 
             "break_even_p_crash": round((e - w) / (e - k), 3)}
 
 
+# ------------------------------------------------------------------ scatter cloud
+CLOUD_DEMANDS = (0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5)
+CLOUD_WINDOW_S, CLOUD_STRIDE_S, CLOUD_SECONDS, CLOUD_ENVS, CLOUD_SEED = 60.0, 10.0, 270.0, 6, 5000
+CLOUD_PER_DEMAND = 60  # points kept per (driver, demand) after thinning
+
+
+def cloud_job(job) -> list[list[float]]:
+    """One cloud cell (spec, cfg_d, demand, seed, envs, seconds) -> [[density, throughput, demand], ...]: a
+    sliding 60-s window every 10 s, per env, for windows lying entirely after the 30 s warm-up. Definitions are
+    those of the live dot on the site's start page: density = mean number of driving cars on the map over
+    the window, throughput = exits in the window, per minute."""
+    spec, cfg_d, demand, seed, envs, seconds = job
+    cfg = SimConfig(**{**(cfg_d or {}), "demand": demand})
+    sim = Sim(cfg, envs, seed=seed)
+    drv = make_driver(spec, sim)
+    T = int(round(seconds / cfg.dt))
+    w, stride = int(round(CLOUD_WINDOW_S / cfg.dt)), int(round(CLOUD_STRIDE_S / cfg.dt))
+    first = int(round(WARMUP / cfg.dt)) + w
+    cars = np.zeros((T, envs))
+    exits = np.zeros((T + 1, envs))
+    for i in range(T):
+        cars[i] = sim.alive.sum(1)
+        sim.step(drv.act())
+        exits[i + 1] = sim.stats.exits
+    out = []
+    for end in range(first, T + 1, stride):
+        dens = cars[end - w:end].mean(0)
+        thr = (exits[end] - exits[end - w]) * (60.0 / CLOUD_WINDOW_S)
+        out += [[round(float(d), 1), round(float(t), 1), demand] for d, t in zip(dens, thr)]
+    return out
+
+
+def cloud(drivers: dict, demands=CLOUD_DEMANDS, envs=CLOUD_ENVS, seconds=CLOUD_SECONDS, seed=CLOUD_SEED,
+          per_demand=CLOUD_PER_DEMAND, cfg_d=None, workers=1, log=print) -> dict:
+    """Fundamental-diagram scatter cloud: {key: spec} -> {"meta", "drivers": {key: {"points": [[density,
+    throughput, demand], ...]}}}; each cell thinned evenly to ``per_demand`` points."""
+    jobs = [(spec, cfg_d, dm, seed + k, envs, seconds) for spec in drivers.values() for k, dm in enumerate(demands)]
+    t0 = time.time()
+    if workers > 1:
+        with mp.get_context("spawn").Pool(workers) as pool:
+            cells = pool.map(cloud_job, jobs, chunksize=1)
+    else:
+        cells = [cloud_job(j) for j in jobs]
+    out = {"meta": {
+        "density": "mean number of driving cars on the map over the window (as the live dot on the start page)",
+        "throughput": f"exits in the window per minute ({CLOUD_WINDOW_S:g}-s sliding window, one every "
+                      f"{CLOUD_STRIDE_S:g} s, windows entirely after the {WARMUP:g} s warm-up)",
+        "points": "[density, throughput, demand]; per driver and demand evenly thinned",
+        "protocol": f"{envs} envs x {seconds:g} s per demand {list(demands)}, default world, traffic seed {seed}+"},
+        "drivers": {}}
+    for ki, key in enumerate(drivers):
+        pts = []
+        for cell in cells[ki * len(demands):(ki + 1) * len(demands)]:
+            if len(cell) > per_demand:
+                cell = [cell[j] for j in np.linspace(0, len(cell) - 1, per_demand).round().astype(int)]
+            pts += cell
+        out["drivers"][key] = {"spec": drivers[key], "points": pts}
+        log(f"cloud {key}: {len(pts)} points")
+    log(f"cloud: {len(jobs)} cells in {time.time() - t0:.0f} s")
+    return out
+
+
 def main(argv=None):
     p = argparse.ArgumentParser()
     p.add_argument("cmd", choices=["summarize"])

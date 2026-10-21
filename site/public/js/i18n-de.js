@@ -249,5 +249,6 @@
  "fd.now": "Jetzt: <b>{cars}</b> Autos unterwegs · <b>{thr}</b> Autos/min",
  "fd.wait": "Der Punkt erscheint nach ein paar Sekunden.",
  "fd.me": "jetzt live",
- "fd.curve": "gemessen (Durchschnitt)"
+ "fd.max": " · Ring = Maximum {n}/min",
+ "start.demand-opt": "Startwert: so viele Autos, wie dieses Gehirn maximal schafft ({n}/min)."
 };

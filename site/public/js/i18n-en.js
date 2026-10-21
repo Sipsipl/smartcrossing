@@ -445,13 +445,15 @@
  "fd.now": "Now: <b>{cars}</b> cars on the road · <b>{thr}</b> cars/min",
  "fd.wait": "The dot appears after a few seconds.",
  "fd.me": "live now",
- "fd.curve": "measured (average)",
+ "idx.fd-leg-cloud": "single measured minutes",
+ "fd.max": " · ring = maximum {n}/min",
+ "start.demand-opt": "Starting value: as many cars as this brain can handle at most ({n}/min).",
  "idx.fd-title": "Where is the crossing right now?",
- "idx.fd-hint": "Push “How many cars arrive?” to the right and watch the dot pass the maximum of the curve.",
- "idx.fd-leg-line": "what this brain can handle at every amount of traffic (measured)",
- "idx.fd-leg-dot": "the simulation up here, right now",
+ "idx.fd-hint": "The dot jumps around inside the cloud – traffic fluctuates. With more traffic the cloud moves to the right.",
+ "idx.fd-leg-line": "average (measured)",
+ "idx.fd-leg-dot": "live now",
  "idx.fd-link": "What is this curve?",
  "cmp.fd-h2": "Fundamental diagram: what can the crossing handle?",
  "cmp.fd-intro": "Traffic research has known this curve for decades: the more cars are on the road at once, the more get through per minute – up to the capacity. If it gets even fuller, throughput <b>drops again</b>: queues build up, cars get in each other’s way, in the worst case everything stands still (gridlock). The traffic controller shows what the crossing could physically handle; traffic light and learned cars stay below it.",
- "cmp.fd-note": "Each dot is one demand level (12 to 120 cars/min arriving) measured over 3 minutes in 8 parallel simulations after a 30 s warm-up, mean over 3 traffic runs. The ringed dot is the maximum of each curve."
+ "cmp.fd-note": "Each dot is one demand level (12 to 120 cars/min arriving) measured over 3 minutes in 8 parallel simulations after a 30 s warm-up, mean over 3 traffic runs. The ringed dot is the maximum of each curve. The pale dots behind are single measured minutes (sliding 60-second windows, one every 10 s, 420 per driver): the line is their average, single minutes scatter widely around it."
 };

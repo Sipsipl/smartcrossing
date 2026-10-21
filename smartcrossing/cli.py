@@ -5,6 +5,8 @@
   python -m smartcrossing.cli gate    --driver policy:<file> [--out cases.json]   (stop gate, gates.py)
   python -m smartcrossing.cli deadlock --driver ... --demands 0.3,0.5 --out runs/deadlock/x.jsonl
                                        [--noise policy|0.1] [--lamp zero|shuffle]   (deadlock.py)
+  python -m smartcrossing.cli cloud --driver brain=policy:results/round4_best.npz --driver light --driver reservation
+                                       --out results/fundamental_cloud.json --workers 4   (scatter cloud, deadlock.py)
 """
 
 import argparse
@@ -54,7 +56,7 @@ def cfg_from_args(a) -> SimConfig:
 
 def main(argv=None):
     p = argparse.ArgumentParser()
-    p.add_argument("cmd", choices=["bench", "render", "gate", "evalset", "deadlock"])
+    p.add_argument("cmd", choices=["bench", "render", "gate", "evalset", "deadlock", "cloud"])
     p.add_argument("--driver", action="append", default=None,
                    help="driver spec (default reservation); evalset: repeatable, one block of lines per driver")
     p.add_argument("--demand", type=float, default=0.15)
@@ -74,7 +76,14 @@ def main(argv=None):
     drivers = a.driver or ["reservation"]
     driver = drivers[-1]
     cfg = cfg_from_args(a)
-    if a.cmd == "deadlock":
+    if a.cmd == "cloud":
+        from . import deadlock
+
+        specs = dict(d.split("=", 1) if "=" in d else (deadlock.label(d), d) for d in drivers)
+        res = deadlock.cloud(specs, [float(x) for x in a.demands.split(",")] if a.demands else deadlock.CLOUD_DEMANDS,
+                             workers=a.workers, cfg_d=json.loads(a.cfg) if a.cfg else None)
+        Path(a.out).write_text(json.dumps(res, separators=(",", ":")), encoding="utf-8", newline="\n")
+    elif a.cmd == "deadlock":
         from . import deadlock
 
         deadlock.sweep(drivers, [float(x) for x in a.demands.split(",")] if a.demands else deadlock.DEMANDS,

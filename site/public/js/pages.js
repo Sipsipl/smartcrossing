@@ -102,6 +102,7 @@
 
   // ------------------------------------------------------------------ fundamental diagram
   const FD_DRIVERS = [["brain", "drv.policy", "--c4"], ["light", "drv.light", "--c1"], ["reservation", "drv.reservation", "--c2"]];
+  const fdCloud = (key) => (D.fundamental && D.fundamental.cloud && D.fundamental.cloud[key]) || [];
   const fdPoints = (key) => ((D.fundamental && D.fundamental.drivers[key]) || []).map((p) => [p.density, p.throughput]);
   /** The point of a curve with the highest throughput ([density, throughput]). */
   const fdPeak = (pts) => pts.reduce((b, p) => (p[1] > b[1] ? p : b), pts[0]);
@@ -110,13 +111,16 @@
    *  maximum of each ringed. keys: which drivers; compact: small chart for the start page. */
   function fdChartOpts(keys, compact) {
     const used = FD_DRIVERS.filter(([k]) => keys.includes(k) && fdPoints(k).length);
+    // compact chart: no label at the ring (it would collide with the live dot); the legend names the maximum
     const peaks = used.map(([k, name, col]) => {
       const pk = fdPeak(fdPoints(k));
-      return { x: pk[0], y: pk[1], color: SCX.cssVar(col), label: tx("fd.peak", { n: num(pk[1], 0) }) };
+      return { x: pk[0], y: pk[1], color: SCX.cssVar(col), label: compact ? null : tx("fd.peak", { n: num(pk[1], 0) }) };
     });
+    const allPts = (k) => [...fdPoints(k), ...fdCloud(k)];
     return {
+      clouds: used.filter(([k]) => fdCloud(k).length).map(([k, name, col]) => ({ color: SCX.cssVar(col), points: fdCloud(k), r: compact ? 2.2 : 2.4, opacity: compact ? 0.3 : 0.22 })),
       series: used.map(([k, name, col]) => ({ name: tx(name), color: SCX.cssVar(col), dots: !compact, points: [[0, 0], ...fdPoints(k)] })),
-      peaks, xMin: 0, yMin: 0, yMax: compact ? Math.max(...used.flatMap(([k]) => fdPoints(k).map((p) => p[1]))) * 1.3 : undefined, xMax: compact ? Math.ceil(Math.max(...used.flatMap(([k]) => fdPoints(k).map((p) => p[0]))) * 1.2) : undefined,
+      peaks, xMin: 0, yMin: 0, yMax: compact ? Math.max(...used.flatMap(([k]) => allPts(k).map((p) => p[1]))) * 1.1 : undefined, xMax: compact ? Math.ceil(Math.max(...used.flatMap(([k]) => allPts(k).map((p) => p[0]))) * 1.05) : undefined,
       xLabel: tx("fd.xlabel"), yLabel: tx(compact ? "fd.ylabel" : "fd.ylabel.big"),
       yFmt: (v, tip) => (tip ? num(v) : String(Math.round(v))), xFmt: (v) => String(Math.round(v)),
       xTipFmt: (v) => tx("fd.xtip", { n: num(v, 1) }),
@@ -124,12 +128,14 @@
     };
   }
 
-  /** Small fundamental diagram of the main brain with a dot for the running simulation: density = cars on the
-   *  map (both smoothed over ~6 s of sim time), throughput = exits of the last 60 s. The dot is moved by a CSS
+  /** Small fundamental diagram of the main brain with a dot for the running simulation, same definitions as the
+   *  cloud behind the curve (results/fundamental_cloud.json): density = mean number of driving cars on the map
+   *  over the last 60 s, throughput = exits of the last 60 s (shorter windows right after the start). The dot is moved by a CSS
    *  transform (transition) a few times per second; the chart itself is only redrawn on resize / theme change. */
   function fdLive(box, readout, cx) {
     if (!D.fundamental || !fdPoints("brain").length) { $("fd-live").hidden = true; return null; }
     let dot = null, trail = null, scales = null, ema = null, lastT = 0, lastUpd = 0;
+    const carsHist = []; // [sim time, cars on the map] per update (4/s), the last 60 s
     const hist = []; // last positions (svg px), one per update (4/s): ~5 s of fading trail
     const NS = "http://www.w3.org/2000/svg";
     const place = (cars, thr) => {
@@ -145,25 +151,11 @@
       if (hist.length > 21) hist.shift();
       trail.innerHTML = hist.slice(0, -1).map((p, i, a) => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${(1.5 + 2 * i / a.length).toFixed(1)}" style="opacity:${(0.5 * (i + 1) / a.length).toFixed(2)}"/>`).join("");
     };
-    /** Label of the measured curve: under its rising part (free space), at half the maximum's density. */
-    const curveLabel = (svg) => {
-      const { X, Y } = scales, pts = [[0, 0], ...fdPoints("brain")], pk = fdPeak(pts);
-      const x0 = pk[0] * 0.5;
-      let i = 1;
-      while (i < pts.length - 1 && pts[i][0] < x0) i++;
-      const [a, b] = [pts[i - 1], pts[i]], f = b[0] > a[0] ? (x0 - a[0]) / (b[0] - a[0]) : 0, y0 = a[1] + f * (b[1] - a[1]);
-      const t = document.createElementNS(NS, "text");
-      t.setAttribute("class", "curve-label");
-      t.setAttribute("x", X(x0) + 10);
-      t.setAttribute("y", Y(y0) + 18);
-      t.textContent = tx("fd.curve");
-      svg.appendChild(t);
-    };
     const draw = () => {
       const o = fdChartOpts(["brain"], true);
+      $("fd-max").textContent = tx("fd.max", { n: num(fdPeak(fdPoints("brain"))[1], 0) });
       const svg = SCX.lineChart(box, o);
       scales = svg.scales;
-      curveLabel(svg);
       trail = document.createElementNS(NS, "g");
       trail.setAttribute("class", "live-trail");
       svg.appendChild(trail);
@@ -180,12 +172,12 @@
       if (now - lastUpd < 250 || !dot) return;
       lastUpd = now;
       const s = cx.statsSummary();
-      if (s.t < lastT) ema = null; // simulation restarted
-      const dt = s.t - lastT;
+      if (s.t < lastT) { ema = null; carsHist.length = 0; } // simulation restarted
       lastT = s.t;
-      if (s.t < 12) { readout.textContent = tx("fd.wait"); return; }
-      const a = ema === null ? 1 : 1 - Math.exp(-dt / 6);
-      ema = ema === null ? { cars: s.road, thr: s.throughput } : { cars: ema.cars + a * (s.road - ema.cars), thr: ema.thr + a * (s.throughput - ema.thr) };
+      carsHist.push([s.t, s.road]);
+      while (carsHist.length > 1 && carsHist[0][0] < s.t - 60) carsHist.shift();
+      if (s.t - carsHist[0][0] < 5) { readout.textContent = tx("fd.wait"); return; } // at least 5 s of sim time
+      ema = { cars: carsHist.reduce((a, p) => a + p[1], 0) / carsHist.length, thr: s.throughput };
       readout.innerHTML = tx("fd.now", { cars: num(ema.cars, 0), thr: num(ema.thr, 0) });
       place(ema.cars, ema.thr);
     };
@@ -227,6 +219,13 @@
       $("noise").disabled = !c.signal;
       cx.applyControls();
     };
+    // start value of the traffic slider: the main brain's capacity (its maximum measured throughput, set in build.py)
+    const sd = D.fundamental && D.fundamental.start_demand;
+    if (sd) {
+      $("demand").value = sd;
+      $("demand-opt").textContent = tx("start.demand-opt", { n: num(D.fundamental.max_throughput, 0) });
+      $("demand-opt").hidden = false;
+    }
     for (const id of ["demand", "pright", "pleft", "noise"]) $(id).addEventListener("input", apply);
     $("sigon").addEventListener("change", apply);
     apply();
