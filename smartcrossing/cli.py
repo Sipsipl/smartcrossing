@@ -7,7 +7,6 @@
 
 import argparse
 import json
-import time
 from pathlib import Path
 
 import numpy as np
@@ -53,34 +52,46 @@ def cfg_from_args(a) -> SimConfig:
 
 def main(argv=None):
     p = argparse.ArgumentParser()
-    p.add_argument("cmd", choices=["bench", "render", "gate"])
-    p.add_argument("--driver", default="reservation")
+    p.add_argument("cmd", choices=["bench", "render", "gate", "evalset"])
+    p.add_argument("--driver", action="append", default=None,
+                   help="driver spec (default reservation); evalset: repeatable, one block of lines per driver")
     p.add_argument("--demand", type=float, default=0.15)
     p.add_argument("--cfg", default="", help="JSON overrides for SimConfig")
     p.add_argument("--envs", type=int, default=8)
     p.add_argument("--seconds", type=float, default=120)
     p.add_argument("--seed", type=int, default=1000)
-    p.add_argument("--out", default="runs/render", help="render: folder; gate: optional JSON file of the cases")
+    p.add_argument("--out", default=None, help="render: folder (default runs/render); gate: optional JSON file of "
+                   "the cases; evalset: JSONL file the lines are appended to")
     p.add_argument("--view", type=float, default=None, help="render: half-width of the view in m")
+    p.add_argument("--demands", default="", help="evalset: comma-separated demands (default evalset.DEMANDS)")
+    p.add_argument("--seeds", default="", help="evalset: comma-separated traffic seeds (default evalset.SEEDS)")
+    p.add_argument("--workers", type=int, default=1, help="evalset: worker processes")
     a = p.parse_args(argv)
+    drivers = a.driver or ["reservation"]
+    driver = drivers[-1]
     cfg = cfg_from_args(a)
-    if a.cmd == "gate":
+    if a.cmd == "evalset":
+        from . import evalset
+
+        evalset.evalset(drivers, a.out, json.loads(a.cfg) if a.cfg else None,
+                        demands=[float(x) for x in a.demands.split(",")] if a.demands else evalset.DEMANDS,
+                        seeds=[int(x) for x in a.seeds.split(",")] if a.seeds else evalset.SEEDS,
+                        envs=a.envs, seconds=a.seconds, workers=a.workers)
+    elif a.cmd == "gate":
         from .gates import stop_gate
 
-        summary, rows = stop_gate(a.driver, json.loads(a.cfg) if a.cfg else None)
-        if a.out != p.get_default("out"):
+        summary, rows = stop_gate(driver, json.loads(a.cfg) if a.cfg else None)
+        if a.out:
             Path(a.out).write_text(json.dumps(rows, indent=1), encoding="utf-8", newline="\n")
         print(json.dumps(summary))
     elif a.cmd == "bench":
-        t0 = time.time()
-        sim, _ = run(a.driver, cfg, a.envs, a.seconds, a.seed)
-        res = {"driver": a.driver, "demand": cfg.demand, **summarize(sim, a.seconds)}
-        res["wall_s"] = round(time.time() - t0, 1)
-        print(json.dumps({k: round(v, 3) if isinstance(v, float) else v for k, v in res.items()}))
+        from .evalset import bench_line
+
+        print(json.dumps(bench_line(driver, cfg, a.seed, a.envs, a.seconds)))
     else:
-        out = Path(a.out)
+        out = Path(a.out or "runs/render")
         out.mkdir(parents=True, exist_ok=True)
-        sim, frames = run(a.driver, cfg, 1, a.seconds, a.seed, frame_every=2, view=a.view,
+        sim, frames = run(driver, cfg, 1, a.seconds, a.seed, frame_every=2, view=a.view,
                           spacetime=out / "spacetime.png")
         pick = np.linspace(len(frames) * 0.1, len(frames) - 1, 9).astype(int)
         contact_sheet([frames[i] for i in pick]).save(out / "sheet.png")
