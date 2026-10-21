@@ -30,6 +30,7 @@ Owners, damit Kontext frisch ist und GPU-Training möglich wird.
 - **Kontext klein halten:** Arbeit an Subagents geben (klare Dateizuständigkeit, keine zwei
   Agents in denselben Dateien), knappe Berichte (Zahlen, Pfade, keine Code-Dumps) anfordern.
   Subagents schauen sich Bilder/Screenshots selbst an; du nur stichprobenartig.
+- **Standard-Eval = `cli evalset`** (4 Nachfragen × 3 Verkehrs-Seeds × 8 Envs × 120 s + Anhaltetest, JSONL wie results/round4_eval.jsonl).
 - **Selbst evaluieren:** `pytest`, `cli bench` (JSON-Zeile), `cli render` (sheet.png,
   spacetime.png), `analyze.py`, Playwright-Screenshots der Website. Nie Erfolg behaupten ohne
   Beleg; Misserfolge ehrlich berichten.

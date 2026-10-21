@@ -70,8 +70,22 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
   an interface value like n_signal) can grow without new weights. numpy (PolicyDriver, workers), torch
   (rollout_torch, ppo_torch via autograd) and JS (sim.js) forwards, parity-tested
   (tests/test_policy_set.py, test_sim_js_parity.py). Checkpoints carry an `arch` field (absent = MLP,
-  older files unchanged). Site: sim.js runs set brains; build.py skips them for now (brain view and
-  snapshot format assume MLP layers).
+  older files unchanged); `policy.linear_forward` / `ppo_torch.linear_forward` and `policy.param_count` are the
+  one dispatch between the two architectures. Site: sim.js runs set brains; build.py handles both (its `Brain`
+  helper: snapshot, bench payload, rounding).
+- `smartcrossing/bc.py` (`ppo --init-bc TEACHER.npz`): behaviour cloning of an MLP brain into a new actor (set
+  encoder or MLP of other sizes; the student may see more neighbours). Other `ppo.py` options worth knowing:
+  `--max-minutes` (stop after the iteration past the limit; the final checkpoint is always written and
+  evaluated), `--init-policy` / `--critic-warmup` (above), `--arch set` / `--critic-arch`.
+- `smartcrossing/gates.py`: stop gate (`cli gate`), a measurement: one car alone in front of a wreck / parked
+  car (speeds x gaps x positions x types x distractors) must stop without crashing.
+- `smartcrossing/evalset.py` (`cli evalset`): the standard eval protocol = 4 demands (0.05, 0.15, 0.3, 0.5) x
+  3 traffic seeds (1000, 2000, 3000) x 8 envs x 120 s in the default world + the stop gate, appended as JSON
+  lines (format of results/round2_eval.jsonl / round4_eval.jsonl). Its `bench_one` / `KEEP_KEYS` are shared by
+  `cli bench`, `ppo.eval_job` and the site bench.
+- Obstacle scenarios (training option, round 2): SimConfig `obstacle_envs` (fraction of envs; 0 = off and
+  bit-identical), `obstacle_rate`, `obstacle_time`, `obstacle_max`, `obstacle_parked`, `obstacle_box`: wrecks /
+  parked cars appear on a path (never closer than a car could stop).
 - `smartcrossing/policy.py` (shared MLP, numpy, `PolicyDriver`). The old ES trainer was removed
   (history only); ES checkpoints still load via `policy_compat.py`.
   `smartcrossing/policy_compat.py`: running old checkpoints (observation-layout remap by

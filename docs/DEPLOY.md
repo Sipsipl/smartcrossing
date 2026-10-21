@@ -84,8 +84,8 @@ ca. 0,4 MB): Ampel, Verkehrsrechner und das beste Gehirn fahren je 90 s mit gena
 Verkehr (wenig / mittel / viel). Die Aufnahme läuft bei jedem Build neu (ca. 20 s), passt sich
 also automatisch an die aktuelle Simulation und das aktuell beste Gehirn an.
 
-Ohne Optionen ist das Hauptgehirn `DEFAULT_MAIN` in `site/build.py` (aktuell `r1_main_x3/current`,
-= `results/round1_x3.npz`); `--previous` (Standard `wide_s1ft2/ckpt_2650`) ist das Gehirn davor, das
+Ohne Optionen ist das Hauptgehirn `DEFAULT_MAIN` in `site/build.py` (aktuell `r4_S_s1/ckpt_0205`,
+= `results/round4_best.npz`); `--previous` (Standard `r2_B_s1/ckpt_0639` = `results/round2_best.npz`) ist das Gehirn davor, das
 auf „Vergleich“ daneben steht. Quelle (`--source auto`): Schnappschuss `results/site/` und
 Trainingsläufe aus `runs/` werden zusammengeführt (ein Lauf in `runs/` ersetzt den gleichnamigen im
 Schnappschuss); der Build schreibt den Schnappschuss danach neu. Die Zeitreise folgt der Kette der
