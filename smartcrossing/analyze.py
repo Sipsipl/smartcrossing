@@ -24,7 +24,6 @@ from .cli import make_driver
 from .metrics import summarize
 from .sim import ARM_U, DONE_NAMES, OBS_DIM, Sim, SimConfig, nb_features
 
-MODES = ("normal", "zero", "shuffle")
 KIND_NAMES = DONE_NAMES[1:]  # outcome kinds of finished cars (DONE_NAMES[0] is "none")
 NB_PRESENT = 5  # index of the `present` flag inside a neighbour block (after rel. pos 2, rel. heading 2, speed)
 

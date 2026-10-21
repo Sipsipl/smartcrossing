@@ -4,10 +4,6 @@ All cars of one group share one flat parameter vector. The network maps the
 per-car observation of :mod:`smartcrossing.sim` to (accel, curvature, signal...)
 with tanh hidden layers and a tanh output.
 
-``forward`` accepts either one parameter vector (D,) applied to every car, or one
-vector per environment (B, D) so a whole ES population can be evaluated inside a
-single batched Sim (environment b uses params[b]).
-
 Architecture: the default is this MLP on the flat observation (``arch`` None / absent from the
 checkpoint). ``arch = {"type": "set", ...}`` is the neighbour set encoder of policy_set.py; its
 checkpoints store the arch dict next to the flat params (``save_npz(..., arch=...)``) and keep
@@ -43,6 +39,11 @@ def n_params(sizes) -> int:
     return sum(a * b + b for a, b in zip(sizes[:-1], sizes[1:]))
 
 
+def param_count(sizes, arch=None) -> int:
+    """Length of the flat parameter vector of an MLP (``sizes``) or a set encoder (``arch``)."""
+    return policy_set.n_params(arch) if is_set(arch) else n_params(sizes)
+
+
 def init_params(sizes, rng=None, out_scale=0.1) -> np.ndarray:
     """Scaled-normal init; the output layer is small so the initial policy keeps
     roughly constant speed and heading."""
@@ -74,22 +75,30 @@ def is_set(arch) -> bool:
     return bool(arch) and arch.get("type", "mlp") == "set"
 
 
+def mlp_linear(params: np.ndarray, sizes, x: np.ndarray) -> np.ndarray:
+    """MLP with tanh hidden layers and a linear output (PPO's pre-squash mean; the policy is tanh of it)."""
+    layers = unpack(params, sizes)
+    for k, (W, b) in enumerate(layers):
+        x = x @ W + b
+        if k < len(layers) - 1:
+            x = np.tanh(x)
+    return x
+
+
+def linear_forward(params: np.ndarray, sizes, x: np.ndarray, arch=None) -> np.ndarray:
+    """Linear output of an MLP (``sizes``; arch None / mlp) or a set encoder (policy_set ``arch``).
+    The torch twin is ppo_torch.linear_forward."""
+    return policy_set.forward(params, arch, x) if is_set(arch) else mlp_linear(params, sizes, x)
+
+
 def forward(params: np.ndarray, obs: np.ndarray, sizes, in_scale=None, arch=None) -> np.ndarray:
-    """params (D,) with obs (..., obs_dim), or params (B, D) with obs (B, N, obs_dim).
+    """Deterministic policy: tanh of the linear output for params (D,) and obs (..., obs_dim).
     in_scale (obs_dim,) multiplies the observation first (None = identity). arch: None / mlp,
-    or a policy_set arch (one params vector only)."""
+    or a policy_set arch."""
+    if params.ndim != 1:
+        raise ValueError("forward takes one parameter vector")
     h = obs if in_scale is None else obs * in_scale
-    if is_set(arch):
-        if params.ndim != 1:
-            raise ValueError("set-encoder policies take one parameter vector")
-        return np.tanh(policy_set.forward(params, arch, h))
-    batched = params.ndim == 2
-    for W, b in unpack(params, sizes):
-        if batched:
-            h = np.tanh(np.einsum("bni,bio->bno", h, W, optimize=True) + b[:, None, :])
-        else:
-            h = np.tanh(h @ W + b)
-    return h
+    return np.tanh(linear_forward(params, sizes, h, arch))
 
 
 class PolicyDriver:

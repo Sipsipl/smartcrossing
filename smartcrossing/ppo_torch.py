@@ -102,6 +102,11 @@ def set_forward(p, arch, x):
     return z
 
 
+def linear_forward(p, sizes, x, arch=None):
+    """Linear output of an MLP (``sizes``) or a set encoder (``arch``); torch twin of policy.linear_forward."""
+    return set_forward(p, arch, x) if arch else mlp_forward(p, sizes, x)[0]
+
+
 def net_forward(p, sizes, x, arch=None):
     """(output, context for net_backward) of an MLP (``sizes``) or a set encoder (``arch``)."""
     if arch is None:

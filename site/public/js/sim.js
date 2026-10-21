@@ -64,8 +64,6 @@
     return Math.hypot(Math.max(W + Rc - Math.abs(x), 0.0), Math.max(W + Rc - Math.abs(y), 0.0));
   }
 
-  const offroadPoint = (x, y, W, Rc) => cornerDist(x, y, W, Rc) < Rc;
-
   /** First t >= 0 at which the ray enters {u >= a, v >= b} (Infinity if never). */
   function quarterEntry(u, v, du, dv, a, b) {
     if (Math.abs(du) < 1e-12) du = 1e-12;

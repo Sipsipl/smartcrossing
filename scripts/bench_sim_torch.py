@@ -30,7 +30,7 @@ sys.path.insert(0, str(ROOT))
 
 from smartcrossing import ppo  # noqa: E402
 from smartcrossing.ppo_common import N_PRIV  # noqa: E402
-from smartcrossing.policy import load_in_scale, load_npz  # noqa: E402
+from smartcrossing.policy import load_in_scale, load_npz, mlp_linear  # noqa: E402
 from smartcrossing.sim import Sim, SimConfig, act_dim, obs_dim  # noqa: E402
 
 CKPT = ROOT / "results" / "round1_x3.npz"
@@ -65,9 +65,9 @@ def numpy_runner(cfg, B, seed):
         act = np.zeros((B, cfg.n_slots, A))
         if len(bi):
             o = obs[bi, ni] * in_scale
-            mu = ppo.mlp_forward(actor_p, a_sizes, o)
+            mu = mlp_linear(actor_p, a_sizes, o)
             u = mu + std * rng.standard_normal(mu.shape)
-            ppo.mlp_forward(critic_p, c_sizes, np.concatenate([o, pr[bi, ni]], 1))
+            mlp_linear(critic_p, c_sizes, np.concatenate([o, pr[bi, ni]], 1))
             act[bi, ni] = np.tanh(u)
         sim.step(act)
 
