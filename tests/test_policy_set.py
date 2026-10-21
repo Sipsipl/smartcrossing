@@ -1,7 +1,7 @@
 """Set encoder over the neighbours (policy_set.py, Roadmap B): numpy / torch forward parity,
 permutation invariance over neighbour slots, presence mask, checkpoint round trip (old MLP
 checkpoints unchanged), more neighbour slots (SimConfig.n_neighbours), the torch update and
-rollout with set networks, and ppo.main --arch set."""
+rollout with set networks (ppo.main --arch set: test_ppo_main.py, behaviour cloning: test_bc.py)."""
 
 import json
 from pathlib import Path
@@ -170,8 +170,9 @@ def test_old_checkpoints_unchanged():
     """Committed MLP checkpoints load as before (no arch, K = 4) and their export has layers."""
     from smartcrossing.policy import export_json, load_npz
 
-    for path in sorted((ROOT / "results").glob("*.npz"))[:3]:
-        assert load_arch(path) is None
+    mlp_paths = [p for p in sorted((ROOT / "results").glob("*.npz")) if load_arch(p) is None]
+    assert len(mlp_paths) >= 3
+    for path in mlp_paths[:3]:
         params, sizes, _ = load_npz(path)
         sim = Sim(SimConfig(n_slots=8), 1, seed=0)
         drv = PolicyDriver.load(path, sim)
@@ -219,57 +220,3 @@ def test_torch_rollout_and_update_with_set_networks():
     assert out["epochs_done"] == 2 and np.isfinite(out["vloss"])
     assert np.abs(actor.p - p0).max() > 1e-5 and np.abs(critic.p - c0).max() > 1e-5
     assert opt_a.t == opt_c.t == 8
-
-
-def test_ppo_main_arch_set(tmp_path):
-    pytest.importorskip("torch")
-    from smartcrossing import ppo
-
-    runs = tmp_path / "runs"
-    common = ["--workers", "1", "--envs", "2", "--horizon", "16", "--hidden", "8,8", "--minibatches", "2", "--epochs",
-              "1", "--eval-every", "0", "--demand-start", "0.3", "--arch", "set", "--set-phi", "8", "--set-heads", "2",
-              "--set-dk", "4", "--cfg", json.dumps({"n_slots": 8, "n_neighbours": 6})]
-    with pytest.raises(SystemExit, match="torch update"):
-        ppo.main(["--name", "bad", "--iters", "1", "--runs-dir", str(runs), *common])
-    ppo.main(["--name", "s", "--iters", "3", "--runs-dir", str(runs), "--update-device", "cpu", *common])
-    ppo.main(["--name", "t", "--iters", "2", "--runs-dir", str(runs), "--rollout-device", "cpu", *common])
-    # behaviour-cloning warm start from the MLP brain (K 4 -> 6)
-    ppo.main(["--name", "b", "--iters", "1", "--runs-dir", str(runs), "--rollout-device", "cpu", "--init-bc",
-              str(ROOT / "results" / "round2_best.npz"), "--bc-steps", "5", "--bc-seconds", "3", *common])
-    for name in ("s", "t", "b"):
-        run = runs / name
-        arch = load_arch(run / "current.npz")
-        assert arch["type"] == "set" and arch["K"] == 6 and arch["phi"] == [8]
-        args = json.loads((run / "args.json").read_text(encoding="utf-8"))
-        assert args["actor_arch"] == arch and args["critic_arch"]["n_extra"] == N_PRIV
-        sim = Sim(SimConfig(n_slots=8, demand=0.5), 2, seed=0)
-        drv = PolicyDriver.load(run / "current.npz", sim)
-        for _ in range(20):
-            sim.step(drv.act())
-    from smartcrossing.gates import stop_gate
-
-    g, _ = stop_gate(f"policy:{runs / 's' / 'current.npz'}", {})
-    assert 0.0 <= g["safe_rate_feasible"] <= 1.0
-
-
-def test_behaviour_cloning_into_set_actor():
-    """bc.py: the teacher's states and pre-tanh outputs are recorded (student K > teacher K works),
-    and fitting reduces the imitation error."""
-    pytest.importorskip("torch")
-    from smartcrossing.bc import collect, fit, teacher_mu
-    from smartcrossing.policy import load_in_scale, load_npz
-
-    teacher = ROOT / "results" / "round2_best.npz"
-    cfg = SimConfig(n_slots=16, n_neighbours=6)
-    x, y = collect(str(teacher), cfg, envs=4, seconds=15.0, demand=(0.3, 0.4))
-    assert x.shape[1] == obs_dim(cfg) and len(x) == len(y) > 100
-    params, sizes, _ = load_npz(teacher)
-    n_t = sizes[0]
-    np.testing.assert_allclose(teacher_mu(params, sizes, x[:, :n_t] * load_in_scale(teacher)), y, atol=1e-12)
-    arch = _arch(cfg, "attn")
-    p0 = policy_set.init_params(arch, 0, 0.01)
-    scale = default_in_scale(cfg)
-    mse0 = float(np.mean((policy_set.forward(p0, arch, x * scale) - y) ** 2))
-    p, mse = fit(arch, p0, x * scale, y, steps=150, batch=512, lr=3e-3)
-    assert mse < 0.6 * mse0
-    assert float(np.mean((policy_set.forward(p, arch, x * scale) - y) ** 2)) == pytest.approx(mse, rel=1e-3)

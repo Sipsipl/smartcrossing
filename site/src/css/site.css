@@ -257,3 +257,21 @@ ol.phases li.world { display: block; font-weight: 650; margin-top: 6px; color: v
   .rw-row .rw-track { grid-column: 1 / -1; grid-row: 2; }
   .rw-row .val { grid-row: 1; grid-column: 2; }
 }
+
+/* "Das Gehirn": set / attention brain diagram (brain.js SetView) and the brain picker */
+.setnet { display: block; margin: 0 auto; max-width: 100%; touch-action: manipulation; }
+.setnet text { font-family: ui-sans-serif, system-ui, sans-serif; user-select: none; }
+.setnet text.halo { paint-order: stroke; stroke: var(--panel); stroke-width: 4px; stroke-linejoin: round; }
+.setnet [data-id] { cursor: pointer; }
+.brain-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 0; }
+.legend [hidden], .brain-pick[hidden], #setnet[hidden] { display: none !important; }
+
+/* /gehirn: enlarged network (default on wide screens; the toggle goes back to the side-by-side layout) */
+.brain-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.brain-head #selhead { min-width: 0; flex: 1; }
+#brain-big { display: none; }
+@media (min-width: 901px) { #brain-big { display: inline-block; } }
+@media (min-width: 901px) {
+  .sim-layout.big, .sim-layout.wide-panel.big { grid-template-columns: minmax(0, 1fr); }
+  .sim-layout.big #stage { max-width: 760px; margin: 0 auto; width: 100%; }
+}

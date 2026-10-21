@@ -2,7 +2,7 @@
 
 Same seed (TorchSim(rng="numpy") replays sim.py's random draws), same actions: every
 step positions, done kinds, uids, rewards, queues and observations must agree
-(float64, cpu; and cuda if available, with a shorter run: eager cuda is launch-bound).
+(float64, cpu; and cuda with SC_TEST_CUDA=1, with a shorter run: eager cuda is launch-bound).
 torch comes from the optional `gpu` poetry group: skipped without it.
 """
 
@@ -11,13 +11,13 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from conftest import CUDA, DEVICES  # noqa: E402
 from smartcrossing.sim import STAT_NAMES, Sim, SimConfig, act_dim  # noqa: E402
 from smartcrossing.sim_torch import TorchSim  # noqa: E402
 
 TOL = 1e-9
 RUN = {"cpu": (6, 300), "cuda": (6, 120)}  # (envs, steps); both contain exits, crashes, off-road and wrecks
 
-DEVICES = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
 
 
 def _actions(rng, B, N, A):
@@ -102,7 +102,7 @@ def test_torch_matches_numpy(device, cfg_kw):
     print(f"[{device}] max abs deviation over {steps} steps: {worst:.3g}; done kinds {kinds.tolist()}")
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs cuda")
+@CUDA
 @pytest.mark.parametrize("extra", [{}, dict(obstacle_envs=0.5, obstacle_rate=2.0, crash_cost_speed="own")])
 def test_cuda_graph_matches_eager(extra):
     """The CUDA-graph replay of step() gives the same trajectory as eager stepping (torch rng)."""

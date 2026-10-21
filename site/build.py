@@ -20,7 +20,9 @@ runs/ is gitignored and usually holds only the latest runs, so by default (--sou
 merges: the committed snapshot plus the training runs found in runs/ (a run in runs/ replaces the
 snapshot's run of the same name). Training runs are runs/es*, runs/ppo*, runs/wide* and runs/r<N>_*
 (training rounds, PPO); prof_*, smoke_* and other folders are ignored. Warm starts are followed via
-args.json "init" (a run's state.npz) and "init_policy" (a transplanted checkpoint, matched by weights).
+args.json "init" (a run's state.npz), "init_policy" (a transplanted checkpoint, matched by weights) and
+"init_bc" (the MLP teacher a brain was behaviour-cloned from, matched by weights). Brains are MLPs
+(policy "layers") or set encoders (smartcrossing/policy_set.py: policy "arch" + flat "params").
 A build from runs/ (or a merge) also writes a compact snapshot of everything it used
 to results/site/ (committed): the chosen checkpoints (brains/<run>/<name>.npz, exact weights,
 so the bench cache keys stay valid), the warm-start chain info and the thinned learning curves
@@ -65,14 +67,15 @@ DEMANDS = [0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 1.0]  # up to the start page slider m
 # shown before it (narrow crossing); override with --main / --history
 # Checkpoints are named <run>/<file stem> (found in runs/ or in the snapshot); a path to an
 # .npz anywhere (e.g. results/wide_s1ft2_ckpt2650.npz) works too if its weights match one.
-DEFAULT_MAIN = ["r2_B_s1/ckpt_0639"]  # = results/round2_best.npz (round 2: practised with obstacle scenarios)
-DEFAULT_PREVIOUS = "r1_main_x3/current"  # = results/round1_x3.npz, the main brain before round 2
+DEFAULT_MAIN = ["r4_S_s1/ckpt_0205"]  # = results/round4_best.npz (round 4: set / attention encoder, K=8 neighbours)
+DEFAULT_PREVIOUS = "r2_B_s1/ckpt_0639"  # = results/round2_best.npz, the main brain before round 4
 DEFAULT_HISTORY = "ppo17/ckpt_5250"
 # second brain for mixing on the start page; old brains (2 lamps, no brake light) cannot share a sim with the
 # main brain, so none for now (was wide_s0ft/ckpt_2850 = results/wide_s0ft_ckpt2850.npz)
 DEFAULT_MIX = ""
 TIMELINE_DEMANDS = [0.05, 0.15]
-BENCH_ENVS, BENCH_SECONDS, BENCH_SEED = 8, 120.0, 1000
+BENCH_ENVS, BENCH_SECONDS = 8, 120.0
+BENCH_SEEDS = (1000, 2000, 3000)  # traffic seeds, the same for all drivers (paired); results are averaged
 # Plain German names for known runs: run id -> (short label for chart markers, label, one-line
 # explanation). Shown on "Wie lernen sie?" instead of the raw ids; unmapped runs fall back to the id.
 RUN_INFO = {
@@ -135,13 +138,32 @@ RUN_INFO = {
     "r1_main_x3": ("R1+", "Runde 1: länger weitergelernt",
                    "Rund 40 % weniger Unfälle als das Gehirn davor, bei dichtem Verkehr aber noch viele – das Hauptgehirn vor Runde 2."),
     "r2_B_s1": ("R2", "Runde 2: mit Hindernissen geübt",
-                "Das aktuelle Gehirn: im Training standen Wracks und parkende Autos im Weg. Es bremst viel öfter dahinter ab und reiht sich ein, statt hineinzufahren."),
+                "Im Training standen Wracks und parkende Autos im Weg: Es bremst viel öfter dahinter ab und reiht sich ein, statt hineinzufahren – das Hauptgehirn vor Runde 4."),
     "r2_A_s1": ("R2a", "Runde 2, Test: nur mehr Ausprobieren",
                 "Ohne Hindernisse im Training: schon deutlich weniger Unfälle als vorher, aber längst nicht so sicher vor Hindernissen."),
     "r2_A_s2": ("R2a'", "Runde 2, Test: nur mehr Ausprobieren, zweiter Lauf",
                 "Anderer Zufallsstart, fast dasselbe Ergebnis."),
     "r2_C_s1": ("R2c", "Runde 2, Test: Unfälle je nach eigenem Tempo bestraft",
                 "Mit Hindernissen und tempoabhängiger Strafe: etwas schlechter als ohne die Strafe (bei einem Lauf nicht sicher)."),
+    "r3_B_long": ("R3", "Runde 3: Hindernis-Gehirn länger trainiert",
+                  "Weitergelernt: kaum weniger Unfälle – mehr vom Gleichen half nicht."),
+    "r2_B_s2": ("R2'", "Runde 2: mit Hindernissen, zweiter Lauf",
+                "Gleiches Rezept, anderer Zufallsstart: deutlich mehr Unfälle – der erste Lauf hatte auch Glück."),
+    "r2_C_s2": ("R2c'", "Runde 2, Test: tempoabhängige Strafe, zweiter Lauf",
+                "Bestätigt: mit tempoabhängiger Strafe mehr Unfälle bei dichtem Verkehr."),
+    "r4_S_s1": ("R4", "Runde 4: ein Mini-Netz für jeden Nachbarn + Aufmerksamkeit",
+                "Das aktuelle Gehirn: schaut auf bis zu 8 Nachbarn, jeder geht durch dasselbe kleine Netz, dann entscheidet eine „Aufmerksamkeit“, wer gerade zählt. "
+                "Erst hat es das vorige Gehirn nachgeahmt, dann 12 Minuten weitergelernt."),
+    "r4_S_s2": ("R4'", "Runde 4: Mini-Netz + Aufmerksamkeit, zweiter Lauf",
+                "Anderer Zufallsstart, ähnlich gut – bei sehr dichtem Verkehr bleiben aber mehr Autos mitten auf der Kreuzung stecken."),
+    "r4_M_s1": ("R4m", "Runde 4, Vergleich: bisheriges Netz weitertrainiert",
+                "Gleich lange (12 Minuten) mit dem bisherigen Netz (64 × 64) weitergelernt: nicht besser als vorher, bei dichtem Verkehr eher mehr Unfälle."),
+    "r4_M_s2": ("R4m'", "Runde 4, Vergleich: bisheriges Netz, zweiter Lauf",
+                "Anderer Zufallsstart, ähnlich."),
+    "r4_W_s1": ("R4w", "Runde 4, Vergleich: doppelt so breites Netz",
+                "Mehr Neuronen (128 × 128) helfen auch – aber nicht so viel wie das Mini-Netz pro Nachbar."),
+    "r4_W_s2": ("R4w'", "Runde 4, Vergleich: breites Netz, zweiter Lauf",
+                "Anderer Zufallsstart, ähnlich."),
     "r1_x1": ("R1a", "Runde 1, Test: Unfälle so teuer wie bisher",
               "Kurzer Test: ähnlich gut wie mit dreifacher Strafe – der Unterschied ist Zufall."),
     "r1_x10": ("R1b", "Runde 1, Test: Unfälle zehnmal so teuer",
@@ -174,6 +196,7 @@ STEP_INFO = {
     "r1_x3": "Neue Regeln: Wracks mit Warnblinker, Bremslicht, eine Lampe, Einfahrt nur rechts; Unfälle kosten dreimal so viel, geübt wird mit dichterem Verkehr → die Kurve fällt erst, dann lernt das alte Gehirn um",
     "r1_main_x3": "Länger weitergelernt → rund 40 % weniger Unfälle als vorher: das Hauptgehirn bis Runde 2",
     "r2_B_s1": "Dazu Hindernisse im Training (Wracks, parkende Autos) → bremst viel öfter dahinter ab und reiht sich ein; noch Unfälle mitten auf der Kreuzung bei dichtem Verkehr",
+    "r4_S_s1": "Neues Gehirn: ein gemeinsames Mini-Netz für jeden der bis zu 8 Nachbarn plus Aufmerksamkeit; erst das vorige Gehirn nachgeahmt, dann weitergelernt → im Vergleich (gleich lange trainiert wie das bisherige und ein doppelt so breites Netz) die wenigsten Unfälle",
 }
 
 
@@ -227,12 +250,66 @@ def ckpt_meta(path: Path) -> dict:
     return {"gen": gen, "cfg": cfg, "extra": extra}
 
 
-def policy_vector(d: dict) -> np.ndarray:
-    return np.concatenate([np.concatenate([np.ravel(np.asarray(l["W"], dtype=float)), np.asarray(l["b"], dtype=float)]) for l in d["layers"]])
+class Brain:
+    """One brain of the site: a policy dict in the export_json / load_adapted_policy format, either an MLP
+    (``layers``: W, b per layer) or a set encoder (smartcrossing/policy_set.py: ``arch`` + flat ``params``).
+    All set / MLP branching of the build lives here."""
+
+    def __init__(self, d: dict):
+        self.d = d
+
+    @property
+    def is_set(self) -> bool:
+        return bool(self.d.get("arch")) and self.d["arch"].get("type") == "set"
+
+    def vector(self) -> np.ndarray:
+        """The flat parameter vector (policy.py layout)."""
+        if self.is_set:
+            return np.asarray(self.d["params"], dtype=float)
+        return np.concatenate([np.concatenate([np.ravel(np.asarray(l["W"], dtype=float)), np.asarray(l["b"], dtype=float)])
+                               for l in self.d["layers"]])
+
+    def hash(self) -> str:
+        return hashlib.sha1(self.vector().tobytes() + json.dumps(self.d["in_scale"]).encode()).hexdigest()[:16]
+
+    def payload(self) -> tuple:
+        """Bench / replay payload for policy_driver: (params, sizes, in_scale[, arch])."""
+        return (self.vector().tolist(), self.d["sizes"], self.d["in_scale"], *([self.d["arch"]] if self.is_set else []))
+
+    def rounded(self, digits: int = 5) -> dict:
+        """Shrink the JSON: weights rounded to `digits` decimals."""
+        r = lambda a: np.round(np.asarray(a, dtype=float), digits).tolist()  # noqa: E731
+        d = self.d
+        if self.is_set:
+            return {**d, "in_scale": r(d["in_scale"]), "params": r(d["params"])}
+        return {**d, "in_scale": r(d["in_scale"]), "layers": [{"W": r(l["W"]), "b": r(l["b"])} for l in d["layers"]]}
+
+    def snapshot(self) -> tuple[dict, dict]:
+        """For results/site/brains/*.npz: (info fields n_layers + policy without weights,
+        arrays in_scale + params (set encoder) or W<i> / b<i> (MLP))."""
+        d = self.d
+        info = {"n_layers": 0 if self.is_set else len(d["layers"]),
+                "policy": {k: v for k, v in d.items() if k not in ("layers", "in_scale", "params")}}
+        arrays = {"in_scale": np.asarray(d["in_scale"], dtype=float)}
+        if self.is_set:  # set encoder: flat params, the arch stays in info["policy"]
+            arrays["params"] = np.asarray(d["params"], dtype=float)
+        for i, l in enumerate(d.get("layers", [])):
+            arrays[f"W{i}"], arrays[f"b{i}"] = np.asarray(l["W"], dtype=float), np.asarray(l["b"], dtype=float)
+        return info, arrays
+
+    @classmethod
+    def from_snapshot(cls, z, info: dict) -> "Brain":
+        """Inverse of snapshot (z: the opened npz)."""
+        pol = {**info["policy"], "in_scale": z["in_scale"].tolist()}
+        if "params" in z.files:  # set encoder: flat params (its arch is in info["policy"])
+            pol["params"] = z["params"].tolist()
+        else:
+            pol["layers"] = [{"W": z[f"W{i}"].tolist(), "b": z[f"b{i}"].tolist()} for i in range(info["n_layers"])]
+        return cls(pol)
 
 
 def policy_hash(pol: dict) -> str:
-    return hashlib.sha1(policy_vector(pol).tobytes() + json.dumps(pol["in_scale"]).encode()).hexdigest()[:16]
+    return Brain(pol).hash()
 
 
 def _entry(run: str, stem: str, file: str, method: str, gen, physics: dict, pol: dict) -> dict:
@@ -248,8 +325,7 @@ def discover(world: str = "any") -> dict:
         for f in sorted((SNAPSHOT / "brains").glob("*/*.npz")):
             with np.load(f) as z:
                 info = json.loads(str(z["info"]))
-                pol = {**info["policy"], "in_scale": z["in_scale"].tolist(),
-                       "layers": [{"W": z[f"W{i}"].tolist(), "b": z[f"b{i}"].tolist()} for i in range(info["n_layers"])]}
+                pol = Brain.from_snapshot(z, info).d
             # snapshots written before the interface keys existed: lamp count / neighbour layout from the
             # checkpoint's own training cfg (old brains: 2 lamps, acceleration feature)
             phys = {**info["physics"], **{k: v for k, v in physics_of(pol.get("cfg") or {}).items() if k in INTERFACE_KEYS}}
@@ -273,9 +349,6 @@ def discover(world: str = "any") -> dict:
             except Exception as e:  # incompatible / broken checkpoint: skip loudly
                 print(f"  skip {f.relative_to(ROOT)}: {e}")
                 continue
-            if "layers" not in pol:  # set encoder (policy_set.py): sim.js runs it, brain view / snapshot not yet
-                print(f"  skip {f.relative_to(ROOT)}: set-encoder brains are not published on the site yet")
-                continue
             meta = ckpt_meta(f)
             if world != "any" and world_of(physics_of(meta["cfg"])) != world:
                 continue
@@ -292,12 +365,16 @@ def init_of(run: str) -> tuple[str, int] | None:
     p = RUNS / run / "args.json"
     args = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
     init = args.get("init") or ""
-    if not init and args.get("init_policy"):  # actor transplanted from a checkpoint: find it by its weights
-        ip = ROOT / args["init_policy"]
+    # actor transplanted from a checkpoint (init_policy) or behaviour-cloned from a teacher (init_bc): find it by its weights
+    src = args.get("init_policy") or args.get("init_bc")
+    if not init and src:
+        ip = ROOT / src
         if not ip.is_file():
             return None
         h = policy_hash(load_adapted_policy(ip))
-        c = next((c for c in FOUND.values() if c["hash"] == h and c["run"] != run), None)
+        # a run whose first checkpoint is an exact copy of the same brain is not its origin: prefer gen > 0
+        cands = [c for c in FOUND.values() if c["hash"] == h and c["run"] != run]
+        c = min(cands, key=lambda c: not c["gen"], default=None)
         return (c["run"], c["gen"] or 0) if c else None
     if not init:
         return None
@@ -329,26 +406,43 @@ def chain_of(run: str) -> list[tuple[str, int]]:
 
 
 # ------------------------------------------------------------------ bench
-def _bench_job(job):
-    kind, payload, physics, demand = job
-    from smartcrossing.baselines import LaneDriver
-    from smartcrossing.metrics import summarize
+def policy_driver(sim, payload):
+    """PolicyDriver for a bench / replay payload (params, sizes, in_scale[, arch]; arch None = MLP)."""
     from smartcrossing.policy import PolicyDriver
-    from smartcrossing.sim import Sim
 
-    cfg = SimConfig(**{**physics, "demand": demand})
-    sim = Sim(cfg, BENCH_ENVS, seed=BENCH_SEED)
+    params, sizes, in_scale, *rest = payload
+    return PolicyDriver(sim, np.asarray(params), sizes, in_scale=np.asarray(in_scale), archs=rest[0] if rest else None)
+
+
+def make_driver(sim, kind: str, payload):
+    """Driver of a bench / replay job: a rule-based LaneDriver (kind "baseline", payload = its name) or a policy."""
     if kind == "baseline":
-        drv = LaneDriver(sim, payload)
-    else:
-        params, sizes, in_scale = payload
-        drv = PolicyDriver(sim, np.asarray(params), sizes, in_scale=np.asarray(in_scale))
-    for _ in range(int(BENCH_SECONDS / cfg.dt)):
-        sim.step(drv.act())
-    r = summarize(sim, BENCH_SECONDS)
-    keep = ("throughput_per_min", "demand_per_min", "exit_ok_rate", "crash_cars_per_1000", "crash_cars",
-            "offroad_cars", "timeouts", "delay_mean_s")
-    return {k: (round(float(r[k]), 3) if r[k] == r[k] else None) for k in keep}
+        from smartcrossing.baselines import LaneDriver
+
+        return LaneDriver(sim, payload)
+    return policy_driver(sim, payload)
+
+
+def _bench_job(job):
+    """One bench run (smartcrossing.evalset.bench_one), its KEEP_KEYS metrics."""
+    from smartcrossing.evalset import bench_one, keep
+
+    kind, payload, physics, demand, seed = job
+    cfg = SimConfig(**{**physics, "demand": demand})
+    return keep(bench_one(lambda sim: make_driver(sim, kind, payload), cfg, seed, BENCH_ENVS, BENCH_SECONDS))
+
+
+def _bench_ck(key, physics, d, seed, sim_src):
+    return f"{key}|{json.dumps(physics, sort_keys=True)}|{d}|{BENCH_ENVS}x{BENCH_SECONDS}@{seed}|{sim_src}"
+
+
+def _mean_results(rs: list[dict]) -> dict:
+    """Mean over the traffic seeds, field by field (None if a seed has no value)."""
+    out = {}
+    for k in rs[0]:
+        v = [r[k] for r in rs if r[k] is not None]
+        out[k] = round(sum(v) / len(v), 3) if v else None
+    return out
 
 
 def run_bench(entries: list[tuple[str, str, object, dict, list]], force: bool, workers: int) -> dict:
@@ -365,13 +459,14 @@ def run_bench(entries: list[tuple[str, str, object, dict, list]], force: bool, w
     jobs, keys = [], []
     for key, kind, payload, physics, demands in entries:
         for d in demands:
-            ck = f"{key}|{json.dumps(physics, sort_keys=True)}|{d}|{BENCH_ENVS}x{BENCH_SECONDS}@{BENCH_SEED}|{sim_src}"
-            if ck in cache:
-                continue
-            jobs.append((kind, payload, physics, d))
-            keys.append(ck)
+            for seed in BENCH_SEEDS:
+                ck = _bench_ck(key, physics, d, seed, sim_src)
+                if ck in cache:
+                    continue
+                jobs.append((kind, payload, physics, d, seed))
+                keys.append(ck)
     if jobs:
-        print(f"  benchmarking {len(jobs)} runs ({BENCH_ENVS} envs x {BENCH_SECONDS:.0f} s each) ...")
+        print(f"  benchmarking {len(jobs)} runs ({BENCH_ENVS} envs x {BENCH_SECONDS:.0f} s each, {len(BENCH_SEEDS)} traffic seeds) ...")
         t0 = time.time()
         CACHE.parent.mkdir(parents=True, exist_ok=True)
         with mp.get_context(MP_START).Pool(workers) as pool:
@@ -385,8 +480,7 @@ def run_bench(entries: list[tuple[str, str, object, dict, list]], force: bool, w
     for key, kind, payload, physics, demands in entries:
         out.setdefault(key, {})
         for d in demands:
-            ck = f"{key}|{json.dumps(physics, sort_keys=True)}|{d}|{BENCH_ENVS}x{BENCH_SECONDS}@{BENCH_SEED}|{sim_src}"
-            out[key][f"{d:g}"] = cache[ck]  # as JS String(d): "1" for 1.0
+            out[key][f"{d:g}"] = _mean_results([cache[_bench_ck(key, physics, d, sd, sim_src)] for sd in BENCH_SEEDS])  # as JS String(d): "1" for 1.0
     return out
 
 
@@ -411,18 +505,12 @@ def _replay_job(job):
     brake lights on (acceleration < sim.BRAKE_ACC), flattened, and wreck_from the first sample at which
     the car is a wreck (-1: never; a wreck stays cfg.wreck_time, its samples continue the track).
     Plus crash marks and the queue per arm. "lamps" = lamp channels per sample (0 for the baselines)."""
-    from smartcrossing.baselines import LaneDriver
-    from smartcrossing.policy import PolicyDriver
     from smartcrossing.sim import DONE_NAMES, Sim
 
     kind, payload, physics, demand = job
     cfg = SimConfig(**{**physics, "demand": demand})
     sim = Sim(cfg, 1, seed=REPLAY_SEED)
-    if kind == "baseline":
-        drv = LaneDriver(sim, payload)
-    else:
-        params, sizes, in_scale = payload
-        drv = PolicyDriver(sim, np.asarray(params), sizes, in_scale=np.asarray(in_scale))
+    drv = make_driver(sim, kind, payload)
     lamps = 0 if kind == "baseline" else cfg.n_signal
     tracks, marks, queue = {}, [], []
     n_warm, n = int(round(REPLAY_WARMUP / cfg.dt)), int(round(REPLAY_SECONDS / cfg.dt))
@@ -489,8 +577,7 @@ def record_replays(drivers: list[tuple[str, str, object, dict]], workers: int) -
 
 
 def pol_entry(c: dict) -> tuple:
-    p = c["policy"]
-    return (f"pol:{c['hash']}", "policy", (policy_vector(p).tolist(), p["sizes"], p["in_scale"]), c["physics"])
+    return (f"pol:{c['hash']}", "policy", Brain(c["policy"]).payload(), c["physics"])
 
 
 # ------------------------------------------------------------------ logs
@@ -584,12 +671,9 @@ def write_snapshot(found: dict, used: list[str], chain_runs: list[str]):
         keep.add(rel)
         if c.get("snap") and (brains / rel).exists():  # unchanged copy from the snapshot itself
             continue
+        binfo, arrays = Brain(pol).snapshot()
         info = {"run": c["run"], "file": c["file"], "method": c["method"], "gen": c["gen"], "physics": c["physics"],
-                "n_layers": len(pol["layers"]),
-                "policy": {k: v for k, v in pol.items() if k not in ("layers", "in_scale")}}
-        arrays = {"in_scale": np.asarray(pol["in_scale"], dtype=float)}
-        for i, l in enumerate(pol["layers"]):
-            arrays[f"W{i}"], arrays[f"b{i}"] = np.asarray(l["W"], dtype=float), np.asarray(l["b"], dtype=float)
+                **binfo}
         path = brains / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(path, info=json.dumps(info, sort_keys=True), **arrays)
@@ -680,12 +764,6 @@ def timeline(found: dict, best_id: str, n_max: int, keep: set = frozenset()) -> 
     return [{"gen": g, "id": cid} for g, cid in pts], chain
 
 
-def round_policy(d: dict, digits: int = 5) -> dict:
-    """Shrink the JSON: weights rounded to `digits` decimals."""
-    r = lambda a: np.round(np.asarray(a, dtype=float), digits).tolist()  # noqa: E731
-    return {**d, "in_scale": r(d["in_scale"]), "layers": [{"W": r(l["W"]), "b": r(l["b"])} for l in d["layers"]]}
-
-
 def random_policy(physics: dict | None = None) -> dict:
     """Random brain with the observation interface of `physics` (default: the current one)."""
     cfg = interface_cfg(physics) if physics else SimConfig()
@@ -742,7 +820,7 @@ def copy_src(version: str, built: str):
         html.write_text(t, encoding="utf-8", newline="\n")
 
 
-def main(argv=None):
+def parse_args(argv=None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--main", action="append", default=None, metavar="PATH",
                     help=f"the site's main brain (first one; drives start page, sensors, brain, Vergleich) and/or the best "
@@ -765,7 +843,12 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.main is None:
         a.main = list(DEFAULT_MAIN)
-    kind = a.source
+    return a
+
+
+def setup_source(source: str) -> str:
+    """Resolve --source (auto -> merge / snapshot / runs) and fill SOURCE; returns the kind."""
+    kind = source
     train_runs = {p.name for p in RUNS.iterdir() if p.is_dir() and method_of(p.name)} if RUNS.exists() else set()
     if kind == "auto":
         has_snap = (SNAPSHOT / "manifest.json").exists()
@@ -776,14 +859,13 @@ def main(argv=None):
             raise SystemExit(f"no runs/ and no snapshot in {SNAPSHOT.relative_to(ROOT)}/")
         SOURCE["manifest"] = json.loads((SNAPSHOT / "manifest.json").read_text(encoding="utf-8"))
     print(f"source: {kind}" + (f" (+ runs/: {', '.join(sorted(train_runs))})" if kind == "merge" else ""))
+    return kind
 
-    cfg = SimConfig()
-    obs_layout(cfg)  # fails loudly if the sim's observation layout changed
-    print("discovering checkpoints ...")
-    found = discover(a.world)
-    FOUND.update(found)
-    print(f"  {len(found)} loadable checkpoints")
 
+def collect(found: dict, a) -> dict:
+    """Collect phase: pick the brains (best per method, main / history / previous / mix), the Zeitreise
+    timelines, warm-start chains, learning curves and side notes; returns the selection incl. the
+    policies the site shows and the bench entries they need."""
     def cid_of(spec):
         return resolve(found, spec)
 
@@ -805,7 +887,7 @@ def main(argv=None):
         if cid not in policies:
             policies[cid] = {
                 "id": cid, "run": c["run"], "run_label": run_info(c["run"])["label"], "file": c["file"], "method": c["method"], "gen": c["gen"],
-                "physics": c["physics"], "adapted": c["adapted"], "policy": round_policy(c["policy"], 4),
+                "physics": c["physics"], "adapted": c["adapted"], "policy": Brain(c["policy"]).rounded(4),
                 "bench": {},
             }
         bench_entries.append((*pol_entry(c), demands))
@@ -842,8 +924,8 @@ def main(argv=None):
         rp = random_policy(phys)
         rid = "zufall"
         policies[rid] = {"id": rid, "run": None, "file": None, "method": "es", "gen": 0, "physics": phys,
-                         "adapted": None, "policy": round_policy(rp, 4), "bench": {}}
-        bench_entries.append(("pol:random7", "policy", (policy_vector(rp).tolist(), rp["sizes"], rp["in_scale"]), phys, TIMELINE_DEMANDS))
+                         "adapted": None, "policy": Brain(rp).rounded(4), "bench": {}}
+        bench_entries.append(("pol:random7", "policy", Brain(rp).payload(), phys, TIMELINE_DEMANDS))
         if not timelines["es"] or timelines["es"][0]["gen"] > 0:
             timelines["es"].insert(0, {"gen": 0, "id": rid})
     # other (dead-end) runs: their best checkpoint as a side note
@@ -860,31 +942,42 @@ def main(argv=None):
         use(mix_id, DEMANDS)
     if prev_id:
         use(prev_id, DEMANDS)
-    # the rule-based drivers run in the same world (geometry, grip) as the main policy, and also
-    # in the world of each other brain on "Vergleich" (old narrow crossing), so every brain is
-    # compared on its own crossing
+    return {"picked": picked, "main_id": main_id, "hist_id": hist_id, "prev_id": prev_id, "mix_id": mix_id,
+            "policies": policies, "bench_entries": bench_entries, "timelines": timelines, "curves": curves,
+            "chains": chains, "others": others}
+
+
+def bench(found: dict, sel: dict, cfg: SimConfig, a) -> dict:
+    """Bench phase: the rule-based drivers in the main brain's world (and in each other brain's world on
+    "Vergleich", e.g. the old narrow crossing, so every brain is compared on its own crossing) plus all
+    selected policies; fills each policy's "bench". Returns the baseline results and worlds."""
     def world_phys(cid):
         return {**physics_of(cfg.__dict__), **{k: v for k, v in found[cid]["physics"].items() if k in GEOMETRY_KEYS}}
 
     base_worlds = {}  # world name -> physics; the main brain's world first
-    for cid in (main_id, hist_id, picked.get("es")):
+    for cid in (sel["main_id"], sel["hist_id"], sel["picked"].get("es")):
         if cid:
             base_worlds.setdefault(world_of(found[cid]["physics"]), world_phys(cid))
     if not base_worlds:
         base_worlds[world_of(physics_of(cfg.__dict__))] = physics_of(cfg.__dict__)
     main_world = next(iter(base_worlds))
-    base_phys = base_worlds[main_world]
     base_key = lambda drv, w: f"base:{drv}" if w == main_world else f"base:{drv}:{w}"  # noqa: E731
+    entries = list(sel["bench_entries"])
     for w, phys in base_worlds.items():
         for drv in ("light", "reservation"):
-            bench_entries.append((base_key(drv, w), "baseline", drv, phys, DEMANDS))
-    bench = run_bench(bench_entries, a.bench, a.workers)
-    for cid, p in policies.items():
+            entries.append((base_key(drv, w), "baseline", drv, phys, DEMANDS))
+    res = run_bench(entries, a.bench, a.workers)
+    for cid, p in sel["policies"].items():
         key = f"pol:{found[cid]['hash']}" if cid in found else "pol:random7"
-        p["bench"] = bench[key]
-    baselines_by_world = {w: {drv: bench[base_key(drv, w)] for drv in ("light", "reservation")} for w in base_worlds}
-    baselines = baselines_by_world[main_world]
+        p["bench"] = res[key]
+    by_world = {w: {drv: res[base_key(drv, w)] for drv in ("light", "reservation")} for w in base_worlds}
+    return {"baselines_by_world": by_world, "main_world": main_world, "base_phys": base_worlds[main_world]}
 
+
+def write_site(found: dict, sel: dict, bres: dict, cfg: SimConfig, kind: str, a):
+    """Write phase: site data (observation layouts, policies, curves, baselines, ...), the side-by-side
+    replays, the snapshot (runs / merge) and the public/ folder."""
+    main_id, policies = sel["main_id"], sel["policies"]
     # observation labels per interface (lamp count, neighbour layout) of the brains on the site; "layout"
     # is the main brain's (the pages pick the one of their sim: SCX.layoutFor)
     ifaces = {interface_key(cfg): cfg}
@@ -899,29 +992,29 @@ def main(argv=None):
         "layouts": layouts,
         "cfg": {k: (list(v) if isinstance(v, tuple) else v) for k, v in cfg.__dict__.items()},
         "policies": policies,
-        "best": picked,
+        "best": sel["picked"],
         "main": found[main_id]["method"] if main_id else None,  # method of the main brain (shown first on the site)
         "main_id": main_id,
-        "history": hist_id,
-        "mix": mix_id,
-        "previous": prev_id if prev_id != main_id else None,  # the main brain before the current one
-        "timelines": timelines,
-        "chains": chains,
-        "curves": curves,
-        "others": others,
-        "baselines": baselines,  # in the main brain's world
-        "baselines_by_world": baselines_by_world,  # world ("wide" / "narrow") -> {light, reservation}
-        "main_world": main_world,
+        "history": sel["hist_id"],
+        "mix": sel["mix_id"],
+        "previous": sel["prev_id"] if sel["prev_id"] != main_id else None,  # the main brain before the current one
+        "timelines": sel["timelines"],
+        "chains": sel["chains"],
+        "curves": sel["curves"],
+        "others": sel["others"],
+        "baselines": bres["baselines_by_world"][bres["main_world"]],  # in the main brain's world
+        "baselines_by_world": bres["baselines_by_world"],  # world ("wide" / "narrow") -> {light, reservation}
+        "main_world": bres["main_world"],
         # reward rules the main brain was trained with (from its checkpoint's training cfg; drawn on /lernen)
         "reward": reward_of(found[main_id]["policy"].get("cfg") or {}) if main_id else None,
         "demands": DEMANDS,
-        "bench_setup": {"envs": BENCH_ENVS, "seconds": BENCH_SECONDS, "seed": BENCH_SEED},
+        "bench_setup": {"envs": BENCH_ENVS, "seconds": BENCH_SECONDS, "seeds": len(BENCH_SEEDS)},
     }
     # side-by-side replays (same traffic) of the two rule-based drivers and the best policy
+    base_phys = bres["base_phys"]
     replays = None
     if main_id:
-        mp_ = found[main_id]
-        _, _, payload, phys = pol_entry(mp_)
+        _, _, payload, phys = pol_entry(found[main_id])
         replays = record_replays([
             ("light", "baseline", "light", base_phys),
             ("reservation", "baseline", "reservation", base_phys),
@@ -931,7 +1024,7 @@ def main(argv=None):
         replays["world"] = {k: base_phys[k] for k in ("L", "W", "Rc") if k in base_phys}
     data["replay_world"] = world_of(base_phys)
     if kind in ("runs", "merge"):
-        write_snapshot(found, [cid for cid in policies if cid in found], [r["run"] for ch in chains.values() for r in ch])
+        write_snapshot(found, [cid for cid in policies if cid in found], [r["run"] for ch in sel["chains"].values() for r in ch])
     src_hash = hashlib.sha1(b"".join(f.read_bytes() for f in sorted(SRC.rglob("*")) if f.is_file())
                             + sim_config_js().encode()).hexdigest()
     version = hashlib.sha1((json.dumps([data, replays], sort_keys=True) + src_hash).encode()).hexdigest()[:8]
@@ -944,8 +1037,22 @@ def main(argv=None):
     print(f"  replays.js: {len(rjs) / 1024:.0f} KiB")
     size = sum(f.stat().st_size for f in OUT.rglob("*") if f.is_file())
     print(f"wrote {OUT.relative_to(ROOT)}/ ({size / 1024:.0f} KiB, data {len(js) / 1024:.0f} KiB, version {version})")
-    for m, pts in timelines.items():
+    for m, pts in sel["timelines"].items():
         print(f"  Zeitreise {m}: " + ", ".join(f"{p['id']}@{p['gen']}" for p in pts))
+
+
+def main(argv=None):
+    a = parse_args(argv)
+    kind = setup_source(a.source)
+    cfg = SimConfig()
+    obs_layout(cfg)  # fails loudly if the sim's observation layout changed
+    print("discovering checkpoints ...")
+    found = discover(a.world)
+    FOUND.update(found)
+    print(f"  {len(found)} loadable checkpoints")
+    sel = collect(found, a)
+    bres = bench(found, sel, cfg, a)
+    write_site(found, sel, bres, cfg, kind, a)
 
 
 if __name__ == "__main__":

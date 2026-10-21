@@ -2,7 +2,7 @@
 
 float64, numpy traffic streams and Worker's numpy action noise: the batches (obs, priv,
 actions, log-probs, values, advantages, returns, done counts, rewards) must agree over
-three rollouts incl. an episode reset. cuda parts are skipped without cuda.
+three rollouts incl. an episode reset. cuda parts run only with SC_TEST_CUDA=1.
 """
 
 import numpy as np
@@ -10,14 +10,13 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from conftest import CUDA, DEVICES  # noqa: E402
 from smartcrossing.policy import default_in_scale, layer_sizes  # noqa: E402
 from smartcrossing.ppo import MLP, Worker  # noqa: E402
 from smartcrossing.ppo_common import N_PRIV  # noqa: E402
 from smartcrossing.rollout_torch import TorchRollout  # noqa: E402
 from smartcrossing.sim import SimConfig, act_dim, obs_dim  # noqa: E402
 
-DEVICES = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
-CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs cuda")
 
 
 def _setup(B=3, T=60, ep=100, seed=0):

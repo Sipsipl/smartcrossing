@@ -380,7 +380,10 @@ class TorchSim:
         done_kind = torch.zeros(alive.shape, dtype=torch.int8, device=self.device)
         self.done_uid = torch.where(alive, self.uid, -1)
         ws = wreck_steps(cfg)
-        if ws > 0 or cfg.obstacle_envs > 0:  # wrecks whose time is up disappear (before the collision check)
+        # wrecks whose time is up disappear (before the collision check). sim.py guards this with
+        # `self.wreck.any()`; here the static "wrecks can exist" test avoids a host sync (CUDA graph).
+        # Same result: without any wreck both lines are no-ops.
+        if ws > 0 or cfg.obstacle_envs > 0:
             self.wreck_left = self.wreck_left - self.wreck.to(torch.int64)
             self._remove(self.wreck & (self.wreck_left <= 0))
 

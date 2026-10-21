@@ -14,6 +14,7 @@
   const pol = (id) => D.policies[id];
   const mainMethod = D.main || (D.best.ppo ? "ppo" : "es");
   const MAIN_ID = D.main_id || D.best[mainMethod];
+  const isSetEntry = (e) => !!(e && e.policy && e.policy.arch && e.policy.arch.type === "set");
   const isNarrow = (entry) => !!(entry && entry.physics && entry.physics.W !== undefined && entry.physics.W < 5);
 
   function genLabel(entry) {
@@ -37,7 +38,7 @@
       if (D.best[om]) types.push(SCX.makeType(pol(D.best[om]), `${METHOD_NAMES[om]} (bestes Gehirn)`, { share: 0 }));
     }
     // all cars of one sim share the observation interface (lamp count, neighbour layout) of the first brain
-    const key = (t) => `${t.physics.n_signal}/${t.physics.brake_light}`;
+    const key = (t) => SCX.IFACE_KEYS.map((k) => t.physics[k]).join("/");
     return types.filter((t) => key(t) === key(types[0])).slice(0, 3);
   }
 
@@ -166,17 +167,31 @@
         zu <b>${pct(r15.exit_ok_rate)}</b> heil ans Ziel – <b>${num(r15.throughput_per_min)}</b> Autos pro Minute.
         Eine Ampel schafft ${num(l15.throughput_per_min)} pro Minute, ein zentraler Verkehrsrechner ${num(v15.throughput_per_min)} – beide ohne einen einzigen Unfall.
         Die Autos lernen also noch.${prevNote()}
-        <a href="vergleich.html">Zum Vergleich →</a>`;
+        <a href="gehirn.html">Zum Gehirn →</a> · <a href="vergleich.html">Zum Vergleich →</a>`;
     }
+  }
+
+  /** Crashes (+ off-road) per 1000 cars of a bench entry at demand d, or null. */
+  const badPer1000 = (e, d) => (e && e.bench[d] ? e.bench[d].crash_cars_per_1000 : null);
+
+  /** "17 statt 105" style comparison of main vs previous brain at demand d (bench data), or "". */
+  function crashPair(d) {
+    const a = badPer1000(D.previous && pol(D.previous), d), b = badPer1000(pol(MAIN_ID), d);
+    return a === null || b === null ? "" : `${num(b, 0)} statt ${num(a, 0)}`;
   }
 
   /** What is new in the main brain vs the previous one (crash numbers from the bench data). */
   function prevNote() {
-    const a = D.previous && pol(D.previous) && pol(D.previous).bench["0.15"], b = pol(MAIN_ID) && pol(MAIN_ID).bench["0.15"];
-    if (!a || !b || !(a.crash_cars_per_1000 > 0)) return "";
-    // one traffic seed only: the comparison is noisy, so no exact percentage here
-    return ` Neu beim aktuellen Gehirn: Im Training standen Wracks und parkende Autos im Weg – es bremst viel öfter dahinter ab und reiht sich ein, statt hineinzufahren.
-      Bei mittlerem Verkehr baut es deutlich weniger Unfälle als das vorherige (in unserer Messung ${num(b.crash_cars_per_1000, 0)} statt ${num(a.crash_cars_per_1000, 0)} pro 1000 Autos) – bei dichtem Verkehr kracht es mitten auf der Kreuzung aber noch.`;
+    const m = pol(MAIN_ID), mid = crashPair("0.15"), dense = crashPair("0.3");
+    if (!mid) return "";
+    const a = badPer1000(pol(D.previous), "0.15"), b = badPer1000(m, "0.15");
+    const much = a > 0 && b < 0.5 * a ? "viel weniger" : b < a ? "weniger" : "nicht weniger";
+    // bench values are means over several traffic seeds, but still a rounded comparison
+    return isSetEntry(m)
+      ? ` Neu beim aktuellen Gehirn: Es schaut auf bis zu ${m.policy.arch.K} Nachbarn, jeden mit demselben Mini-Netz, und eine „Aufmerksamkeit“ entscheidet, wer gerade zählt.
+      Es baut ${much} Unfälle als das vorherige (in unserer Messung pro 1000 Autos: bei mittlerem Verkehr ${mid}${dense ? `, bei dichtem ${dense}` : ""}) –
+      bei dichtem Verkehr kracht es mitten auf der Kreuzung aber noch, und manchmal verkeilen sich die Autos dort.`
+      : ` Bei mittlerem Verkehr baut das aktuelle Gehirn ${much} Unfälle als das vorherige (in unserer Messung ${mid} pro 1000 Autos).`;
   }
 
   // ------------------------------------------------------------------ obs panel ("Was sieht ein Auto?")
@@ -200,7 +215,7 @@
   /** Inputs a brain ignores (all weights 0: trained before the sensor existed, see policy_compat). */
   const unusedCache = new WeakMap();
   function unusedInputs(raw) {
-    if (!raw) return new Set();
+    if (!raw || !raw.layers) return new Set(); // set encoders: no legacy (zero-weight) inputs
     if (!unusedCache.has(raw)) {
       const W = raw.layers[0].W, sc = raw.in_scale, off = new Set();
       W.forEach((row, i) => { if ((sc && sc[i] === 0) || row.every((w) => w === 0)) off.add(i); });
@@ -258,7 +273,9 @@
       hint: "Tippe ein Auto an",
       onRefresh: (c) => { SCX.renderSelHead(c, $("selhead")); renderObsPanel(c, $("obs")); },
     });
-    $("dim-count").textContent = (SCX.layoutFor(cx.sim.cfg) || D.layout).dim;
+    const lay = SCX.layoutFor(cx.sim.cfg) || D.layout;
+    $("dim-count").textContent = lay.dim;
+    document.querySelectorAll("[data-nbk]").forEach((e) => { e.textContent = lay.k_neighbours; });
     window.__sc = cx;
   }
 
@@ -348,24 +365,51 @@
   // ------------------------------------------------------------------ brain
   function initGehirn() {
     layoutWarning($("brainnote"));
-    let net = null, mismatch = false;
-    const tip = $("tip");
+    const TIP0 = "Fahre mit der Maus über einen Kreis (oder tippe darauf).";
+    const TIP_SET = "Fahre mit der Maus über einen Kreis, einen Nachbarn oder einen Balken (oder tippe darauf).";
+    let net = null, setv = null, mismatch = false, attn = null;
+    const tip = $("tip"), canvas = $("net"), setHost = $("setnet");
+    const onHover = (txt) => { tip.textContent = txt || (!setHost.hidden ? TIP_SET : TIP0); };
+    // brains to look at: the current one and the previous main brain (other structure: the classic MLP view)
+    const picks = [{ id: MAIN_ID, name: "Aktuelles Gehirn" }];
+    if (D.previous && pol(D.previous)) picks.push({ id: D.previous, name: "Vorheriges Gehirn" });
+    let pick = 0;
+    const stamp = { n: -1, t: -1, uid: -1 };
     const cx = makeCrossing($("stage"), {
-      overlay: "none", autoSelect: true, speed: 0.5, speeds: [0.25, 0.5, 1, 2], hint: "Tippe ein Auto an",
-      onRefresh: (c) => {
-        SCX.renderSelHead(c, $("selhead"));
+      types: [SCX.makeType(pol(picks[0].id), picks[0].name)],
+      // the overlay is only drawn while the brain view belongs to the current sim step and car
+      overlay: "attention", attention: (n, c) => (attn && setv && stamp.n === n && stamp.t === c.sim.t && stamp.uid === c.sim.uid[n] ? setv.lineInfo() : null),
+      onTick: (ts) => { if (setv && !setHost.hidden) setv.animate(ts); },
+      autoSelect: true, speed: 0.5, speeds: [0.25, 0.5, 1, 2], hint: "Tippe ein Auto an",
+      onRefresh: (c) => { SCX.renderSelHead(c, $("selhead")); updateBrain(c); },
+    });
+    // the brain view is updated on every sim step (before drawing), not on the throttled panel refresh,
+    // so its numbers, cards and the road overlay always belong to the state that is drawn
+    cx.opts.onStepped = updateBrain;
+    function updateBrain(c) {
         const n = c.selIndex();
-        if (n < 0) return;
-        const t = c.typeOf(n);
-        if (!net || net.raw !== t.raw) {
-          if (!net) net = new SCX.NetView($("net"), SCX.layoutFor(c.sim.cfg) || D.layout, t.raw, { onHover: (h) => { tip.textContent = h ? net.describe(h) : "Fahre mit der Maus über einen Kreis (oder tippe darauf)."; } });
-          else net.setPolicy(t.raw);
-        }
-        const D_ = SC.obsDim(c.sim.cfg);
-        const trace = SCX.forwardTrace(t.raw, c.obs, n * D_);
-        // our forward must equal the simulator's (sim.js) forward pass
+        if (n < 0) { attn = null; return; }
+        const t = c.typeOf(n), D_ = SC.obsDim(c.sim.cfg), lay = SCX.layoutFor(c.sim.cfg) || D.layout;
         const ref = SC.forward(t.policy, c.obs, n * D_);
-        const out = trace[trace.length - 1];
+        let out;
+        if (t.policy.kind === "set") {
+          canvas.style.display = "none"; setHost.hidden = false;
+          if (!setv) setv = new SCX.SetView(setHost, lay, t.policy, { onHover, fmt: (it, v) => fmtObs(it, v), onFocus: () => c.draw() });
+          else if (setv.pol !== t.policy) setv.setPolicy(t.policy, lay);
+          const tr = SC.setTrace(t.policy, c.obs, n * D_);
+          setv.update(tr, c.obsRow(n), c.neighbourUids(n, t.policy.arch.K));
+          attn = true;
+          out = tr.out;
+        } else {
+          canvas.style.display = ""; setHost.hidden = true; attn = null;
+          if (!net) net = new SCX.NetView(canvas, lay, t.raw, { onHover: (h) => onHover(h ? net.describe(h) : null) });
+          else if (net.raw !== t.raw) { net.layout = lay; net.setPolicy(t.raw); }
+          const trace = SCX.forwardTrace(t.raw, c.obs, n * D_);
+          net.update(trace);
+          if (net.hoverN) tip.textContent = net.describe(net.hoverN);
+          out = trace[trace.length - 1];
+        }
+        // the drawn forward pass must equal the simulator's (sim.js) forward pass
         const diff = Math.max(...Array.from(out, (v, i) => Math.abs(v - ref[i])));
         if (diff > 1e-9 && !mismatch) {
           mismatch = true;
@@ -373,16 +417,49 @@
           $("brainnote").insertAdjacentHTML("beforeend", `<p class="note warn">Achtung: Die Anzeige weicht vom Simulator ab (${diff}).</p>`);
         }
         window.__brainDiff = diff;
-        net.update(trace);
-        if (net.hoverN) tip.textContent = net.describe(net.hoverN);
-      },
-    });
-    const p = pol(MAIN_ID);
-    if (p) {
-      const s = p.policy.sizes, params = s.slice(1).reduce((a, n, i) => a + s[i] * n + n, 0);
-      $("brain-sizes").textContent = `${s[0]} Eingänge → ${s[1]} → ${s[2]} → ${s[3]} Ausgänge`;
-      $("brain-params").textContent = params.toLocaleString("de-DE");
+        stamp.n = n; stamp.t = c.sim.t; stamp.uid = c.sim.uid[n];
     }
+    function describeBrain() {
+      const p = pol(picks[pick].id);
+      if (!p) return;
+      const set = isSetEntry(p);
+      document.querySelectorAll("[data-set-only]").forEach((e) => { e.hidden = !set; });
+      $("set-explain").hidden = !set;
+      if (set) {
+        const ar = p.policy.arch;
+        $("brain-lead").innerHTML = `Jedes Auto wird von einem kleinen neuronalen Netz gesteuert. Das aktuelle ist in Teile gegliedert:
+          die <b>eigenen Werte</b> (${ar.n_ego} Zahlen) und bis zu <b>${ar.K} Nachbarn</b> (je ${ar.F} Zahlen) → ein <b>Mini-Netz pro Nachbar</b>
+          → <b>Aufmerksamkeit</b> („welcher Nachbar zählt gerade?“) → ${ar.hidden.join(" → ")} → ${ar.n_out} Ausgänge: Gas, Lenkung und Lampe.`;
+        $("brain-params").textContent = p.policy.params.length.toLocaleString("de-DE");
+        document.querySelectorAll("#set-explain [data-k]").forEach((e) => { e.textContent = ar.K; });
+        document.querySelectorAll("#set-explain [data-heads]").forEach((e) => { e.textContent = ar.heads; });
+      } else {
+        const s = p.policy.sizes, params = s.slice(1).reduce((a, n, i) => a + s[i] * n + n, 0);
+        $("brain-lead").innerHTML = `${pick > 0 ? "Das vorherige Gehirn ist ein klassisches neuronales Netz" : "Jedes Auto wird von einem kleinen neuronalen Netz gesteuert"}:
+          <span id="brain-sizes">${s[0]} Eingänge → ${s.slice(1, -1).join(" → ")} → ${s[s.length - 1]} Ausgänge</span>.
+          Links kommen die Sensorwerte rein, rechts kommen Gas, Lenkung und Lampe raus. Dazwischen: ${s.length - 2} Schichten „Neuronen“.`;
+        $("brain-params").textContent = params.toLocaleString("de-DE");
+      }
+      onHover(null);
+    }
+    if (picks.length > 1) {
+      const seg = $("brain-pick");
+      seg.innerHTML = picks.map((p, i) => `<input type="radio" name="brain-pick" id="bp${i}" value="${i}"${i === 0 ? " checked" : ""}><label for="bp${i}">${p.name}</label>`).join("");
+      seg.querySelectorAll("input").forEach((el) => el.addEventListener("change", () => {
+        pick = +el.value;
+        attn = null;
+        cx.setTypes([SCX.makeType(pol(picks[pick].id), picks[pick].name)]);
+        describeBrain();
+      }));
+      $("brain-pick-box").hidden = false;
+    }
+    const bigBtn = $("brain-big"), lay = $("brain-layout");
+    if (bigBtn && lay) bigBtn.addEventListener("click", () => {
+      const big = lay.classList.toggle("big");
+      bigBtn.textContent = big ? "Klein anzeigen" : "Groß anzeigen";
+      bigBtn.setAttribute("aria-pressed", String(big));
+    });
+    describeBrain();
     window.__sc = cx;
   }
 
@@ -657,7 +734,12 @@
     if (badPct("0.15")) $("h-mid").textContent = `rund ${badPct("0.15")}`;
     if (badPct("0.05")) $("h-low").textContent = `rund ${badPct("0.05")}`;
     const pb = D.previous && pol(D.previous) && pol(D.previous).bench["0.15"];
-    if (mb && mb["0.15"] && pb) $("h-prev").textContent = ` Das vorherige Gehirn hatte bei mittlerem Verkehr noch ${num(pb.crash_cars_per_1000, 0)} Unfälle pro 1000 Autos, das aktuelle ${num(mb["0.15"].crash_cars_per_1000, 0)}.`;
+    if (mb && mb["0.15"] && pb) {
+      const pd = pol(D.previous).bench["0.3"], md = mb["0.3"];
+      $("h-prev").textContent = ` Das vorherige Gehirn hatte bei mittlerem Verkehr noch ${num(pb.crash_cars_per_1000, 0)} Unfälle pro 1000 Autos, das aktuelle ${num(mb["0.15"].crash_cars_per_1000, 0)}`
+        + (pd && md ? `, bei dichtem Verkehr ${num(pd.crash_cars_per_1000, 0)} gegen ${num(md.crash_cars_per_1000, 0)}.` : ".")
+        + (isSetEntry(pol(MAIN_ID)) ? " Bei dichtem Verkehr verkeilen sich die Autos des aktuellen Gehirns außerdem manchmal mitten auf der Kreuzung." : "");
+    }
     if ($("c-thr-note")) $("c-thr-note").textContent = groups.length > 1 ? `Diagramm: ${WORLD_NAMES[mainWorld].replace(/ \(.*/, "")}. In den Tabellen steht jedes Gehirn neben Ampel und Verkehrsrechner auf der Kreuzung, auf der es trainiert wurde.` : "";
     const draw = () => SCX.lineChart($("c-thr"), {
       series: [
@@ -670,7 +752,7 @@
     });
     draw();
     window.addEventListener("resize", debounce(draw, 200));
-    $("bench-setup").textContent = `${D.bench_setup.envs} Simulationen × ${Math.round(D.bench_setup.seconds / 60)} Minuten je Wert, gleicher Zufallsverkehr für alle (Stand ${D.built}).`;
+    $("bench-setup").textContent = `${D.bench_setup.envs} Simulationen × ${Math.round(D.bench_setup.seconds / 60)} Minuten je Wert, Mittel über ${D.bench_setup.seeds} Verkehrsläufe; gleicher Zufallsverkehr für alle (Stand ${D.built}).`;
   }
 
   function debounce(fn, ms) { let t; return () => { clearTimeout(t); t = setTimeout(fn, ms); }; }

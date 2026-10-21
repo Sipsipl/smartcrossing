@@ -778,3 +778,27 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
   (the MLP baselines were warm-started); K=4 vs K=8 for the set encoder; attn vs mean / max; a wider MLP
   (128x128) as the "more parameters" control. The set encoder costs ~1.8x per iteration (update ~2.8x), so equal
   time means ~55 % of the MLP's iterations.
+
+## Round 4: network comparison - MLP 64x64 vs MLP 128x128 vs set/attention encoder (2026-10-14)
+- Same world/reward for all (round-2 B recipe: obstacles 0.5, crash cost x3, relative cost), 12 min training
+  per run (`--max-minutes`), 2 seeds each. M: 64x64 warm start from round2_best; W: 128x128 and S: set encoder
+  (attention, K=8 neighbours) behaviour-cloned from round2_best (`--init-bc`, now also for MLPs; BC R^2 0.99 / 0.87).
+  Iterations in 12 min: M 604/935, W 692/822, S 206/168 (set encoder ~4 s/it).
+- Result (8 envs x 120 s, seeds 1000/2000/3000; crash+off per 1000 / throughput per min, mean (s1, s2);
+  results/round4_eval.jsonl):
+
+  | | @0.15 | @0.3 | gate safe/stop |
+  |---|---|---|---|
+  | M 64x64 | 34 (30, 37) / 32.0 | 162 (129, 195) / 40.6 | 0.91/0.74, 0.85/0.70 |
+  | W 128x128 | 18 (21, 14) / 32.9 | 72 (93, 51) / 44.3 | 0.89/0.74, 0.92/0.82 |
+  | S set/attn K=8 | 12 (7, 17) / 32.9 | 51 (46, 55) / 49.8 | 0.99/0.99, 0.97/0.97 |
+  | round2_best | 31 / 29.6 | 105 / 34.7 | 0.84/0.75 |
+  | light / reservation | 0 / 24.5, 0 / 33.8 | 0 / 28.4, 0 / 64.1 | - |
+
+- Reading: the set encoder wins clearly with a quarter of the iterations (crashes @0.3 halved vs round2_best,
+  throughput up, gate 97-99% - passes the 95% stop gate). Wider MLP second. Caveat: timeouts (cars stuck until
+  max_age) rise with S at high demand: per 120 s run S_s1 6 @0.3 / 31 @0.5, S_s2 29 / 73 (W_s2 9 / 38); at 0.5
+  S crashes 120-128 vs W 86. Sheet at 0.3: crashes and near-gridlock in the box (left/straight turners stack up).
+  Best: r4_S_s1 -> results/round4_best.npz.
+- Next: S as the site's main brain (needs /gehirn view + build support for set brains); deadlock/timeouts in the
+  box at high demand as the next problem (owner: rather a jam than a crash, but not a gridlock).

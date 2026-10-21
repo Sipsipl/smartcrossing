@@ -31,6 +31,7 @@ poetry install
 poetry run pytest -q                                                      # Tests
 poetry run python -m smartcrossing.cli bench --driver reservation --demand 0.15   # Kennzahlen
 poetry run python -m smartcrossing.cli render --driver light --out runs/light     # Bilder + GIF
+poetry run python -m smartcrossing.cli evalset --driver policy:results/round4_best.npz --out runs/eval.jsonl   # Standard-Auswertung
 poetry run python site/build.py                                          # Website bauen
 cd site/public && python3 -m http.server 8000                            # Website lokal ansehen
 ```
@@ -42,6 +43,10 @@ cd site/public && python3 -m http.server 8000                            # Websi
 | `smartcrossing/sim.py` | Simulation der Kreuzung (numpy, viele Kreuzungen parallel) |
 | `smartcrossing/ppo.py` | Training mit PPO (optional auf der GPU: `poetry install --with gpu`, dann `--rollout-device cuda`; siehe `ppo_torch.py`, `sim_torch.py`) |
 | `smartcrossing/baselines.py` | Vergleichsfahrer mit Spuren: Ampel und zentraler Verkehrsrechner |
+| `smartcrossing/policy.py`, `policy_set.py` | das Gehirn: einfaches Netz (MLP) bzw. Netz mit Mini-Netz pro Nachbar + Aufmerksamkeit; `policy_compat.py` lädt alte Gehirne |
+| `smartcrossing/bc.py` | Nachahmen: ein neues Gehirn lernt erst vom alten (`ppo --init-bc`) |
+| `smartcrossing/gates.py` | Anhaltetest: hält ein Auto vor einem Hindernis an? |
+| `smartcrossing/evalset.py` | Standard-Auswertung (`cli evalset`): mehrere Verkehrsdichten und Zufalls-Seeds + Anhaltetest |
 | `site/` | die Website; `site/src/js/sim.js` ist die Browser-Version der Simulation |
 | `docs/PLAN.md` | Ziele, Entscheidungen, Architektur |
 | `docs/experiments.md` | Protokoll aller Trainingsläufe |

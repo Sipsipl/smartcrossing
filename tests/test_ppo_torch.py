@@ -6,13 +6,13 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from conftest import DEVICES  # noqa: E402
 from smartcrossing.policy import default_in_scale, layer_sizes  # noqa: E402
 from smartcrossing.ppo import MLP, Adam, Worker, ppo_update  # noqa: E402
 from smartcrossing.ppo_common import N_PRIV  # noqa: E402
 from smartcrossing.ppo_torch import TorchPPO  # noqa: E402
 from smartcrossing.sim import SimConfig, act_dim, obs_dim  # noqa: E402
 
-DEVICES = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
 
 
 @pytest.fixture(scope="module")

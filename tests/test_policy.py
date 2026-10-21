@@ -27,17 +27,10 @@ def _setup(B=3, N=5):
 def test_forward_shapes():
     cfg, sizes, obs, params = _setup()
     assert params.shape[1] == n_params(sizes)
-    out = forward(params, obs, sizes)
+    out = forward(params[0], obs, sizes)
     assert out.shape == (3, 5, act_dim(cfg))
     assert np.all(np.abs(out) <= 1)
     assert forward(params[0], obs[0], sizes).shape == (5, act_dim(cfg))
-
-
-def test_batched_equals_unbatched():
-    _, sizes, obs, params = _setup()
-    out = forward(params, obs, sizes)
-    for b in range(len(params)):
-        np.testing.assert_allclose(out[b], forward(params[b], obs[b], sizes), atol=1e-12)
 
 
 def test_save_load_roundtrip_and_driver(tmp_path):

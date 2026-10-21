@@ -48,7 +48,7 @@ from pathlib import Path
 import numpy as np
 
 from . import policy_set
-from .policy import default_in_scale, layer_sizes, n_params, save_npz
+from .policy import default_in_scale, layer_sizes, linear_forward, param_count, save_npz
 from .ppo_common import LOG2PI, N_DONE, N_PRIV, PRIV_DEMAND_SCALE, PRIV_QUEUE_SCALE, git_info
 from .sim import DONE_CRASH, DONE_EXIT, DONE_OFFROAD, DONE_TIMEOUT, DONE_WRONG, Sim, SimConfig, act_dim, obs_dim
 
@@ -132,25 +132,6 @@ class SetNet:
         return policy_set.forward(self.p, self.arch, x)
 
 
-def net_forward(p, sizes, x, arch=None):
-    """Stateless forward (workers) of an MLP (sizes) or a set encoder (arch)."""
-    return policy_set.forward(p, arch, x) if arch else mlp_forward(p, sizes, x)
-
-
-def mlp_forward(p, sizes, x):
-    """Stateless forward (workers): tanh hidden, linear output."""
-    i = 0
-    n = len(sizes) - 1
-    for k, (a, b) in enumerate(zip(sizes[:-1], sizes[1:])):
-        W = p[i : i + a * b].reshape(a, b)
-        bias = p[i + a * b : i + a * b + b]
-        i += a * b + b
-        x = x @ W + bias
-        if k < n - 1:
-            x = np.tanh(x)
-    return x
-
-
 # ---------------------------------------------------------------- rollout worker
 def privileged(sim: Sim) -> np.ndarray:
     """(B, N, N_PRIV) extra critic inputs (not visible to the policy; ppo_common.PRIV_FEATURES)."""
@@ -213,10 +194,10 @@ class Worker:
             pr = privileged(sim)
             if len(bi):
                 o = obs[bi, ni] * self.in_scale
-                mu = net_forward(actor_p, actor_sizes, o, self.a_arch)
+                mu = linear_forward(actor_p, actor_sizes, o, self.a_arch)
                 u = mu + std * self.rng.standard_normal(mu.shape)
                 lp = (-0.5 * ((u - mu) / std) ** 2 - logstd - 0.5 * LOG2PI) @ self.act_mask
-                v = net_forward(critic_p, critic_sizes, np.concatenate([o, pr[bi, ni]], 1), self.c_arch)[:, 0]
+                v = linear_forward(critic_p, critic_sizes, np.concatenate([o, pr[bi, ni]], 1), self.c_arch)[:, 0]
                 obs_buf[t, bi, ni] = obs[bi, ni]
                 priv_buf[t, bi, ni] = pr[bi, ni]
                 u_buf[t, bi, ni] = u
@@ -238,7 +219,7 @@ class Worker:
         bi, ni = np.nonzero(sim.alive)
         if len(bi):
             o = obs[bi, ni] * self.in_scale
-            val[T, bi, ni] = net_forward(critic_p, critic_sizes, np.concatenate([o, privileged(sim)[bi, ni]], 1),
+            val[T, bi, ni] = linear_forward(critic_p, critic_sizes, np.concatenate([o, privileged(sim)[bi, ni]], 1),
                                          self.c_arch)[:, 0]
         # GAE per slot chain (chain cut at removals)
         adv = np.zeros((T, B, N))
@@ -353,17 +334,14 @@ def eval_job(ckpt: str, out_path: str, it: int, demands, envs: int, seconds: flo
     """Bench metrics of the deterministic policy (cli bench settings) in the run's world (cfg_d: the
     training SimConfig; fixed demand per bench, rewards do not matter) plus the stop gate (gates.py,
     ~1 s); appends one JSON line."""
-    from .cli import run
+    from . import evalset
     from .gates import stop_gate
-    from .metrics import summarize
 
     world = {**(cfg_d or {}), "demand_range": None}
     rec = {"iter": it, "ckpt": ckpt}
     for d in demands:
-        sim, _ = run(f"policy:{ckpt}", SimConfig(**{**world, "demand": d}), envs, seconds, EVAL_SEED)
-        s = summarize(sim, seconds)
-        rec[f"d{d:g}"] = {k: round(s[k], 3) for k in ("throughput_per_min", "exit_ok_rate", "crash_cars_per_1000",
-                                                      "crash_cars", "offroad_cars", "timeouts", "delay_mean_s", "queued_end")}
+        s = evalset.bench_one(f"policy:{ckpt}", SimConfig(**{**world, "demand": d}), EVAL_SEED, envs, seconds)
+        rec[f"d{d:g}"] = evalset.keep(s, (*evalset.KEEP_KEYS, "queued_end"))
     g, _ = stop_gate(f"policy:{ckpt}", world)
     rec["gate"] = {k: g[k] for k in ("stop_rate_feasible", "safe_rate_feasible", "stop_rate", "crash", "offroad")}
     with open(out_path, "a", encoding="utf-8", newline="\n") as f:
@@ -380,6 +358,9 @@ def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--name", required=True)
     p.add_argument("--iters", type=int, default=500)
+    p.add_argument("--max-minutes", type=float, default=0.0,
+                   help="stop after the iteration that crosses this training wall time (0 = off; the final "
+                   "iteration is checkpointed and evaluated like the last of --iters)")
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--envs", type=int, default=24, help="envs per worker")
     p.add_argument("--horizon", type=int, default=128, help="steps per rollout")
@@ -419,8 +400,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--init", default="", help="resume from a full checkpoint (state.npz)")
     p.add_argument("--init-policy", default="", help="warm-start the actor from a policy .npz of an older interface "
                    "(policy_compat.transplant_actor); critic fresh")
-    p.add_argument("--init-bc", default="", help="--arch set: start the actor by behaviour cloning this MLP "
-                   "checkpoint (bc.py); critic fresh")
+    p.add_argument("--init-bc", default="", help="start the actor by behaviour cloning this MLP "
+                   "checkpoint (bc.py; --arch set or mlp); critic fresh")
     p.add_argument("--bc-steps", type=int, default=3000, help="Adam steps of the behaviour cloning")
     p.add_argument("--bc-seconds", type=float, default=120.0, help="behaviour cloning: teacher drive (32 envs)")
     p.add_argument("--critic-warmup", type=int, default=0, help="first N iterations of this run train only the critic")
@@ -485,8 +466,8 @@ def build_state(a) -> TrainState:
     a_sizes = layer_sizes(cfg, hidden)
     c_sizes = [obs_dim(cfg) + N_PRIV, *hidden, 1]
     rng = np.random.default_rng(a.seed)
-    arch = getattr(a, "arch", "mlp")
-    c_arch = arch if getattr(a, "critic_arch", "same") == "same" else a.critic_arch
+    arch = a.arch
+    c_arch = arch if a.critic_arch == "same" else a.critic_arch
     a_arch = c_arch_d = None
     if arch == "set" or c_arch == "set":
         kw = dict(hidden=hidden, phi=tuple(int(h) for h in a.set_phi.split(",")), pool=a.set_pool, heads=a.set_heads,
@@ -501,14 +482,14 @@ def build_state(a) -> TrainState:
                     c_arch=c_arch_d)
     if a.init_policy and a_arch:
         raise ValueError("--init-policy transplants an MLP actor; it cannot start a set-encoder actor (--init-bc)")
-    if getattr(a, "init_bc", ""):
-        if not a_arch:
-            raise ValueError("--init-bc clones into a set-encoder actor (--arch set)")
+    if a.init_bc:
         from .bc import bc_actor
 
         dev = a.rollout_device if a.rollout_device != "numpy" else a.update_device
-        actor.p = bc_actor(a.init_bc, cfg, a_arch, in_scale, actor.p, steps=a.bc_steps, seconds=a.bc_seconds,
+        t_bc = time.time()
+        actor.p = bc_actor(a.init_bc, cfg, a_arch or a_sizes, in_scale, actor.p, steps=a.bc_steps, seconds=a.bc_seconds,
                            device="cpu" if dev == "numpy" else dev, seed=a.seed)
+        print(f"bc: {time.time() - t_bc:.1f} s", flush=True)
     if a.init_policy:
         from .policy_compat import transplant_actor
 
@@ -609,6 +590,7 @@ def train_loop(a, st: TrainState, out: Path, source, update, ctx, git: dict):
     actor, critic, logstd, opt_a = st.actor, st.critic, st.logstd, st.opt_a
     cfg_d = st.cfg_d
     eval_proc = None
+    t_start = time.time()
     with open(out / "log.jsonl", "a", encoding="utf-8", newline="\n") as log:
         try:
             for it in range(st.it0, a.iters):
@@ -658,20 +640,25 @@ def train_loop(a, st: TrainState, out: Path, source, update, ctx, git: dict):
                 log.write(json.dumps(rec) + "\n")
                 log.flush()
                 print(json.dumps(rec), flush=True)
+                if a.max_minutes and time.time() - t_start >= 60 * a.max_minutes:
+                    a.iters = it + 1  # this iteration is the last one: final checkpoint + eval below
                 extra = dict(iter=it, ceiling=st.ceiling, logstd=logstd.tolist(), algo="ppo", **git)
                 save_npz(out / "current.npz", actor.p, st.a_sizes, cfg_d, st.in_scale, arch=st.a_arch, **extra)
                 np.savez(out / "state.npz", actor=actor.p, critic=critic.p, logstd=logstd, ceiling=st.ceiling, iter=it,
                          total_steps=st.total_steps)
-                if a.eval_every and (it % a.eval_every == 0 or it == a.iters - 1):
+                final = it == a.iters - 1
+                if final or (a.eval_every and it % a.eval_every == 0):  # the final checkpoint is always written
                     ck = out / f"ckpt_{it:04d}.npz"
                     save_npz(ck, actor.p, st.a_sizes, cfg_d, st.in_scale, arch=st.a_arch, **extra)
-                    if it == a.iters - 1 and eval_proc is not None:
+                    if final and eval_proc is not None:
                         eval_proc.join()  # always evaluate the final policy
-                    if eval_proc is None or not eval_proc.is_alive():
+                    if a.eval_every and (eval_proc is None or not eval_proc.is_alive()):
                         rdir = str(out / f"render_{it:04d}") if a.render_every and it % a.render_every == 0 else None
                         job = (str(ck), str(out / "eval.jsonl"), it, EVAL_DEMANDS, EVAL_ENVS, EVAL_SECONDS, rdir, cfg_d)
                         eval_proc = ctx.Process(target=eval_job, args=job)
                         eval_proc.start()
+                if final:
+                    break  # --max-minutes reached (range() above was built with the original --iters)
         finally:
             source.close()
             if eval_proc is not None:
@@ -686,8 +673,7 @@ def main(argv=None):
     st = build_state(a)
     git = git_info()
     write_args(out, a, st, git)
-    n_a = policy_set.n_params(st.a_arch) if st.a_arch else n_params(st.a_sizes)
-    n_c = policy_set.n_params(st.c_arch) if st.c_arch else n_params(st.c_sizes)
+    n_a, n_c = param_count(st.a_sizes, st.a_arch), param_count(st.c_sizes, st.c_arch)
     print(f"actor {'set ' + json.dumps(st.a_arch) if st.a_arch else st.a_sizes} ({n_a} params), "
           f"critic {'set' if st.c_arch else st.c_sizes} ({n_c} params)", flush=True)
 

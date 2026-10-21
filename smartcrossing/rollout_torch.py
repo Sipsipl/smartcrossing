@@ -21,8 +21,8 @@ import numpy as np
 import torch
 
 from .ppo_common import LOG2PI, N_DONE, N_PRIV, PRIV_DEMAND_SCALE, PRIV_QUEUE_SCALE
-from . import policy_set
-from .ppo_torch import mlp_forward, set_forward
+from .policy import param_count
+from .ppo_torch import linear_forward
 from .sim import SimConfig, act_dim, obs_dim
 from .sim_torch import TorchSim
 
@@ -66,11 +66,8 @@ class TorchRollout:
         f, kw = self.dt, dict(device=self.dev)
         self.in_scale = torch.as_tensor(np.asarray(in_scale), **kw).to(f)
         self.mask = torch.as_tensor(np.asarray(act_mask), **kw).to(f)
-        def n_par(sizes, arch):
-            return policy_set.n_params(arch) if arch else sum(a * b + b for a, b in zip(sizes[:-1], sizes[1:]))
-
-        self.pa = torch.zeros(n_par(self.a_sizes, actor_arch), dtype=f, **kw)
-        self.pc = torch.zeros(n_par(self.c_sizes, critic_arch), dtype=f, **kw)
+        self.pa = torch.zeros(param_count(self.a_sizes, actor_arch), dtype=f, **kw)
+        self.pc = torch.zeros(param_count(self.c_sizes, critic_arch), dtype=f, **kw)
         self.ls = torch.zeros(A, dtype=f, **kw)
         T, B = horizon, n_envs
         f32 = torch.float32
@@ -110,10 +107,10 @@ class TorchRollout:
         self.steps_in_ep = 0
 
     def _actor(self, o):
-        return set_forward(self.pa, self.a_arch, o) if self.a_arch else mlp_forward(self.pa, self.a_sizes, o)[0]
+        return linear_forward(self.pa, self.a_sizes, o, self.a_arch)
 
     def _critic(self, x):
-        return set_forward(self.pc, self.c_arch, x) if self.c_arch else mlp_forward(self.pc, self.c_sizes, x)[0]
+        return linear_forward(self.pc, self.c_sizes, x, self.c_arch)
 
     def _noise(self, al):
         B, N, A = self.B, self.N, self.A

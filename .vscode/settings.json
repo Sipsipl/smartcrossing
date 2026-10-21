@@ -1,6 +1,0 @@
-{
-    "python.defaultInterpreterPath": "C:\\Users\\evers\\AppData\\Local\\pypoetry\\Cache\\virtualenvs\\smartcrossing-PGb3DgHh-py3.13\\Scripts\\python.exe",
-    "python.analysis.extraPaths": [
-        "${workspaceFolder}"
-    ]
-}

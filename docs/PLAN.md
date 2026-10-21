@@ -70,8 +70,22 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
   an interface value like n_signal) can grow without new weights. numpy (PolicyDriver, workers), torch
   (rollout_torch, ppo_torch via autograd) and JS (sim.js) forwards, parity-tested
   (tests/test_policy_set.py, test_sim_js_parity.py). Checkpoints carry an `arch` field (absent = MLP,
-  older files unchanged). Site: sim.js runs set brains; build.py skips them for now (brain view and
-  snapshot format assume MLP layers).
+  older files unchanged); `policy.linear_forward` / `ppo_torch.linear_forward` and `policy.param_count` are the
+  one dispatch between the two architectures. Site: sim.js runs set brains; build.py handles both (its `Brain`
+  helper: snapshot, bench payload, rounding).
+- `smartcrossing/bc.py` (`ppo --init-bc TEACHER.npz`): behaviour cloning of an MLP brain into a new actor (set
+  encoder or MLP of other sizes; the student may see more neighbours). Other `ppo.py` options worth knowing:
+  `--max-minutes` (stop after the iteration past the limit; the final checkpoint is always written and
+  evaluated), `--init-policy` / `--critic-warmup` (above), `--arch set` / `--critic-arch`.
+- `smartcrossing/gates.py`: stop gate (`cli gate`), a measurement: one car alone in front of a wreck / parked
+  car (speeds x gaps x positions x types x distractors) must stop without crashing.
+- `smartcrossing/evalset.py` (`cli evalset`): the standard eval protocol = 4 demands (0.05, 0.15, 0.3, 0.5) x
+  3 traffic seeds (1000, 2000, 3000) x 8 envs x 120 s in the default world + the stop gate, appended as JSON
+  lines (format of results/round2_eval.jsonl / round4_eval.jsonl). Its `bench_one` / `KEEP_KEYS` are shared by
+  `cli bench`, `ppo.eval_job` and the site bench.
+- Obstacle scenarios (training option, round 2): SimConfig `obstacle_envs` (fraction of envs; 0 = off and
+  bit-identical), `obstacle_rate`, `obstacle_time`, `obstacle_max`, `obstacle_parked`, `obstacle_box`: wrecks /
+  parked cars appear on a path (never closer than a car could stop).
 - `smartcrossing/policy.py` (shared MLP, numpy, `PolicyDriver`). The old ES trainer was removed
   (history only); ES checkpoints still load via `policy_compat.py`.
   `smartcrossing/policy_compat.py`: running old checkpoints (observation-layout remap by
@@ -91,21 +105,64 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
 - Subagents look at images themselves and report numbers; orchestrator keeps context small.
 - Emergence claims require ablations: signal zeroed/shuffled, no-comm training, MI(signal; intent).
 
-## Status (2026-10-11)
+## Status (2026-10-14)
 Done: simulator + baselines + metrics + tests; PPO training (numpy and GPU); emergence analysis
-tooling; website (site/) incl. sliders, agent mixing, side-by-side comparison; wide crossing, grip
-limit, reverse gear, impact-speed crash cost, wrecks / brake light / hazard / one lamp / right-half
-spawning; round 1 (crash cost x3, warm start).
-Main brain: round-1 brain results/round1_x3.npz (site main `r1_main_x3`; previous: wide_s1ft2_ckpt2650).
-Open: cars see obstacles but don't brake to a stop; crashes in the box; weaving; lamps unused.
-Next: round 2 (A/B/C, see Roadmap (E)), then (B), (C), (D).
+tooling; website (site/) incl. sliders, agent mixing, side-by-side comparison, reward visual, set-brain
+view; wide crossing, grip limit, reverse gear, impact-speed crash cost, wrecks / brake light / hazard /
+one lamp / right-half spawning; rounds 1-4 (crash cost x3, obstacle scenarios, set/attention encoder);
+stop gate; multi-seed site bench; run tracking.
+Main brain: round-4 set/attention brain results/round4_best.npz (site main `r4_S_s1`; previous r2_B_s1).
+Crash rule: equal cost for all involved (relative impact speed); own-speed variant C was worse (round 3).
+Open: deadlocks / near-gridlock in the box at high demand (cars removed after max_age 60 s); remaining
+crashes in the box; lamp unused so far.
+
+## Next up (ordered by the coordinator, owner 2026-10-14)
+1. Site: make the brain view on /gehirn larger (zoom / full-width / fullscreen toggle; owner: too small).
+   Same step: keep the start page's "Flackern (Störung)" slider (lamp noise, never used in training;
+   an intervention tool: do cars rely on the lamp?) but explain it in one plain sentence (owner: option a).
+2. Refactoring step (due after rounds 2-4: set encoder + site build grew).
+2b. English (owner, 2026-10-21): the whole website in German AND English with a language toggle top
+   right (DE/EN; remembers the choice, default by browser language, German stays the primary text);
+   all page texts incl. the data-driven sentences in pages.js, labels from obs_labels, run notes,
+   chart labels. README.md in English only. Do it after the refactoring step (site build is cleaner
+   then) and in parallel with the deadlock measurement (site-only vs sim/analysis: no file overlap).
+2c. Site (with 2b): fundamental diagram (owner, 2026-10-21): throughput vs density for brain, light and
+   reservation (traffic-flow "Fundamentaldiagramm": flow rises to capacity, then drops - capacity drop,
+   spillback, gridlock), plus a live point on the start page showing where the running sim sits on the
+   curve. Needs density over time from the bench (cars on the crossing / approaches). Same step: demand
+   slider max 240 -> 120 cars/min (0.5 /s/arm: above every driver's capacity incl. reservation ~90/min,
+   so the collapse stays visible; 240 is unrealistic); drop demand 1.0 from the site bench.
+3. (G) Deadlock study, measurement first (see below): incl. a demand sweep 0.05 ... 0.5 for the main
+   brain vs light vs reservation (throughput, deadlocks, timeouts, queue at the edges).
+4. (G) Deadlock fixes, one variable at a time with 2+ seeds each. First candidate: train with dense
+   traffic too (curriculum so far only up to 0.3 /s/arm = ~72 cars/min; above ~80/min the brain breaks
+   down - out of its training range): demand range up to 0.5 /s/arm (= the new slider max, 120/min),
+   compare with an arm up to 1.0 if cheap; keep sampling lower demands so normal traffic isn't forgotten. Goal: stay on the plateau above capacity instead of collapsing,
+   then raise capacity towards the reservation's via emergent coordination (alternating streams,
+   platoons, lamp negotiation).
+5. Then (D) norm experiments (lamp language, priority patterns) - (G) feeds directly into them.
+
+- (G) Deadlocks and decentralised negotiation (owner, 2026-10-14; the interesting part from a game-theory
+  view: can individual agents find a convention / negotiation without any central instance?).
+  Framing: a coordination game like "chicken" (go/yield; the problem is who yields). A traffic light is
+  a correlation device; agents could create their own: (1) symmetry breaking - all cars share one brain
+  and act deterministically in evaluation, so symmetric situations give symmetric actions (all wait /
+  all go); randomness as in Ethernet backoff; (2) conventions from observable asymmetries (who was
+  first, who comes from the right, who already stands); (3) communication via the free lamp ("I go" /
+  "I have waited long"); (4) memory (GRU) to know waiting time / arrival order; (5) incentives: today a
+  deadlock is cheap (removed after max_age 60 s: -1 plus waiting time vs crash from -4.5), and yielding
+  mainly helps others (individual reward; shared brain gives only weak cooperation).
+  Plan: measure first (deadlock frequency, duration, constellation; does a little action noise in
+  evaluation already dissolve them? does the lamp play a role?), then single-variable experiments:
+  deadlock cost (max_age handling / timeout cost, outcome-based), GRU memory, small shared reward
+  component (throughput of all; owner decision), lamp analysis. Literature: Pal et al. 2022.
 
 ## Roadmap (owner, after the wide-crossing change)
 - (A) Driving quality: failure breakdown (offroad vs crash, solo vs traffic, per manoeuvre and
   demand), solo-driving gate (a car alone never leaves the road), impact-speed crash/offroad
   cost, physically visible neighbour features (curvature, acceleration).  <- done
-- (B) Perception / network: set (attention) encoder over all neighbours instead of K nearest,
-  optional recurrent memory (GRU).
+- (B) Perception / network: set (attention) encoder over all neighbours instead of K nearest
+  <- done (round 4, clear win); optional recurrent memory (GRU) <- open, see (G).
 - (C) Geometry-independent inputs throughout + randomized geometries during training; GPU port
   (owner has an RTX 3070 Ti, local training later).
 - (D) Norm experiments: >= 20 seeds per configuration; lateral position (lanes; driving side is
@@ -144,7 +201,7 @@ Next: round 2 (A/B/C, see Roadmap (E)), then (B), (C), (D).
   brain, each learns from its own reward; ES: each mutation drives in its own environments, all
   cars there use it, fitness = sum over all cars).
 
-## Decided for the next training round (owner)
+## Decided for round 1 (owner; all implemented 2026-10-11)
 - Spawn on the right half of the road in driving direction, always (`spawn_right` for the learners
   too; owner, 2026-10-11): fewer crashes / space problems at the map edge. This gives up the
   "does a driving side emerge on its own" question (earlier runs already showed the cars agree on a

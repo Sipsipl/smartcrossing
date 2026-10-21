@@ -1,7 +1,7 @@
 import numpy as np
 
-from smartcrossing.policy import PolicyDriver, default_in_scale, forward, layer_sizes, save_npz
-from smartcrossing.ppo import MLP, Worker, mlp_forward
+from smartcrossing.policy import PolicyDriver, default_in_scale, forward, layer_sizes, mlp_linear, save_npz
+from smartcrossing.ppo import MLP, Worker
 from smartcrossing.ppo_common import N_PRIV
 from smartcrossing.sim import Sim, SimConfig, act_dim, obs_dim
 
@@ -23,7 +23,7 @@ def test_mlp_backward_matches_finite_differences():
         net.p[i] = old
         num[i] = (fp - fm) / 2e-6
     np.testing.assert_allclose(g, num, atol=1e-6)
-    np.testing.assert_allclose(mlp_forward(net.p, net.sizes, x), y)
+    np.testing.assert_allclose(mlp_linear(net.p, net.sizes, x), y)
 
 
 def test_export_is_tanh_of_mean(tmp_path):

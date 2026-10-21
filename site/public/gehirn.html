@@ -6,34 +6,53 @@
 <title>Das Gehirn – Smart Crossing</title>
 <meta name="description" content="Das neuronale Netz eines selbstfahrenden Autos, live beim Denken.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/site.css?v=1c69e12e">
+<link rel="stylesheet" href="css/site.css?v=3fccb579">
 </head>
 <body data-page="gehirn">
 <div class="wrap">
 <header class="top"><a class="brand" href="index.html"><svg viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="5" fill="#3b5640"/><path d="M9 0h6v24H9zM0 9h24v6H0z" fill="#46484d"/><rect x="5" y="10.2" width="6" height="3.6" rx="1" fill="#f5a623"/><rect x="10.2" y="14" width="3.6" height="6" rx="1" fill="#4287f5"/></svg>Smart Crossing</a><nav class="nav" aria-label="Seiten"><a href="index.html">Start</a><a href="sehen.html">Was sieht ein Auto?</a><a href="tun.html">Was kann es tun?</a><a href="gehirn.html" aria-current="page">Das Gehirn</a><a href="lernen.html">Wie lernen sie?</a><a href="vergleich.html">Vergleich</a></nav></header>
 <h1>Das Gehirn</h1>
-<p class="lead">Jedes Auto wird von einem kleinen neuronalen Netz gesteuert: <span id="brain-sizes">48 Eingänge → 32 → 32 → 4 Ausgänge</span>.
+<p class="lead" id="brain-lead">Jedes Auto wird von einem kleinen neuronalen Netz gesteuert: <span id="brain-sizes">48 Eingänge → 32 → 32 → 4 Ausgänge</span>.
 Links kommen die Sensorwerte rein, rechts kommen Gas, Lenkung und Lampe raus. Dazwischen: zwei Schichten „Neuronen“.</p>
 
-<div class="sim-layout wide-panel">
+<div class="brain-pick" id="brain-pick-box" hidden><span class="muted small">Gehirn:</span> <div class="seg" role="radiogroup" aria-label="Welches Gehirn" id="brain-pick"></div></div>
+
+<div class="sim-layout wide-panel big" id="brain-layout">
   <section id="stage" aria-label="Live-Simulation"></section>
   <aside class="panel">
     <div class="group" id="brainnote">
-      <div id="selhead"></div>
-      <div class="brain-box"><canvas id="net" aria-label="Netzdiagramm mit Live-Aktivierungen"></canvas></div>
+      <div class="brain-head"><div id="selhead"></div><button type="button" class="btn" id="brain-big" aria-pressed="true">Klein anzeigen</button></div>
+      <div class="brain-box"><canvas id="net" aria-label="Netzdiagramm mit Live-Aktivierungen"></canvas><div id="setnet" hidden></div></div>
       <div class="tip" id="tip">Fahre mit der Maus über einen Kreis (oder tippe darauf).</div>
       <div class="legend small">
         <span class="key"><span class="lamp" style="background:var(--pos)"></span></span><span>positiv (bis +1)</span>
         <span class="key"><span class="lamp" style="background:var(--neg)"></span></span><span>negativ (bis −1)</span>
-        <span class="key"><span class="line-key" style="border-color:var(--muted)"></span></span><span>nur die stärksten Verbindungen; kräftig = schiebt gerade stark</span>
+        <span class="key" data-set-only hidden><span class="line-key" style="border-color:var(--c4);border-top-width:4px"></span></span><span data-set-only hidden>Aufmerksamkeit: dick = zählt gerade viel (auch in der Kreuzung)</span>
+        <span class="key"><span class="line-key" style="border-color:var(--muted)"></span></span><span>nur die stärksten Verbindungen</span>
       </div>
     </div>
   </aside>
 </div>
 
+<section id="set-explain" hidden>
+<h2>Warum ein Mini-Netz für jeden Nachbarn?</h2>
+<p>Das aktuelle Gehirn schaut auf bis zu <b data-k>8</b> andere Autos in der Nähe. Jedes davon läuft durch <b>dasselbe kleine Netz</b> – oben im Bild nur einmal
+gezeichnet, aber es arbeitet für jeden Nachbarn einzeln. Danach entscheidet die <b>Aufmerksamkeit</b>, wie viel jeder Nachbar gerade zählt, und mischt alle entsprechend zusammen.
+Erst dann kommt die Mischung mit den eigenen Werten zusammen und es geht weiter zu Gas, Lenkung und Lampe.</p>
+<ul class="plain">
+  <li><b>Einmal lernen reicht.</b> „Der vor mir bremst“ muss das Gehirn nur ein einziges Mal lernen – egal, ob dieses Auto gerade Nachbar 1 oder Nachbar 5 ist.
+    Das vorherige Gehirn hatte für jeden Platz eigene Gewichte und musste dasselbe für jeden Platz extra lernen.</li>
+  <li><b>Die Reihenfolge ist egal.</b> Die Nachbarn sind zwar nach Abstand sortiert, aber tauschen zwei die Plätze, kommt genau dasselbe heraus.</li>
+  <li><b>Mehr Autos im Blick.</b> Ein weiterer Nachbar kostet kein einziges neues Gewicht. Deshalb kann es <span data-k>8</span> statt 4 Autos ansehen.</li>
+  <li><b>Aufmerksamkeit</b> heißt hier: Die eigenen Werte stellen eine Frage („Wer ist für mich gerade wichtig?“), jeder Nachbar bringt eine Antwort mit,
+    und je besser die passt, desto mehr zählt er. Eigentlich sind es <span data-heads>4</span> solche Fragen gleichzeitig; die Balken zeigen den Durchschnitt.
+    In der Kreuzung siehst du dieselben Nachbarn mit Nummer – je dicker die gelbe Linie, desto mehr Aufmerksamkeit. Fahre über einen Nachbarn im Bild, um ihn zu markieren.</li>
+</ul>
+</section>
+
 <h2>Was passiert da?</h2>
 <ul class="plain">
-  <li>Jedes Neuron rechnet dasselbe: Es nimmt die Werte von links, multipliziert jeden mit einem <b>Gewicht</b>, zählt alles zusammen und
+  <li>Jedes Neuron rechnet dasselbe: Es nimmt die Werte davor, multipliziert jeden mit einem <b>Gewicht</b>, zählt alles zusammen und
     drückt das Ergebnis auf einen Wert zwischen −1 und +1 (blau positiv, orange negativ).</li>
   <li>Insgesamt hat das Netz <b id="brain-params">2 788</b> Gewichte. <b>Das ist alles, was das Auto „weiß“.</b> Am Anfang sind es Zufallszahlen;
     das Training dreht so lange an ihnen, bis das Auto vernünftig fährt.</li>
@@ -44,13 +63,13 @@ Links kommen die Sensorwerte rein, rechts kommen Gas, Lenkung und Lampe raus. Da
     und lässt sich oft gar nicht so einfach in Worte fassen.</li>
 </ul>
 <p><a href="lernen.html">Weiter: Wie lernen die Autos? →</a></p>
-<footer>Smart Crossing – ein Hobbyprojekt. Alles läuft direkt in deinem Browser, es werden keine Daten gesammelt. Stand: 2026-10-12. <a href="https://github.com/Sipsipl/smartcrossing">Code auf GitHub</a></footer>
+<footer>Smart Crossing – ein Hobbyprojekt. Alles läuft direkt in deinem Browser, es werden keine Daten gesammelt. Stand: 2026-10-21. <a href="https://github.com/Sipsipl/smartcrossing">Code auf GitHub</a></footer>
 </div>
-<script src="data/site-data.js?v=1c69e12e"></script>
-<script src="js/sim-config.js?v=1c69e12e"></script>
-<script src="js/sim.js?v=1c69e12e"></script>
-<script src="js/crossing.js?v=1c69e12e"></script>
-<script src="js/brain.js?v=1c69e12e"></script>
-<script src="js/pages.js?v=1c69e12e"></script>
+<script src="data/site-data.js?v=3fccb579"></script>
+<script src="js/sim-config.js?v=3fccb579"></script>
+<script src="js/sim.js?v=3fccb579"></script>
+<script src="js/crossing.js?v=3fccb579"></script>
+<script src="js/brain.js?v=3fccb579"></script>
+<script src="js/pages.js?v=3fccb579"></script>
 </body>
 </html>
