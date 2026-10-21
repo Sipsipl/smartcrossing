@@ -38,7 +38,13 @@
   // number formats: German decimal comma, English decimal point
   const EN = lang === "en";
   SCX.num = (v, d = 1) => (v === null || v === undefined ? "–" : EN ? v.toFixed(d) : v.toFixed(d).replace(".", ","));
-  SCX.pct = (v) => (v === null || v === undefined ? "–" : EN ? `${Math.round(v * 100)}%` : `${Math.round(v * 100)} %`);
+  /** Rate as percent: whole numbers, but one decimal (truncated) from 99 % up; 100 only when exactly 1. */
+  SCX.pct = (v) => {
+    if (v === null || v === undefined) return "–";
+    const p = v * 100, s = p >= 99 && p < 100 ? String(Math.floor(p * 10 + 1e-6) / 10) : String(Math.round(p));
+    const n = s.indexOf(".") < 0 && p >= 99 && p < 100 ? s + ".0" : s;
+    return EN ? `${n}%` : `${n.replace(".", ",")} %`;
+  };
   SCX.pctInt = (v) => (EN ? `${v}%` : `${v} %`);
   SCX.group = (n) => n.toLocaleString(EN ? "en-US" : "de-DE");
   SCX.signed = (v, d = 2) => (v > 0 ? "+" : v < 0 ? "−" : "") + SCX.num(Math.abs(v), d);
