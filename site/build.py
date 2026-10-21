@@ -48,6 +48,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "site")]
 
 from obs_labels import interface_key, obs_layout  # noqa: E402
+from smartcrossing.deadlock import REPORT_SEEDS  # noqa: E402
+from smartcrossing.gates import stop_gate  # noqa: E402
 from smartcrossing.policy import default_in_scale, init_params, layer_sizes, unpack  # noqa: E402
 from smartcrossing.policy_compat import INTERFACE_KEYS, interface_cfg, load_adapted_policy, physics_of  # noqa: E402
 from smartcrossing.sim import BRAKE_ACC, SimConfig, js_constants  # noqa: E402
@@ -75,7 +77,10 @@ DEFAULT_HISTORY = "ppo17/ckpt_5250"
 DEFAULT_MIX = ""
 TIMELINE_DEMANDS = [0.05, 0.15]
 BENCH_ENVS, BENCH_SECONDS = 8, 120.0
-BENCH_SEEDS = (1000, 2000, 3000)  # traffic seeds, the same for all drivers (paired); results are averaged
+# Traffic seeds, the same for all drivers (paired); results are averaged. These are the held-out REPORTING seeds
+# (deadlock.REPORT_SEEDS = 4000/5000/6000), not the SELECTION seeds 1000/2000/3000 that cli select / evalset use to
+# pick checkpoints: numbers on the website must not be flattered by the selection.
+BENCH_SEEDS = REPORT_SEEDS
 # Plain German names for known runs: run id -> (short label for chart markers, label, one-line
 # explanation). Shown on "Wie lernen sie?" instead of the raw ids; unmapped runs fall back to the id.
 RUN_INFO = {
@@ -166,7 +171,7 @@ RUN_INFO = {
                 "Anderer Zufallsstart, ähnlich."),
     "r5_K_s1": ("R5", "Runde 5: weitergelernt (Kontrolle)",
                 "Das aktuelle Gehirn: das Gehirn aus Runde 4 hat unverändert weitertrainiert. Gewählt ist ein Zwischenstand (Schritt 475) mit wenigen Unfällen. "
-                "Ein stehendes Hindernis umfährt es zu etwa 99 % sicher, hält aber nur in rund 70 % der Fälle davor an – im weiteren Training ließ das Anhalten nach."),
+                "Ein stehendes Hindernis umfährt es zu etwa {safe} % sicher, hält aber nur in rund {stop} % der Fälle davor an – im weiteren Training ließ das Anhalten nach."),
     "r5_K_s2": ("R5'", "Runde 5: weitergelernt, zweiter Lauf",
                 "Anderer Zufallsstart: bei dichtem Verkehr noch mehr Autos durch, dafür bleiben die Unfälle bei sehr dichtem Verkehr hoch."),
     "r5_D_s1": ("R5d", "Runde 5, Test: Training mit dichtem Verkehr",
@@ -303,7 +308,7 @@ RUN_INFO_EN = {
                 "Different random start, similar."),
     "r5_K_s1": ("Round 5: trained on (control)",
                 "The current brain: the round 4 brain trained on, unchanged. An intermediate step (step 475) is chosen, with few crashes. "
-                "It gets past a standing obstacle safely in about 99% of cases, but stops in front of it in only about 70% – stopping faded with further training."),
+                "It gets past a standing obstacle safely in about {safe}% of cases, but stops in front of it in only about {stop}% – stopping faded with further training."),
     "r5_K_s2": ("Round 5: trained on, second run",
                 "Different random start: even more cars get through in dense traffic, but crashes stay high in very dense traffic."),
     "r5_D_s1": ("Round 5, test: training with dense traffic",
@@ -346,7 +351,7 @@ STEP_INFO_EN = {
     "r1_main_x3": "Kept learning for longer → about 40% fewer crashes than before: the main brain up to round 2",
     "r2_B_s1": "Plus obstacles in training (wrecks, parked cars) → brakes behind them far more often and queues up; still crashes in the middle of the crossing in dense traffic",
     "r4_S_s1": "New brain: one shared mini-network for each of the up to 8 neighbours plus attention; first imitated the previous brain, then kept learning → fewest crashes in the comparison (trained for the same time as the previous one and a network twice as wide)",
-    "r5_K_s1": "The same brain trained on, an intermediate step with few crashes and high throughput → more cars through and fewer crashes in dense traffic; but in front of a standing obstacle it stops in only about 70% of cases, otherwise it drives around",
+    "r5_K_s1": "The same brain trained on, an intermediate step with few crashes and high throughput → more cars through and fewer crashes in dense traffic; but in front of a standing obstacle it stops in only about {stop}% of cases, otherwise it drives around",
 }
 
 
@@ -354,8 +359,11 @@ def run_info(run: str | None) -> dict:
     """Names / notes of a run for the pages: German in label / note / step, English in *_en."""
     short, label, note = RUN_INFO.get(run, (run, run, None)) if run else (None, None, None)
     label_en, note_en = RUN_INFO_EN.get(run, (label, None)) if run else (None, None)
+    cid = DEFAULT_MAIN[0]  # the notes with {safe} / {stop} are about the main brain's checkpoint
+    note, note_en = _gate_text(note, cid), _gate_text(note_en, cid)
     return {"short": short, "label": label, "label_en": label_en, "note": note, "note_en": note_en,
-            "step": STEP_INFO.get(run) if run else None, "step_en": STEP_INFO_EN.get(run) if run else None}
+            "step": _gate_text(STEP_INFO.get(run), cid) if run else None,
+            "step_en": _gate_text(STEP_INFO_EN.get(run), cid) if run else None}
 
 
 # nav entries: (file, German label); the English labels are js/i18n-en.js nav.<file>
@@ -1132,6 +1140,41 @@ def bench(found: dict, sel: dict, cfg: SimConfig, a) -> dict:
     return {"baselines_by_world": by_world, "main_world": main_world, "base_phys": base_worlds[main_world]}
 
 
+GATE_CACHE = {}
+
+
+def _ckpt_path(c: dict) -> Path | None:
+    """The .npz of a discovered checkpoint (runs/ or the committed snapshot), or None."""
+    for q in (ROOT / c["file"], SNAPSHOT / "brains" / c["run"] / f"{c['id'].split('/')[-1]}.npz"):
+        if c["file"] and q.is_file():
+            return q
+    return None
+
+
+def gate_of(cid: str | None) -> dict | None:
+    """Stop-gate rates (feasible cases) of a checkpoint, measured here (smartcrossing/gates.py, seconds):
+    {"safe": share that stop or pass without a crash, "stop": share that stop in front of the obstacle}."""
+    c = FOUND.get(cid) if cid else None
+    path = _ckpt_path(c) if c else None
+    if path is None:
+        return None
+    if cid not in GATE_CACHE:
+        summary, _ = stop_gate(f"policy:{path}")
+        GATE_CACHE[cid] = {"safe": summary["safe_rate_feasible"], "stop": summary["stop_rate_feasible"],
+                           "cases": summary["feasible"]}
+    return GATE_CACHE[cid]
+
+
+def _gate_text(text: str | None, cid: str) -> str | None:
+    """Fill {safe} / {stop} (whole percent of the stop gate of checkpoint cid) in a run note."""
+    if text is None or "{safe}" not in text and "{stop}" not in text:
+        return text
+    g = gate_of(cid)
+    if g is None:  # checkpoint not available (e.g. in tests): no number rather than a made-up one
+        return text.replace("{safe}", "?").replace("{stop}", "?")
+    return text.replace("{safe}", str(round(g["safe"] * 100))).replace("{stop}", str(round(g["stop"] * 100)))
+
+
 FUNDAMENTAL = ROOT / "results" / "deadlock_fundamental.json"
 FUNDAMENTAL_DRIVERS = ("brain", "light", "reservation")  # curves of the fundamental diagram on the site
 START_DEMAND_MAX = 0.5  # max of the start page demand slider
@@ -1201,6 +1244,7 @@ def write_site(found: dict, sel: dict, bres: dict, cfg: SimConfig, kind: str, a)
         "reward": reward_of(found[main_id]["policy"].get("cfg") or {}) if main_id else None,
         "demands": DEMANDS,
         "fundamental": fundamental_data(),
+        "gate": {"main": gate_of(main_id), "previous": gate_of(sel["prev_id"]) if sel["prev_id"] != main_id else None},  # stop gate (measured at build)
         "bench_setup": {"envs": BENCH_ENVS, "seconds": BENCH_SECONDS, "seeds": len(BENCH_SEEDS)},
     }
     # side-by-side replays (same traffic) of the two rule-based drivers and the best policy
@@ -1244,6 +1288,8 @@ def main(argv=None):
     FOUND.update(found)
     print(f"  {len(found)} loadable checkpoints")
     sel = collect(found, a)
+    if gate_of(sel["main_id"]) is None:
+        print("WARNING: no stop gate for the main brain (checkpoint file not found); /vergleich shows no gate rates")
     bres = bench(found, sel, cfg, a)
     write_site(found, sel, bres, cfg, kind, a)
 

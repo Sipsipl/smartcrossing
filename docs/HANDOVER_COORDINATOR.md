@@ -67,6 +67,7 @@ Owners, damit Kontext frisch ist und GPU-Training möglich wird.
   Messung, Ausfall-Aufschlüsselung) und auf Basis der Liste handeln. Messen vor Optimieren.
 - **Robuste Zahlen:** Bench über mehrere Verkehrs-Seeds; ein einzelner Seed täuscht (±10–20
   Unfälle/1000). Immer mit Ampel/Verkehrsrechner und dem bisherigen besten Modell vergleichen.
+- **Seeds nach Zweck trennen:** Auswahl-Seeds 1000/2000/3000 (`select.py`, `evalset.py`, Training) – alles auf der Website (Bench, Fundamental, Wolke) nutzt die ungesehenen Berichts-Seeds 4000/5000/6000 (`deadlock.REPORT_SEEDS`), sonst schmeichelt die Auswahl dem gewählten Gehirn.
 - **Trainings:** vor dem Start Iterationen/min messen und Dauer hochrechnen; Zeitlimit im Auftrag;
   CPU-Last im Blick (Training + Website-Build gleichzeitig überbucht die Kerne).
 - **Berichte kritisch prüfen:** Subagent-Berichte und externe Handover sind Behauptungen. Gegen

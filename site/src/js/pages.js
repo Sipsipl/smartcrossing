@@ -291,6 +291,14 @@
   /** Mean throughput (cars/min) of a bench entry at demand d, or null. */
   const thrOf = (e, d) => (e && e.bench[d] ? e.bench[d].throughput_per_min : null);
 
+  /** How the main brain's crashes compare with the previous brain's at demand d (bench data): text key. */
+  function crashVerdict(d) {
+    const a = badPer1000(D.previous && pol(D.previous), d), b = badPer1000(pol(MAIN_ID), d);
+    if (a === null || b === null) return null;
+    if (Math.abs(b - a) < 3 || (b <= 1.25 * a && b >= 0.8 * a)) return "note.cmp.same"; // parity within noise
+    return b < 0.5 * a ? "note.cmp.much" : b < a ? "note.cmp.fewer" : "note.cmp.more";
+  }
+
   /** What is new in the main brain vs the previous one (crash numbers from the bench data). */
   function prevNote() {
     const m = pol(MAIN_ID), mid = crashPair("0.15"), dense = crashPair("0.3");
@@ -298,10 +306,12 @@
     if (!mid) return "";
     const a = badPer1000(pol(D.previous), "0.15"), b = badPer1000(m, "0.15");
     const much = tx(a > 0 && b < 0.5 * a ? "note.much" : b < a ? "note.fewer" : "note.notfewer");
-    // bench values are means over several traffic seeds, but still a rounded comparison
+    const vm = crashVerdict("0.15"), vd = crashVerdict("0.3");
+    // bench values are means over several traffic seeds (held-out reporting seeds), but still a rounded comparison
     return isSetEntry(m)
       ? tx("note.set", {
-        K: m.policy.arch.K, much, mid, dense: dense ? tx("note.dense", { dense }) : "",
+        K: m.policy.arch.K, midw: tx(vm), mid,
+        dense: dense && vd ? tx("note.dense", { dw: tx(vd), dense }) : "",
         thr: num(thr, 0), thrprev: num(thrPrev, 0), dem: num(m.bench["0.5"].demand_per_min, 0),
       })
       : tx("note.mlp", { much, mid });
@@ -859,6 +869,14 @@
       $("h-dthr").textContent = num(m5.throughput_per_min, 0);
       if (p5) $("h-dprev").textContent = tx("cmp.against", { v: num(p5.throughput_per_min, 0) });
       if (f5) $("h-djam").textContent = pct(f5.deadlock_time_frac);
+    }
+    // stop gate (measured by build.py: gates.py, cases a full brake could still stop)
+    const G = D.gate && D.gate.main;
+    if (G && $("g-safe")) {
+      $("g-safe").textContent = SCX.pct(G.safe);
+      $("g-stop").textContent = SCX.pct(G.stop);
+      const GP = D.gate.previous;
+      if (GP) $("g-prev").textContent = tx("cmp.gateprev", { prev: SCX.pct(GP.stop), prevsafe: SCX.pct(GP.safe) });
     }
     if ($("c-thr-note")) $("c-thr-note").textContent = groups.length > 1 ? tx("cmp.chartnote", { world: WORLD_NAMES[mainWorld].replace(/ \(.*/, "") }) : "";
     const draw = () => SCX.lineChart($("c-thr"), {
