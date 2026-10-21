@@ -10,6 +10,7 @@ poetry run pytest -q               # cuda test cases are skipped unless SC_TEST_
 poetry run python -m smartcrossing.cli bench --driver reservation --envs 8 --demand 0.15
 poetry run python -m smartcrossing.cli render --driver light --out runs/light   # sheet.png + episode.gif
 poetry run python -m smartcrossing.cli evalset --driver policy:results/round4_best.npz --driver reservation --out results/x_eval.jsonl --workers 4   # standard eval: 4 demands x 3 seeds + stop gate
+poetry run python -m smartcrossing.cli select --run runs/<name> --every 2 --workers 4 --out results/x_select.jsonl   # model selection: checkpoints with stop gate >= 0.95, best throughput at 0.5 under a crash limit
 ```
 
 ## Notes

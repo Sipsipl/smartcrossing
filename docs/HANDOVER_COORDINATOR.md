@@ -31,6 +31,7 @@ Owners, damit Kontext frisch ist und GPU-Training möglich wird.
   Agents in denselben Dateien), knappe Berichte (Zahlen, Pfade, keine Code-Dumps) anfordern.
   Subagents schauen sich Bilder/Screenshots selbst an; du nur stichprobenartig.
 - **Standard-Eval = `cli evalset`** (4 Nachfragen × 3 Verkehrs-Seeds × 8 Envs × 120 s + Anhaltetest, JSONL wie results/round4_eval.jsonl).
+- **Modellauswahl = `cli select` mit Gate-Filter** (alle Checkpoints eines Runs: Anhaltetest >= 0.95 als harter Filter, dann bester Durchsatz bei 0.5 unter Crash-Limit bei 0.3; `--every N`, `--workers 4`, `--copy-to`).
 - **Selbst evaluieren:** `pytest`, `cli bench` (JSON-Zeile), `cli render` (sheet.png,
   spacetime.png), `analyze.py`, Playwright-Screenshots der Website. Nie Erfolg behaupten ohne
   Beleg; Misserfolge ehrlich berichten.
