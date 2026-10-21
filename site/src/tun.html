@@ -3,43 +3,46 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Was kann ein Auto tun? – Smart Crossing</title>
-<meta name="description" content="Gas, Bremse, Lenkung und eine frei wählbare Dachlampe – die Entscheidungen eines lernenden Autos, live.">
+<title data-i18n="do.was-kann-ein-auto">Was kann ein Auto tun? – Smart Crossing</title>
+<meta data-i18n-attr="content=do.meta-gas-bremse-lenkung" name="description" content="Gas, Bremse, Lenkung und eine frei wählbare Dachlampe – die Entscheidungen eines lernenden Autos, live.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="css/site.css?v={{VERSION}}">
 </head>
 <body data-page="tun">
 <div class="wrap">
 <!-- HEADER -->
-<h1>Was kann ein Auto tun?</h1>
-<p class="lead">Zehnmal pro Sekunde entscheidet das Gehirn über wenige Regler, jeder zwischen −1 und +1: <b>Gas/Bremse</b>, <b>Lenkung</b>
+<h1 data-i18n="do.was-kann-ein-auto-2">Was kann ein Auto tun?</h1>
+<p data-i18n="do.zehnmal-pro-sekunde-entscheidet" class="lead">Zehnmal pro Sekunde entscheidet das Gehirn über wenige Regler, jeder zwischen −1 und +1: <b>Gas/Bremse</b>, <b>Lenkung</b>
 und seine <b>Dachlampe</b> (beim aktuellen Gehirn ein Kanal, hell/dunkel; ältere Gehirne hatten zwei Farbkanäle). Mehr gibt es nicht – kein Blinker, keine Hupe, kein Funk.</p>
 
 <div class="sim-layout">
-  <section id="stage" aria-label="Live-Simulation"></section>
+  <section data-i18n-attr="aria-label=do.aria-live-simulation" id="stage" aria-label="Live-Simulation"></section>
   <aside class="panel">
     <div class="group">
       <div id="selhead"></div>
       <div class="outs" id="outs"></div>
     </div>
     <div class="group">
-      <h3>Die letzten 10 Sekunden</h3>
-      <canvas class="hist" id="hist" aria-label="Verlauf der vier Regler"></canvas>
+      <h3 data-i18n="do.die-letzten-sekunden">Die letzten 10 Sekunden</h3>
+      <canvas data-i18n-attr="aria-label=do.aria-verlauf-der-vier" class="hist" id="hist" aria-label="Verlauf der vier Regler"></canvas>
     </div>
   </aside>
 </div>
 
-<h2>Die Physik</h2>
-<p>Die Autos bewegen sich wie echte Autos von oben gesehen – vereinfacht, aber mit echten Grenzen:</p>
+<h2 data-i18n="do.die-physik">Die Physik</h2>
+<p data-i18n="do.die-autos-bewegen-sich">Die Autos bewegen sich wie echte Autos von oben gesehen – vereinfacht, aber mit echten Grenzen:</p>
 <ul class="plain" id="kin"></ul>
-<p>Die Dachlampe dagegen hat keine Physik: Sie leuchtet einfach in der gewählten Farbe, und die vier nächsten Autos sehen diese Farbe im nächsten Moment.
+<p data-i18n="do.die-dachlampe-dagegen-hat">Die Dachlampe dagegen hat keine Physik: Sie leuchtet einfach in der gewählten Farbe, und die vier nächsten Autos sehen diese Farbe im nächsten Moment.
 Ob das irgendetwas bedeutet, entscheiden die Autos selbst – oder eben nicht.</p>
-<p class="muted small">Ein Unfall ist, wenn sich zwei Autos berühren (jedes Auto wird dafür durch drei Kreise angenähert). „Von der Straße abgekommen“ heißt: ein Teil des Autos ragt über den Bordstein.
+<p data-i18n="do.ein-unfall-ist-wenn" class="muted small">Ein Unfall ist, wenn sich zwei Autos berühren (jedes Auto wird dafür durch drei Kreise angenähert). „Von der Straße abgekommen“ heißt: ein Teil des Autos ragt über den Bordstein.
 In beiden Fällen ist das Auto raus.</p>
-<p><a href="gehirn.html">Weiter: Das Gehirn →</a></p>
+<p><a data-i18n="do.weiter-das-gehirn" href="gehirn.html">Weiter: Das Gehirn →</a></p>
 <!-- FOOTER -->
 </div>
 <script src="data/site-data.js?v={{VERSION}}"></script>
+<script src="js/i18n-de.js?v={{VERSION}}"></script>
+<script src="js/i18n-en.js?v={{VERSION}}"></script>
+<script src="js/i18n.js?v={{VERSION}}"></script>
 <script src="js/sim-config.js?v={{VERSION}}"></script>
 <script src="js/sim.js?v={{VERSION}}"></script>
 <script src="js/crossing.js?v={{VERSION}}"></script>

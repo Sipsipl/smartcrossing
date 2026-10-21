@@ -38,7 +38,7 @@
     const W = Math.max(300, box.clientWidth || 600), H = opts.height || 260;
     const m = { l: 46, r: opts.directLabels ? 92 : 14, t: opts.phases && opts.phases.length ? 34 : 14, b: 40 };
     if (W < 420 && opts.directLabels) m.r = 14; // phone: legend only
-    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img", "aria-label": opts.aria || opts.yLabel || "Diagramm" }, box);
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img", "aria-label": opts.aria || opts.yLabel || SCX.t("chart.fallback") }, box);
     const all = opts.series.flatMap((s) => s.points);
     const xMin = opts.xMin ?? Math.min(...all.map((p) => p[0])), xMax = opts.xMax ?? Math.max(...all.map((p) => p[0]));
     const yMin = opts.yMin ?? 0, yMax = opts.yMax ?? Math.max(...all.map((p) => p[1])) * 1.08;

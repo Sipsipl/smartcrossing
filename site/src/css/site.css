@@ -48,6 +48,12 @@ a { color: var(--accent); }
 .nav a { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 999px; font-size: 14px; white-space: nowrap; }
 .nav a:hover { color: var(--fg); background: var(--chip); }
 .nav a[aria-current="page"] { background: var(--accent); color: var(--accent-ink); }
+.lang { margin-left: auto; order: 2; display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+.lang button { font: inherit; font-size: 13px; font-weight: 600; padding: 3px 11px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.lang button:hover { color: var(--fg); background: var(--chip); }
+.lang button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.lang button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+@media (max-width: 1000px) { .lang { order: 1; } .nav { order: 2; flex-basis: 100%; } }
 h1 { font-size: clamp(1.6rem, 4vw, 2.3rem); line-height: 1.15; margin: 0 0 10px; letter-spacing: -0.02em; text-wrap: balance; }
 h2 { font-size: 1.35rem; margin: 34px 0 10px; letter-spacing: -0.01em; text-wrap: balance; }
 h3 { font-size: 1.05rem; margin: 18px 0 6px; }
