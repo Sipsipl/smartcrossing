@@ -281,3 +281,10 @@ ol.phases li.world { display: block; font-weight: 650; margin-top: 6px; color: v
   .sim-layout.big, .sim-layout.wide-panel.big { grid-template-columns: minmax(0, 1fr); }
   .sim-layout.big #stage { max-width: 760px; margin: 0 auto; width: 100%; }
 }
+
+/* fundamental diagram: ringed maxima + live dot on the start page */
+.chart .peak-label { font-size: 11px; font-weight: 600; fill: var(--fg); }
+.chart .live-dot { transition: transform 0.45s linear, opacity 0.3s; pointer-events: none; }
+.chart .live-dot .halo { fill: var(--fg); opacity: 0.25; }
+.chart .live-dot .core { fill: var(--fg); stroke: var(--panel); stroke-width: 2; }
+.fd-now { margin: 2px 0 6px; font-size: 14px; min-height: 1.4em; font-variant-numeric: tabular-nums; }

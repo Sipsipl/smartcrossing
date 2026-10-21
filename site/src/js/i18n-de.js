@@ -235,5 +235,17 @@
  "chart.xtip": "{n} Autos/min kommen an",
  "chart.aria": "Durchsatz abhängig von der Nachfrage",
  "chart.fallback": "Diagramm",
- "cmp.setup": "{envs} Simulationen × {min} Minuten je Wert, Mittel über {seeds} Verkehrsläufe; gleicher Zufallsverkehr für alle (Stand {built})."
+ "cmp.setup": "{envs} Simulationen × {min} Minuten je Wert, Mittel über {seeds} Verkehrsläufe; gleicher Zufallsverkehr für alle (Stand {built}).",
+ "fd.xlabel": "Autos gleichzeitig unterwegs",
+ "fd.ylabel": "durchgekommen pro Minute",
+ "fd.xtip": "{n} Autos gleichzeitig unterwegs",
+ "fd.aria": "Fundamentaldiagramm: Durchsatz abhängig von der Zahl der gleichzeitig unterwegs befindlichen Autos, für gelernte Autos, Ampel und Verkehrsrechner",
+ "fd.peak": "Maximum {n}/min",
+ "fd.caps": "Höchster gemessener Durchsatz: gelernte Autos <b>{b}</b> Autos/min (bei {bd} Autos gleichzeitig), Ampel <b>{l}</b> (bei {ld}), Verkehrsrechner <b>{r}</b> (bei {rd}).",
+ "fd.drop": " Die gelernten Autos fallen danach bei dichtestem Verkehr auf {x} Autos/min zurück ({p} weniger).",
+ "fd.rise": " Beim Verkehrsrechner steigt die Kurve bis zum Ende der Messung weiter: Seine Kapazität liegt noch darüber.",
+ "fd.mini.aria": "Wo die laufende Simulation gerade auf dem Fundamentaldiagramm der gelernten Autos steht",
+ "fd.now": "Jetzt: <b>{cars}</b> Autos unterwegs · <b>{thr}</b> Autos/min",
+ "fd.wait": "Der Punkt erscheint nach ein paar Sekunden.",
+ "fd.me": "jetzt"
 };

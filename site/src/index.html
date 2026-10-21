@@ -21,12 +21,19 @@ und durch Ausprobieren lernen mussten, wie man hier heil auf die andere Seite ko
     <div class="group">
       <h3 data-i18n="idx.verkehr">Verkehr</h3>
       <div class="ctl"><label data-i18n="idx.wie-viele-autos-kommen" for="demand">Wie viele Autos kommen?</label><output id="demand-o" for="demand"></output>
-        <input type="range" id="demand" min="0" max="1" step="0.01" value="0.15"></div>
+        <input type="range" id="demand" min="0" max="0.5" step="0.01" value="0.15"></div>
       <div class="ctl"><label data-i18n="idx.wollen-rechts-abbiegen" for="pright">Wollen rechts abbiegen</label><output id="pright-o" for="pright"></output>
         <input type="range" id="pright" min="0" max="100" step="1" value="33"></div>
       <div class="ctl"><label data-i18n="idx.wollen-links-abbiegen" for="pleft">Wollen links abbiegen</label><output id="pleft-o" for="pleft"></output>
         <input type="range" id="pleft" min="0" max="100" step="1" value="33"></div>
       <p class="hint" id="pstraight"></p>
+    </div>
+    <div class="group" id="fd-live">
+      <h3 data-i18n="idx.fd-title">Wo steht die Kreuzung gerade?</h3>
+      <div id="fd-mini"></div>
+      <p class="fd-now" id="fd-now" aria-live="off"></p>
+      <p data-i18n="idx.fd-hint" class="hint">Der Punkt ist die laufende Simulation auf der Kurve der gelernten Autos: wie viele Autos gleichzeitig unterwegs sind und wie viele pro Minute durchkommen (letzte 60 s). Schieb „Wie viele Autos kommen?“ nach rechts und sieh zu, wie der Punkt über das Maximum wandert.</p>
+      <p class="hint"><a data-i18n="idx.fd-link" href="vergleich.html#fundamental">Was ist das für eine Kurve?</a></p>
     </div>
     <div class="group">
       <h3 data-i18n="idx.dachlampen">Dachlampen</h3>
@@ -92,6 +99,7 @@ und dürfen dabei nicht zusammenstoßen oder von der Straße fliegen.</p>
 <script src="js/sim-config.js?v={{VERSION}}"></script>
 <script src="js/sim.js?v={{VERSION}}"></script>
 <script src="js/crossing.js?v={{VERSION}}"></script>
+<script src="js/charts.js?v={{VERSION}}"></script>
 <script src="js/pages.js?v={{VERSION}}"></script>
 </body>
 </html>

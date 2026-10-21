@@ -100,6 +100,82 @@
     return !msg;
   }
 
+  // ------------------------------------------------------------------ fundamental diagram
+  const FD_DRIVERS = [["brain", "drv.policy", "--c4"], ["light", "drv.light", "--c1"], ["reservation", "drv.reservation", "--c2"]];
+  const fdPoints = (key) => ((D.fundamental && D.fundamental.drivers[key]) || []).map((p) => [p.density, p.throughput]);
+  /** The point of a curve with the highest throughput ([density, throughput]). */
+  const fdPeak = (pts) => pts.reduce((b, p) => (p[1] > b[1] ? p : b), pts[0]);
+
+  /** Fundamental diagram options for SCX.lineChart: one curve per driver (from the origin: no cars, no flow), the
+   *  maximum of each ringed. keys: which drivers; compact: small chart for the start page. */
+  function fdChartOpts(keys, compact) {
+    const used = FD_DRIVERS.filter(([k]) => keys.includes(k) && fdPoints(k).length);
+    const peaks = used.map(([k, name, col]) => {
+      const pk = fdPeak(fdPoints(k));
+      return { x: pk[0], y: pk[1], color: SCX.cssVar(col), label: compact ? null : tx("fd.peak", { n: num(pk[1], 0) }) };
+    });
+    return {
+      series: used.map(([k, name, col]) => ({ name: tx(name), color: SCX.cssVar(col), dots: !compact, points: [[0, 0], ...fdPoints(k)] })),
+      peaks, xMin: 0, yMin: 0, xMax: compact ? Math.ceil(Math.max(...used.flatMap(([k]) => fdPoints(k).map((p) => p[0]))) * 1.2) : undefined,
+      xLabel: tx("fd.xlabel"), yLabel: tx("fd.ylabel"),
+      yFmt: (v, tip) => (tip ? num(v) : String(Math.round(v))), xFmt: (v) => String(Math.round(v)),
+      xTipFmt: (v) => tx("fd.xtip", { n: num(v, 1) }),
+      directLabels: !compact, compact, height: compact ? 210 : 300, aria: tx(compact ? "fd.mini.aria" : "fd.aria"),
+    };
+  }
+
+  /** Small fundamental diagram of the main brain with a dot for the running simulation: density = cars on the
+   *  map (both smoothed over ~6 s of sim time), throughput = exits of the last 60 s. The dot is moved by a CSS
+   *  transform (transition) a few times per second; the chart itself is only redrawn on resize / theme change. */
+  function fdLive(box, readout, cx) {
+    if (!D.fundamental || !fdPoints("brain").length) { $("fd-live").hidden = true; return null; }
+    let dot = null, scales = null, ema = null, lastT = 0, lastUpd = 0;
+    const place = (cars, thr) => {
+      const { X, Y, m, W, H } = scales;
+      const x = Math.min(Math.max(X(cars), m.l), W - m.r), y = Math.min(Math.max(Y(thr), m.t), H - m.b);
+      dot.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+      dot.style.opacity = "1";
+    };
+    const draw = () => {
+      const o = fdChartOpts(["brain"], true);
+      const svg = SCX.lineChart(box, o);
+      scales = svg.scales;
+      dot = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      dot.setAttribute("class", "live-dot");
+      dot.innerHTML = '<circle r="9" class="halo"/><circle r="5.5" class="core"/>';
+      dot.style.opacity = "0";
+      svg.appendChild(dot);
+      if (ema !== null) place(ema.cars, ema.thr);
+    };
+    const update = (now) => {
+      if (now - lastUpd < 250 || !dot) return;
+      lastUpd = now;
+      const s = cx.statsSummary();
+      if (s.t < lastT) ema = null; // simulation restarted
+      const dt = s.t - lastT;
+      lastT = s.t;
+      if (s.t < 12) { readout.textContent = tx("fd.wait"); return; }
+      const a = ema === null ? 1 : 1 - Math.exp(-dt / 6);
+      ema = ema === null ? { cars: s.road, thr: s.throughput } : { cars: ema.cars + a * (s.road - ema.cars), thr: ema.thr + a * (s.throughput - ema.thr) };
+      readout.innerHTML = tx("fd.now", { cars: num(ema.cars, 0), thr: num(ema.thr, 0) });
+      place(ema.cars, ema.thr);
+    };
+    draw();
+    window.addEventListener("resize", debounce(draw, 200));
+    return update;
+  }
+
+  /** Data-driven sentence below the big diagram: the capacity of each driver (from the measurement). */
+  function fdCaps() {
+    const [b, l, r] = ["brain", "light", "reservation"].map((k) => fdPoints(k));
+    if (!b.length || !l.length || !r.length) return "";
+    const pb = fdPeak(b), pl = fdPeak(l), pr = fdPeak(r), last = b[b.length - 1];
+    const rl = r[r.length - 1], rprev = r[r.length - 2];
+    return tx("fd.caps", { b: num(pb[1], 0), bd: num(pb[0], 0), l: num(pl[1], 0), ld: num(pl[0], 0), r: num(pr[1], 0), rd: num(pr[0], 0) })
+      + (last[1] < 0.95 * pb[1] ? tx("fd.drop", { x: num(last[1], 0), p: pct(1 - last[1] / pb[1]) }) : "")
+      + (pr === rl && rprev && rl[1] > 1.02 * rprev[1] ? tx("fd.rise") : "");
+  }
+
   // ------------------------------------------------------------------ Start
   function initStart() {
     const types = defaultTypes();
@@ -158,6 +234,12 @@
         if (p && several) m.textContent = tx("type.count", { exits: p.exits, bad: p.bad });
       });
     };
+    // live point on the fundamental diagram (updated with the stats refresh, throttled inside)
+    const fd = fdLive($("fd-mini"), $("fd-now"), cx);
+    if (fd) {
+      const prev = cx.opts.onRefresh;
+      cx.opts.onRefresh = (c) => { prev(c); fd(performance.now()); };
+    }
     // honest status line
     const b = pol(MAIN_ID);
     const r15 = b && b.bench["0.15"], l15 = D.baselines.light["0.15"], v15 = D.baselines.reservation["0.15"];
@@ -747,6 +829,14 @@
     });
     draw();
     window.addEventListener("resize", debounce(draw, 200));
+    if (D.fundamental && $("c-fd")) {
+      const drawFd = () => SCX.lineChart($("c-fd"), fdChartOpts(["brain", "light", "reservation"], false));
+      $("fd-caps").innerHTML = fdCaps();
+      drawFd();
+      window.addEventListener("resize", debounce(drawFd, 200));
+    } else if ($("fundamental")) {
+      for (const id of ["fundamental", "c-fd", "fd-caps"]) $(id).hidden = true;
+    }
     $("bench-setup").textContent = tx("cmp.setup", { envs: D.bench_setup.envs, min: Math.round(D.bench_setup.seconds / 60), seeds: D.bench_setup.seeds, built: D.built });
   }
 

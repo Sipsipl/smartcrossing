@@ -62,7 +62,7 @@ SOURCE = {"kind": "runs", "manifest": None, "runs": set()}  # set in main(): "ru
 FOUND = {}  # discovered checkpoints (set in main(); init_of matches transplanted warm starts against it)
 MP_START = "fork" if "fork" in mp.get_all_start_methods() else "spawn"  # Windows has no fork
 
-DEMANDS = [0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 1.0]  # up to the start page slider maximum
+DEMANDS = [0.05, 0.1, 0.15, 0.2, 0.3, 0.5]  # up to the start page slider maximum (0.5 /s/arm = 120 cars/min)
 # the site's main brain (wide crossing) and the end of the older line whose training history is
 # shown before it (narrow crossing); override with --main / --history
 # Checkpoints are named <run>/<file stem> (found in runs/ or in the snapshot); a path to an
@@ -606,7 +606,7 @@ def run_bench(entries: list[tuple[str, str, object, dict, list]], force: bool, w
     for key, kind, payload, physics, demands in entries:
         out.setdefault(key, {})
         for d in demands:
-            out[key][f"{d:g}"] = _mean_results([cache[_bench_ck(key, physics, d, sd, sim_src)] for sd in BENCH_SEEDS])  # as JS String(d): "1" for 1.0
+            out[key][f"{d:g}"] = _mean_results([cache[_bench_ck(key, physics, d, sd, sim_src)] for sd in BENCH_SEEDS])  # as JS String(d)
     return out
 
 
@@ -1104,6 +1104,22 @@ def bench(found: dict, sel: dict, cfg: SimConfig, a) -> dict:
     return {"baselines_by_world": by_world, "main_world": main_world, "base_phys": base_worlds[main_world]}
 
 
+FUNDAMENTAL = ROOT / "results" / "deadlock_fundamental.json"
+FUNDAMENTAL_DRIVERS = ("brain", "light", "reservation")  # curves of the fundamental diagram on the site
+FUNDAMENTAL_FIELDS = ("demand", "density", "throughput", "density_veh_per_km", "demand_per_min")
+
+
+def fundamental_data():
+    """Fundamental diagram (throughput vs cars on the map per driver and demand) from the deadlock study's
+    results/deadlock_fundamental.json, reduced to what the site plots; None if the file is missing."""
+    if not FUNDAMENTAL.exists():
+        return None
+    raw = json.loads(FUNDAMENTAL.read_text(encoding="utf-8"))
+    drivers = {k: [{f: p[f] for f in FUNDAMENTAL_FIELDS} for p in raw["drivers"][k]["points"]]
+               for k in FUNDAMENTAL_DRIVERS if k in raw["drivers"]}
+    return {"drivers": drivers}
+
+
 def write_site(found: dict, sel: dict, bres: dict, cfg: SimConfig, kind: str, a):
     """Write phase: site data (observation layouts, policies, curves, baselines, ...), the side-by-side
     replays, the snapshot (runs / merge) and the public/ folder."""
@@ -1138,6 +1154,7 @@ def write_site(found: dict, sel: dict, bres: dict, cfg: SimConfig, kind: str, a)
         # reward rules the main brain was trained with (from its checkpoint's training cfg; drawn on /lernen)
         "reward": reward_of(found[main_id]["policy"].get("cfg") or {}) if main_id else None,
         "demands": DEMANDS,
+        "fundamental": fundamental_data(),
         "bench_setup": {"envs": BENCH_ENVS, "seconds": BENCH_SECONDS, "seeds": len(BENCH_SEEDS)},
     }
     # side-by-side replays (same traffic) of the two rule-based drivers and the best policy
