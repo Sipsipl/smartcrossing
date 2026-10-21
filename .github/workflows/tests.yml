@@ -20,5 +20,9 @@ jobs:
         run: |
           pip install poetry
           poetry install --no-interaction
+      # CPU torch (same version as the poetry gpu group, CPU wheel) so the set-encoder, behaviour-cloning and
+      # torch-parity tests run here too; cuda cases stay skipped (SC_TEST_CUDA unset)
+      - name: Install CPU torch
+        run: poetry run pip install "torch==2.6.0" --index-url https://download.pytorch.org/whl/cpu
       - name: Run tests
         run: poetry run pytest -q
