@@ -374,12 +374,19 @@
     const picks = [{ id: MAIN_ID, name: "Aktuelles Gehirn" }];
     if (D.previous && pol(D.previous)) picks.push({ id: D.previous, name: "Vorheriges Gehirn" });
     let pick = 0;
+    const stamp = { n: -1, t: -1, uid: -1 };
     const cx = makeCrossing($("stage"), {
       types: [SCX.makeType(pol(picks[0].id), picks[0].name)],
-      overlay: "attention", attention: () => attn,
+      // the overlay is only drawn while the brain view belongs to the current sim step and car
+      overlay: "attention", attention: (n, c) => (attn && setv && stamp.n === n && stamp.t === c.sim.t && stamp.uid === c.sim.uid[n] ? setv.lineInfo() : null),
+      onTick: (ts) => { if (setv && !setHost.hidden) setv.animate(ts); },
       autoSelect: true, speed: 0.5, speeds: [0.25, 0.5, 1, 2], hint: "Tippe ein Auto an",
-      onRefresh: (c) => {
-        SCX.renderSelHead(c, $("selhead"));
+      onRefresh: (c) => { SCX.renderSelHead(c, $("selhead")); updateBrain(c); },
+    });
+    // the brain view is updated on every sim step (before drawing), not on the throttled panel refresh,
+    // so its numbers, cards and the road overlay always belong to the state that is drawn
+    cx.opts.onStepped = updateBrain;
+    function updateBrain(c) {
         const n = c.selIndex();
         if (n < 0) { attn = null; return; }
         const t = c.typeOf(n), D_ = SC.obsDim(c.sim.cfg), lay = SCX.layoutFor(c.sim.cfg) || D.layout;
@@ -390,8 +397,8 @@
           if (!setv) setv = new SCX.SetView(setHost, lay, t.policy, { onHover, fmt: (it, v) => fmtObs(it, v), onFocus: () => c.draw() });
           else if (setv.pol !== t.policy) setv.setPolicy(t.policy, lay);
           const tr = SC.setTrace(t.policy, c.obs, n * D_);
-          setv.update(tr, c.obsRow(n));
-          attn = { w: setv.attention(), focus: setv.focus() };
+          setv.update(tr, c.obsRow(n), c.neighbourUids(n, t.policy.arch.K));
+          attn = true;
           out = tr.out;
         } else {
           canvas.style.display = ""; setHost.hidden = true; attn = null;
@@ -410,8 +417,8 @@
           $("brainnote").insertAdjacentHTML("beforeend", `<p class="note warn">Achtung: Die Anzeige weicht vom Simulator ab (${diff}).</p>`);
         }
         window.__brainDiff = diff;
-      },
-    });
+        stamp.n = n; stamp.t = c.sim.t; stamp.uid = c.sim.uid[n];
+    }
     function describeBrain() {
       const p = pol(picks[pick].id);
       if (!p) return;
