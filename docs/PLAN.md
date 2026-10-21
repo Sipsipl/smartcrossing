@@ -136,7 +136,8 @@ crashes in the box; lamp unused so far.
    brain vs light vs reservation (throughput, deadlocks, timeouts, queue at the edges).
 4. (G) Deadlock fixes, one variable at a time with 2+ seeds each. First candidate: train with dense
    traffic too (curriculum so far only up to 0.3 /s/arm = ~72 cars/min; above ~80/min the brain breaks
-   down - out of its training range). Goal: stay on the plateau above capacity instead of collapsing,
+   down - out of its training range): demand range up to 0.5 /s/arm (= the new slider max, 120/min),
+   compare with an arm up to 1.0 if cheap; keep sampling lower demands so normal traffic isn't forgotten. Goal: stay on the plateau above capacity instead of collapsing,
    then raise capacity towards the reservation's via emergent coordination (alternating streams,
    platoons, lamp negotiation).
 5. Then (D) norm experiments (lamp language, priority patterns) - (G) feeds directly into them.
