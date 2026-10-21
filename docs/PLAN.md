@@ -126,8 +126,19 @@ crashes in the box; lamp unused so far.
    all page texts incl. the data-driven sentences in pages.js, labels from obs_labels, run notes,
    chart labels. README.md in English only. Do it after the refactoring step (site build is cleaner
    then) and in parallel with the deadlock measurement (site-only vs sim/analysis: no file overlap).
-3. (G) Deadlock study, measurement first (see below).
-4. (G) Deadlock fixes, one variable at a time with 2+ seeds each.
+2c. Site (with 2b): fundamental diagram (owner, 2026-10-21): throughput vs density for brain, light and
+   reservation (traffic-flow "Fundamentaldiagramm": flow rises to capacity, then drops - capacity drop,
+   spillback, gridlock), plus a live point on the start page showing where the running sim sits on the
+   curve. Needs density over time from the bench (cars on the crossing / approaches). Same step: demand
+   slider max 240 -> 120 cars/min (0.5 /s/arm: above every driver's capacity incl. reservation ~90/min,
+   so the collapse stays visible; 240 is unrealistic); drop demand 1.0 from the site bench.
+3. (G) Deadlock study, measurement first (see below): incl. a demand sweep 0.05 ... 0.5 for the main
+   brain vs light vs reservation (throughput, deadlocks, timeouts, queue at the edges).
+4. (G) Deadlock fixes, one variable at a time with 2+ seeds each. First candidate: train with dense
+   traffic too (curriculum so far only up to 0.3 /s/arm = ~72 cars/min; above ~80/min the brain breaks
+   down - out of its training range). Goal: stay on the plateau above capacity instead of collapsing,
+   then raise capacity towards the reservation's via emergent coordination (alternating streams,
+   platoons, lamp negotiation).
 5. Then (D) norm experiments (lamp language, priority patterns) - (G) feeds directly into them.
 
 - (G) Deadlocks and decentralised negotiation (owner, 2026-10-14; the interesting part from a game-theory
