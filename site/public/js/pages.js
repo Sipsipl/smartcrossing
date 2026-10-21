@@ -288,15 +288,22 @@
     return a === null || b === null ? "" : tx("note.pair", { b: num(b, 0), a: num(a, 0) });
   }
 
+  /** Mean throughput (cars/min) of a bench entry at demand d, or null. */
+  const thrOf = (e, d) => (e && e.bench[d] ? e.bench[d].throughput_per_min : null);
+
   /** What is new in the main brain vs the previous one (crash numbers from the bench data). */
   function prevNote() {
     const m = pol(MAIN_ID), mid = crashPair("0.15"), dense = crashPair("0.3");
+    const thr = thrOf(m, "0.5"), thrPrev = thrOf(D.previous && pol(D.previous), "0.5");
     if (!mid) return "";
     const a = badPer1000(pol(D.previous), "0.15"), b = badPer1000(m, "0.15");
     const much = tx(a > 0 && b < 0.5 * a ? "note.much" : b < a ? "note.fewer" : "note.notfewer");
     // bench values are means over several traffic seeds, but still a rounded comparison
     return isSetEntry(m)
-      ? tx("note.set", { K: m.policy.arch.K, much, mid, dense: dense ? tx("note.dense", { dense }) : "" })
+      ? tx("note.set", {
+        K: m.policy.arch.K, much, mid, dense: dense ? tx("note.dense", { dense }) : "",
+        thr: num(thr, 0), thrprev: num(thrPrev, 0), dem: num(m.bench["0.5"].demand_per_min, 0),
+      })
       : tx("note.mlp", { much, mid });
   }
 
@@ -835,15 +842,23 @@
     $("t-thr").innerHTML = table((x) => num(x.throughput_per_min));
     $("t-ok").innerHTML = table((x) => `${pct(x.exit_ok_rate)} <span class="muted">· ${num(x.crash_cars_per_1000, 0)}</span>`);
     // "Ehrlich gesagt": numbers from the bench data, not hard-coded
-    const mb = MAIN_ID && pol(MAIN_ID).bench, badPct = (d) => mb && mb[d] ? pct(mb[d].crash_cars_per_1000 / 1000) : null;
+    const mb = MAIN_ID && pol(MAIN_ID).bench, badPct = (d) => mb && mb[d] ? num(mb[d].crash_cars_per_1000, 0) : null;
     if (badPct("0.15")) $("h-mid").textContent = tx("cmp.about", { v: badPct("0.15") });
     if (badPct("0.05")) $("h-low").textContent = tx("cmp.about", { v: badPct("0.05") });
     const pb = D.previous && pol(D.previous) && pol(D.previous).bench["0.15"];
     if (mb && mb["0.15"] && pb) {
       const pd = pol(D.previous).bench["0.3"], md = mb["0.3"];
       $("h-prev").textContent = " " + tx("cmp.prev", { prev: num(pb.crash_cars_per_1000, 0), cur: num(mb["0.15"].crash_cars_per_1000, 0) })
-        + (pd && md ? tx("cmp.prevdense", { prev: num(pd.crash_cars_per_1000, 0), cur: num(md.crash_cars_per_1000, 0) }) : ".")
-        + (isSetEntry(pol(MAIN_ID)) ? " " + tx("cmp.wedged") : "");
+        + (pd && md ? tx("cmp.prevdense", { prev: num(pd.crash_cars_per_1000, 0), cur: num(md.crash_cars_per_1000, 0) }) : ".");
+    }
+    const m5 = mb && mb["0.5"], p5 = D.previous && pol(D.previous) && pol(D.previous).bench["0.5"];
+    const fb = D.fundamental && D.fundamental.drivers.brain, f5 = fb && fb.find((q) => q.demand === 0.5);
+    if (m5 && $("h-dcrash")) {
+      $("h-ddem").textContent = num(m5.demand_per_min, 0);
+      $("h-dcrash").textContent = num(m5.crash_cars_per_1000, 0);
+      $("h-dthr").textContent = num(m5.throughput_per_min, 0);
+      if (p5) $("h-dprev").textContent = tx("cmp.against", { v: num(p5.throughput_per_min, 0) });
+      if (f5) $("h-djam").textContent = pct(f5.deadlock_time_frac);
     }
     if ($("c-thr-note")) $("c-thr-note").textContent = groups.length > 1 ? tx("cmp.chartnote", { world: WORLD_NAMES[mainWorld].replace(/ \(.*/, "") }) : "";
     const draw = () => SCX.lineChart($("c-thr"), {
