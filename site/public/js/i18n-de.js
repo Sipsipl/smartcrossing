@@ -238,6 +238,7 @@
  "cmp.setup": "{envs} Simulationen × {min} Minuten je Wert, Mittel über {seeds} Verkehrsläufe; gleicher Zufallsverkehr für alle (Stand {built}).",
  "fd.xlabel": "Autos gleichzeitig unterwegs",
  "fd.ylabel": "durchgekommen pro Minute",
+ "fd.ylabel.big": "durchgekommen pro Minute (gemessen)",
  "fd.xtip": "{n} Autos gleichzeitig unterwegs",
  "fd.aria": "Fundamentaldiagramm: Durchsatz abhängig von der Zahl der gleichzeitig unterwegs befindlichen Autos, für gelernte Autos, Ampel und Verkehrsrechner",
  "fd.peak": "Maximum {n}/min",
@@ -247,5 +248,6 @@
  "fd.mini.aria": "Wo die laufende Simulation gerade auf dem Fundamentaldiagramm der gelernten Autos steht",
  "fd.now": "Jetzt: <b>{cars}</b> Autos unterwegs · <b>{thr}</b> Autos/min",
  "fd.wait": "Der Punkt erscheint nach ein paar Sekunden.",
- "fd.me": "jetzt"
+ "fd.me": "jetzt live",
+ "fd.curve": "gemessen (Durchschnitt)"
 };

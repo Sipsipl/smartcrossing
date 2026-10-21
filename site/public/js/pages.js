@@ -112,12 +112,12 @@
     const used = FD_DRIVERS.filter(([k]) => keys.includes(k) && fdPoints(k).length);
     const peaks = used.map(([k, name, col]) => {
       const pk = fdPeak(fdPoints(k));
-      return { x: pk[0], y: pk[1], color: SCX.cssVar(col), label: compact ? null : tx("fd.peak", { n: num(pk[1], 0) }) };
+      return { x: pk[0], y: pk[1], color: SCX.cssVar(col), label: tx("fd.peak", { n: num(pk[1], 0) }) };
     });
     return {
       series: used.map(([k, name, col]) => ({ name: tx(name), color: SCX.cssVar(col), dots: !compact, points: [[0, 0], ...fdPoints(k)] })),
-      peaks, xMin: 0, yMin: 0, xMax: compact ? Math.ceil(Math.max(...used.flatMap(([k]) => fdPoints(k).map((p) => p[0]))) * 1.2) : undefined,
-      xLabel: tx("fd.xlabel"), yLabel: tx("fd.ylabel"),
+      peaks, xMin: 0, yMin: 0, yMax: compact ? Math.max(...used.flatMap(([k]) => fdPoints(k).map((p) => p[1]))) * 1.3 : undefined, xMax: compact ? Math.ceil(Math.max(...used.flatMap(([k]) => fdPoints(k).map((p) => p[0]))) * 1.2) : undefined,
+      xLabel: tx("fd.xlabel"), yLabel: tx(compact ? "fd.ylabel" : "fd.ylabel.big"),
       yFmt: (v, tip) => (tip ? num(v) : String(Math.round(v))), xFmt: (v) => String(Math.round(v)),
       xTipFmt: (v) => tx("fd.xtip", { n: num(v, 1) }),
       directLabels: !compact, compact, height: compact ? 210 : 300, aria: tx(compact ? "fd.mini.aria" : "fd.aria"),
@@ -129,22 +129,51 @@
    *  transform (transition) a few times per second; the chart itself is only redrawn on resize / theme change. */
   function fdLive(box, readout, cx) {
     if (!D.fundamental || !fdPoints("brain").length) { $("fd-live").hidden = true; return null; }
-    let dot = null, scales = null, ema = null, lastT = 0, lastUpd = 0;
+    let dot = null, trail = null, scales = null, ema = null, lastT = 0, lastUpd = 0;
+    const hist = []; // last positions (svg px), one per update (4/s): ~5 s of fading trail
+    const NS = "http://www.w3.org/2000/svg";
     const place = (cars, thr) => {
       const { X, Y, m, W, H } = scales;
       const x = Math.min(Math.max(X(cars), m.l), W - m.r), y = Math.min(Math.max(Y(thr), m.t), H - m.b);
       dot.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
       dot.style.opacity = "1";
+      const lab = dot.lastChild, right = x < W - m.r - 80;
+      lab.setAttribute("x", right ? 11 : -11);
+      lab.setAttribute("text-anchor", right ? "start" : "end");
+      lab.setAttribute("y", y > m.t + 24 ? -11 : 20);
+      hist.push([x, y]);
+      if (hist.length > 21) hist.shift();
+      trail.innerHTML = hist.slice(0, -1).map((p, i, a) => `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${(1.5 + 2 * i / a.length).toFixed(1)}" style="opacity:${(0.5 * (i + 1) / a.length).toFixed(2)}"/>`).join("");
+    };
+    /** Label of the measured curve: under its rising part (free space), at half the maximum's density. */
+    const curveLabel = (svg) => {
+      const { X, Y } = scales, pts = [[0, 0], ...fdPoints("brain")], pk = fdPeak(pts);
+      const x0 = pk[0] * 0.5;
+      let i = 1;
+      while (i < pts.length - 1 && pts[i][0] < x0) i++;
+      const [a, b] = [pts[i - 1], pts[i]], f = b[0] > a[0] ? (x0 - a[0]) / (b[0] - a[0]) : 0, y0 = a[1] + f * (b[1] - a[1]);
+      const t = document.createElementNS(NS, "text");
+      t.setAttribute("class", "curve-label");
+      t.setAttribute("x", X(x0) + 10);
+      t.setAttribute("y", Y(y0) + 18);
+      t.textContent = tx("fd.curve");
+      svg.appendChild(t);
     };
     const draw = () => {
       const o = fdChartOpts(["brain"], true);
       const svg = SCX.lineChart(box, o);
       scales = svg.scales;
-      dot = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      curveLabel(svg);
+      trail = document.createElementNS(NS, "g");
+      trail.setAttribute("class", "live-trail");
+      svg.appendChild(trail);
+      dot = document.createElementNS(NS, "g");
       dot.setAttribute("class", "live-dot");
-      dot.innerHTML = '<circle r="9" class="halo"/><circle r="5.5" class="core"/>';
+      dot.innerHTML = '<circle r="9" class="halo"/><circle r="5.5" class="core"/><text class="live-label"></text>';
+      dot.lastChild.textContent = tx("fd.me");
       dot.style.opacity = "0";
       svg.appendChild(dot);
+      hist.length = 0;
       if (ema !== null) place(ema.cars, ema.thr);
     };
     const update = (now) => {

@@ -6,7 +6,7 @@
 <title data-i18n="idx.smart-crossing">Smart Crossing</title>
 <meta data-i18n-attr="content=idx.meta-eine-kreuzung-ohne" name="description" content="Eine Kreuzung ohne Ampel, ohne Spuren, ohne Regeln: selbstfahrende Autos lernen, wie man heil durchkommt. Live im Browser.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/site.css?v=1d5d9989">
+<link rel="stylesheet" href="css/site.css?v=9e231d17">
 </head>
 <body data-page="start">
 <div class="wrap">
@@ -30,9 +30,13 @@ und durch Ausprobieren lernen mussten, wie man hier heil auf die andere Seite ko
     </div>
     <div class="group" id="fd-live">
       <h3 data-i18n="idx.fd-title">Wo steht die Kreuzung gerade?</h3>
+      <div class="chart-legend fd-legend">
+        <span><i class="line-key fd-key-line"></i><span data-i18n="idx.fd-leg-line">so viel schafft dieses Gehirn bei jeder Verkehrsmenge (gemessen)</span></span>
+        <span><i class="fd-key-dot"></i><span data-i18n="idx.fd-leg-dot">die Simulation hier oben, gerade jetzt</span></span>
+      </div>
       <div id="fd-mini"></div>
       <p class="fd-now" id="fd-now" aria-live="off"></p>
-      <p data-i18n="idx.fd-hint" class="hint">Der Punkt ist die laufende Simulation auf der Kurve der gelernten Autos: wie viele Autos gleichzeitig unterwegs sind und wie viele pro Minute durchkommen (letzte 60 s). Schieb „Wie viele Autos kommen?“ nach rechts und sieh zu, wie der Punkt über das Maximum wandert.</p>
+      <p data-i18n="idx.fd-hint" class="hint">Schieb „Wie viele Autos kommen?“ nach rechts und sieh zu, wie der Punkt über das Maximum der Kurve wandert.</p>
       <p class="hint"><a data-i18n="idx.fd-link" href="vergleich.html#fundamental">Was ist das für eine Kurve?</a></p>
     </div>
     <div class="group">
@@ -92,14 +96,14 @@ und dürfen dabei nicht zusammenstoßen oder von der Straße fliegen.</p>
 </div>
 <footer data-i18n="footer">Smart Crossing – ein Hobbyprojekt. Alles läuft direkt in deinem Browser, es werden keine Daten gesammelt. Stand: 2026-10-21. <a href="https://github.com/Sipsipl/smartcrossing">Code auf GitHub</a></footer>
 </div>
-<script src="data/site-data.js?v=1d5d9989"></script>
-<script src="js/i18n-de.js?v=1d5d9989"></script>
-<script src="js/i18n-en.js?v=1d5d9989"></script>
-<script src="js/i18n.js?v=1d5d9989"></script>
-<script src="js/sim-config.js?v=1d5d9989"></script>
-<script src="js/sim.js?v=1d5d9989"></script>
-<script src="js/crossing.js?v=1d5d9989"></script>
-<script src="js/charts.js?v=1d5d9989"></script>
-<script src="js/pages.js?v=1d5d9989"></script>
+<script src="data/site-data.js?v=9e231d17"></script>
+<script src="js/i18n-de.js?v=9e231d17"></script>
+<script src="js/i18n-en.js?v=9e231d17"></script>
+<script src="js/i18n.js?v=9e231d17"></script>
+<script src="js/sim-config.js?v=9e231d17"></script>
+<script src="js/sim.js?v=9e231d17"></script>
+<script src="js/crossing.js?v=9e231d17"></script>
+<script src="js/charts.js?v=9e231d17"></script>
+<script src="js/pages.js?v=9e231d17"></script>
 </body>
 </html>

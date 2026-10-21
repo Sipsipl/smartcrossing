@@ -286,5 +286,16 @@ ol.phases li.world { display: block; font-weight: 650; margin-top: 6px; color: v
 .chart .peak-label { font-size: 11px; font-weight: 600; fill: var(--fg); }
 .chart .live-dot { transition: transform 0.45s linear, opacity 0.3s; pointer-events: none; }
 .chart .live-dot .halo { fill: var(--fg); opacity: 0.25; }
+.chart .curve-label, .chart .live-label { font-size: 11px; font-weight: 600; paint-order: stroke; stroke: var(--panel); stroke-width: 3px; stroke-linejoin: round; }
+.chart .curve-label { fill: var(--c4); font-style: italic; }
+.chart .live-label { fill: var(--fg); }
+.chart .live-trail circle { fill: var(--fg); }
+.chart .live-dot .halo { transform-box: fill-box; transform-origin: center; animation: fd-pulse 2s ease-out infinite; }
+@keyframes fd-pulse { 0% { transform: scale(0.7); opacity: 0.35; } 100% { transform: scale(1.7); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .chart .live-dot .halo { animation: none; } }
+.fd-legend { font-size: 13px; color: var(--muted); gap: 4px 14px; margin: 2px 0 4px; }
+.fd-legend > span { align-items: flex-start; }
+.fd-key-line { border-color: var(--c4); margin-top: 8px; flex: none; }
+.fd-key-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--fg); margin: 4px 6px 0 6px; flex: none; }
 .chart .live-dot .core { fill: var(--fg); stroke: var(--panel); stroke-width: 2; }
 .fd-now { margin: 2px 0 6px; font-size: 14px; min-height: 1.4em; font-variant-numeric: tabular-nums; }
