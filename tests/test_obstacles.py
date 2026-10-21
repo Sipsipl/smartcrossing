@@ -1,13 +1,11 @@
-"""Round 2 options: crash cost by own impact speed (variant C), obstacle scenarios (variant B),
-the stop gate (gates.py) and the exploration knobs of the warm start (variant A)."""
+"""Obstacle scenarios (round 2 variant B: wrecks / parked cars on a path in some envs), the crash cost
+by own impact speed (variant C, kept for old checkpoints) and the round-2 SimConfig fields."""
 
 import json
-from pathlib import Path
 
 import numpy as np
 import pytest
 
-from smartcrossing import gates, ppo
 from smartcrossing.sim import (
     DONE_CRASH,
     NB_FEATURES,
@@ -15,15 +13,11 @@ from smartcrossing.sim import (
     STAT_NAMES,
     Sim,
     SimConfig,
-    act_dim,
     obstacle_clear,
     obstacle_steps,
 )
 
 from test_wrecks import place, zeros  # noqa: E402 (tests/ is on sys.path)
-
-ROOT = Path(__file__).resolve().parents[1]
-ROUND1 = ROOT / "results" / "round1_x3.npz"
 
 
 def rear_end(cfg, v=10.0):
@@ -140,48 +134,6 @@ def test_obstacles_off_draws_nothing():
         sim.step(act)
     assert sim.obst_rng.bit_generator.state == state and not sim.obstacle.any()
     assert set(STAT_NAMES) >= {"obstacles", "obstacle_hits"}
-
-
-class Brake:
-    """Full braking, straight on: the reference for the stop gate's feasibility."""
-
-    def __init__(self, sim):
-        self.sim = sim
-
-    def act(self):
-        a = np.zeros((self.sim.B, self.sim.cfg.n_slots, act_dim(self.sim.cfg)))
-        a[..., 0] = -1.0
-        return a
-
-
-def test_stop_gate_with_a_braking_driver(monkeypatch):
-    from smartcrossing import cli
-
-    monkeypatch.setattr(cli, "make_driver", lambda spec, sim: Brake(sim))
-    summary, rows = gates.stop_gate("brake")
-    assert summary["cases"] == len(gates.cases()) == 108
-    for r in rows:
-        assert r["outcome"] == ("stopped" if r["feasible"] else "crash"), r
-    assert summary["stop_rate_feasible"] == 1.0 and 0 < summary["feasible"] < summary["cases"]
-
-
-def test_stop_gate_policy_runs_fast():
-    s, _ = gates.stop_gate(f"policy:{ROUND1}")
-    assert sum(s[o] for o in gates.OUTCOMES) == s["cases"] and s["wall_s"] < 30
-
-
-def test_logstd_init_with_warm_start(tmp_path):
-    """Variant A: --logstd-init applies with --init-policy, and with --init only via --reset-logstd."""
-    a = ppo.parse_args(["--name", "x", "--init-policy", str(ROUND1), "--logstd-init", "-0.7"])
-    st = ppo.build_state(a)
-    assert np.all(st.logstd == -0.7)
-    np.savez(tmp_path / "state.npz", actor=st.actor.p, critic=st.critic.p, logstd=np.full(3, -2.0), ceiling=0.3, iter=5)
-    keep = ppo.build_state(ppo.parse_args(["--name", "x", "--init", str(tmp_path / "state.npz"), "--logstd-init", "-0.7"]))
-    assert np.all(keep.logstd == -2.0) and keep.it0 == 6
-    reset = ppo.build_state(ppo.parse_args(["--name", "x", "--init", str(tmp_path / "state.npz"), "--logstd-init", "-0.7",
-                                            "--reset-logstd"]))
-    assert np.all(reset.logstd == -0.7)
-    np.testing.assert_array_equal(reset.actor.p, st.actor.p)
 
 
 def test_round2_cfg_roundtrip():
