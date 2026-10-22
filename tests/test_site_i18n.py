@@ -61,13 +61,25 @@ def test_placeholders_match():
 
 
 def test_build_texts_have_english():
-    import build
+    """site/sitebuild/texts.py: one entry per run with both languages, same {placeholders} in both."""
     from obs_labels import obs_layout
+    from sitebuild.texts import RUN_INFO, STEP_INFO, run_info
     from smartcrossing.sim import SimConfig
 
-    assert set(build.RUN_INFO) == set(build.RUN_INFO_EN)
-    assert set(build.STEP_INFO) == set(build.STEP_INFO_EN)
-    assert all(build.run_info(r)["note_en"] and build.run_info(r)["label_en"] for r in build.RUN_INFO)
+    ph = lambda s: set(re.findall(r"\{(\w+)\}", s))  # noqa: E731
+    for run, e in RUN_INFO.items():
+        assert set(e) == {"short", "de", "en"} and e["short"], run
+        for lang in ("de", "en"):
+            label, note = e[lang]
+            assert label and note, (run, lang)
+        assert ph(e["de"][1]) == ph(e["en"][1]) and ph(e["de"][0]) == ph(e["en"][0]) == set(), run
+    for run, e in STEP_INFO.items():
+        assert set(e) == {"de", "en"} and e["de"] and e["en"] and ph(e["de"]) == ph(e["en"]), run
+    assert all(run_info(r)["note_en"] and run_info(r)["label_en"] for r in RUN_INFO)
+    info = run_info("r5_K_s1", lambda s: s and s.replace("{stop}", "70").replace("{safe}", "99"))
+    assert "70 %" in info["step"] and "70%" in info["step_en"] and "{" not in info["note"] + info["note_en"]
+    assert run_info("unknown_run") == {"short": "unknown_run", "label": "unknown_run", "label_en": "unknown_run",
+                                       "note": None, "note_en": None, "step": None, "step_en": None}
     for legacy in (False, True):
         lay = obs_layout(SimConfig(brake_light=not legacy, n_signal=2 if legacy else 1))
         assert len(lay["actions_en"]) == len(lay["actions"])

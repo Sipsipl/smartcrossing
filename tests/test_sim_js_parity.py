@@ -11,10 +11,10 @@ sim.js gets its constants from js/sim-config.js, generated here by the site buil
 
 import copy
 import dataclasses
-import importlib.util
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -274,11 +274,11 @@ def wreck_cases(cfg, tag=""):
 
 
 def site_build():
-    """site/build.py as a module (it writes the js/sim-config.js the site loads)."""
-    spec = importlib.util.spec_from_file_location("site_build", ROOT / "site" / "build.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    """The site build's pages module (it writes the js/sim-config.js the site loads)."""
+    sys.path[:0] = [str(ROOT / "site")]
+    from sitebuild import pages
+
+    return pages
 
 
 @pytest.fixture(scope="module")
