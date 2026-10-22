@@ -164,6 +164,13 @@ crashes in the box; lamp unused so far.
    throughput AND deadlocks/timeouts: a higher cost may trade crashes for gridlock. Goal: stay on the plateau above capacity instead of collapsing,
    then raise capacity towards the reservation's via emergent coordination (alternating streams,
    platoons, lamp negotiation).
+4b. [2026-10-22] Status: round 6 (equal updates, dense traffic + obstacles 0.75) gave the main brain
+   r6_DO_s2@750 (95 vs 61 cars/min at 120/min, half the crashes, deadlock time 50 -> 12 %). Open: the
+   stop skill erodes during training (stop rate 0.71 -> 0.44; safe rate only just 0.955) - the stop gate
+   still acts as a filter. Next: obstacle scenarios that cannot be passed around (whole carriageway
+   blocked, e.g. two wrecks side by side or a wreck plus a standing queue), so only stopping avoids the
+   crash - outcome-only, no style cost (NOT a penalty for passing close to obstacles). Then longer DO
+   runs; then GRU memory and a shared reward component (owner decision) against remaining deadlocks.
 5. Then (D) norm experiments (lamp language, priority patterns) - (G) feeds directly into them.
 
 - (G) Deadlocks and decentralised negotiation (owner, 2026-10-14; the interesting part from a game-theory
