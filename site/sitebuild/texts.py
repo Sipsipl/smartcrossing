@@ -341,14 +341,53 @@ RUN_INFO = {
     "r5_K_s1": {
         "short": "R5",
         "de": ("Runde 5: weitergelernt (Kontrolle)",
-               "Das aktuelle Gehirn: das Gehirn aus Runde 4 hat unverändert weitertrainiert. Gewählt ist ein "
-               "Zwischenstand (Schritt 475) mit wenigen Unfällen. Ein stehendes Hindernis umfährt es zu etwa "
-               "{safe} % sicher, hält aber nur in rund {stop} % der Fälle davor an – im weiteren Training ließ "
-               "das Anhalten nach."),
+               "Das Hauptgehirn bis Runde 6: das Gehirn aus Runde 4 hat unverändert weitertrainiert. Gewählt ist "
+               "ein Zwischenstand (Schritt 475) mit wenigen Unfällen. Vor einem stehenden Hindernis hielt es "
+               "nur selten an – im weiteren Training ließ das Anhalten nach."),
         "en": ("Round 5: trained on (control)",
-               "The current brain: the round 4 brain trained on, unchanged. An intermediate step (step 475) is "
-               "chosen, with few crashes. It gets past a standing obstacle safely in about {safe}% of cases, "
-               "but stops in front of it in only about {stop}% – stopping faded with further training."),
+               "The main brain up to round 6: the round 4 brain trained on, unchanged. An intermediate step "
+               "(step 475) is chosen, with few crashes. In front of a standing obstacle it rarely stopped – "
+               "stopping faded with further training."),
+    },
+    "r6_KO_s1": {
+        "short": "R6k",
+        "de": ("Runde 6, Test: weitergelernt, mehr Hindernis-Szenen",
+               "Gleich viele Lernschritte wie die Läufe mit dichtem Verkehr, aber mit mittlerem Verkehr und "
+               "häufiger Hindernissen im Training: mehr Autos durch, das Anhalten vor Hindernissen ließ trotzdem "
+               "nach."),
+        "en": ("Round 6, test: trained on, more obstacle scenarios",
+               "The same number of learning steps as the dense-traffic runs, but with medium traffic and "
+               "obstacles more often in training: more cars through, yet stopping in front of obstacles "
+               "still faded."),
+    },
+    "r6_KO_s2": {
+        "short": "R6k'",
+        "de": ("Runde 6, Test: mehr Hindernis-Szenen, zweiter Lauf",
+               "Anderer Zufallsstart: viel Durchsatz, am Ende aber auch wieder mehr Unfälle."),
+        "en": ("Round 6, test: more obstacle scenarios, second run",
+               "Different random start: high throughput, but more crashes again at the end."),
+    },
+    "r6_DO_s1": {
+        "short": "R6d",
+        "de": ("Runde 6, Test: sehr dichter Verkehr + mehr Hindernis-Szenen",
+               "Geübt wird mit Verkehr bis 120 Autos pro Minute und häufiger Hindernissen: deutlich mehr "
+               "Durchsatz und weniger Unfälle als mit mittlerem Verkehr."),
+        "en": ("Round 6, test: very dense traffic + more obstacle scenarios",
+               "Practising with traffic of up to 120 cars per minute and obstacles more often: clearly more "
+               "throughput and fewer crashes than with medium traffic."),
+    },
+    "r6_DO_s2": {
+        "short": "R6",
+        "de": ("Runde 6: sehr dichter Verkehr + mehr Hindernis-Szenen, zweiter Lauf",
+               "Das aktuelle Gehirn: das Gehirn aus Runde 5 hat mit Verkehr bis 120 Autos pro Minute und "
+               "häufiger Hindernissen weitertrainiert. Gewählt ist ein Zwischenstand (Schritt 750), der den "
+               "Hindernis-Test besteht. Vor einem stehenden Hindernis kommt es zu etwa {safe} % unfallfrei "
+               "vorbei, hält aber nur in rund {stop} % der Fälle davor an – meist fährt es herum."),
+        "en": ("Round 6: very dense traffic + more obstacle scenarios, second run",
+               "The current brain: the round 5 brain trained on with traffic of up to 120 cars per minute and "
+               "obstacles more often. An intermediate step (step 750) is chosen, which passes the obstacle "
+               "test. In front of a standing obstacle it gets past without a crash in about {safe}% of cases, "
+               "but stops in front of it in only about {stop}% – mostly it drives around."),
     },
     "r5_K_s2": {
         "short": "R5'",
@@ -529,11 +568,18 @@ STEP_INFO = {
     },
     "r5_K_s1": {
         "de": ("Dasselbe Gehirn weitertrainiert, ein Zwischenstand mit wenigen Unfällen und hohem Durchsatz → "
-               "bei dichtem Verkehr mehr Autos durch und weniger Unfälle; vor einem stehenden Hindernis hält "
-               "es aber nur in etwa {stop} % der Fälle an, sonst fährt es herum"),
+               "bei dichtem Verkehr mehr Autos durch und weniger Unfälle; das Hauptgehirn bis Runde 6"),
         "en": ("The same brain trained on, an intermediate step with few crashes and high throughput → more "
-               "cars through and fewer crashes in dense traffic; but in front of a standing obstacle it stops "
-               "in only about {stop}% of cases, otherwise it drives around"),
+               "cars through and fewer crashes in dense traffic; the main brain up to round 6"),
+    },
+    "r6_DO_s2": {
+        "de": ("Weitertrainiert mit Verkehr bis 120 Autos pro Minute und mehr Hindernis-Szenen, ein Zwischenstand "
+               "→ bei sehr dichtem Verkehr deutlich mehr Autos durch, weniger Unfälle und viel weniger Stau; vor "
+               "einem stehenden Hindernis hält es aber nur in etwa {stop} % der Fälle an, sonst fährt es herum"),
+        "en": ("Trained on with traffic of up to 120 cars per minute and more obstacle scenarios, an "
+               "intermediate step → far more cars through in very dense traffic, fewer crashes and much less "
+               "jamming; but in front of a standing obstacle it stops in only about {stop}% of cases, "
+               "otherwise it drives around"),
     },
 }
 

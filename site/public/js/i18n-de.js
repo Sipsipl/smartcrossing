@@ -252,7 +252,7 @@
  "fd.rise": " Beim Verkehrsrechner steigt die Kurve bis zum Ende der Messung weiter: Seine Kapazität liegt noch darüber.",
  "fd.mini.aria": "Wo die laufende Simulation gerade auf dem Fundamentaldiagramm der gelernten Autos steht",
  "fd.now": "Jetzt: <b>{cars}</b> Autos unterwegs · <b>{thr}</b> Autos/min",
- "fd.wait": "Der Punkt erscheint nach ein paar Sekunden.",
+ "fd.wait": "Der Punkt erscheint in {s} s Simulationszeit: Er misst wie die Wolke eine volle Minute nach der Anlaufphase.",
  "fd.me": "jetzt live",
  "fd.max": " · Ring = Maximum {n}/min",
  "start.demand-opt": "Startwert: so viele Autos, wie dieses Gehirn maximal schafft ({n}/min)."
