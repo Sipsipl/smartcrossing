@@ -4,7 +4,7 @@
         --workers 4 --out results/x_select.jsonl [--copy-to results/x.npz]
 
 Per checkpoint (ckpt_XXXX.npz; the first and last one are always kept): stop gate (gates.py) and the bench
-at DEMANDS x SEEDS x ENVS x SECONDS (a subset of the evalset protocol), via evalset.evalset.
+at protocol.SELECT_DEMANDS x SELECTION_SEEDS x ENVS x SECONDS (a subset of the evalset protocol), via evalset.evalset.
 Rule per run: among checkpoints with ``safe_rate_feasible >= gate_min`` take the one with the highest
 throughput at 0.5 subject to crash+off/1000 at 0.3 <= ref * crash_tol + crash_slack (ref = the run's first
 checkpoint, or ``--ref``); the best checkpoint without any constraint is reported for contrast.
@@ -20,9 +20,8 @@ from pathlib import Path
 import numpy as np
 
 from . import evalset
+from .protocol import ENVS, SECONDS, SELECT_DEMANDS, SELECTION_SEEDS
 
-DEMANDS = (0.15, 0.3, 0.5)
-SEEDS = (1000, 2000, 3000)
 GATE_MIN, CRASH_TOL, CRASH_SLACK = 0.95, 1.1, 1.0  # slack: absolute crash+off/1000 (so a ref of 0 is not a hard 0)
 
 
@@ -64,21 +63,27 @@ def aggregate(lines: list[dict], specs: list[str]) -> list[dict]:
 
 def table(rows, marks=None) -> str:
     marks = marks or {}
+    f = lambda v: f"{'-':>7}" if v is None else f"{v:>7.1f}"  # noqa: E731  (demand not measured)
     out = [f"{'ckpt':<28}{'gate':>6}{'stop':>6}{'thr.3':>7}{'thr.5':>7}{'cr.15':>7}{'cr.3':>7}{'cr.5':>7}"]
     for r in rows:
         name = Path(r["ckpt"]).parent.name + "/" + Path(r["ckpt"]).stem
         out.append(f"{name:<28}{r['safe_rate_feasible']:>6.2f}{r['stop_rate_feasible']:>6.2f}"
-                   f"{r['thr']['0.3']:>7.1f}{r['thr']['0.5']:>7.1f}{r['crash']['0.15']:>7.1f}"
-                   f"{r['crash']['0.3']:>7.1f}{r['crash']['0.5']:>7.1f}  {marks.get(r['ckpt'], '')}")
+                   f"{f(r['thr'].get('0.3'))}{f(r['thr'].get('0.5'))}{f(r['crash'].get('0.15'))}"
+                   f"{f(r['crash'].get('0.3'))}{f(r['crash'].get('0.5'))}  {marks.get(r['ckpt'], '')}")
     return "\n".join(out)
 
 
 def select(runs, every: int = 1, gate_min: float = GATE_MIN, crash_tol: float = CRASH_TOL,
-           crash_slack: float = CRASH_SLACK, ref: str | None = None, demands=DEMANDS, seeds=SEEDS,
-           envs: int = evalset.ENVS, seconds: float = evalset.SECONDS, workers: int = 1, out=None, copy_to=None,
+           crash_slack: float = CRASH_SLACK, ref: str | None = None, demands=SELECT_DEMANDS, seeds=SELECTION_SEEDS,
+           envs: int = ENVS, seconds: float = SECONDS, workers: int = 1, out=None, copy_to=None,
            cfg_d: dict | None = None, log=print) -> dict:
-    t0 = time.time()
+    missing = {0.3, 0.5} - {float(d) for d in demands}
+    if missing:  # the rule needs the crash rate at 0.3 and the throughput at 0.5
+        raise SystemExit(f"select: the demands must include 0.3 and 0.5 (missing: {sorted(missing)})")
     per_run = {str(r): [str(c) for c in checkpoints(r, every)] for r in runs}
+    if empty := [r for r, cs in per_run.items() if not cs]:
+        raise SystemExit(f"select: no ckpt_*.npz in {empty}")
+    t0 = time.time()
     specs = [f"policy:{c}" for cs in per_run.values() for c in cs]
     ref_spec = f"policy:{ref}" if ref else None
     if ref_spec and ref_spec not in specs:

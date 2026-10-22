@@ -2,6 +2,8 @@ import json
 import shutil
 from pathlib import Path
 
+import pytest
+
 from smartcrossing import select as sel
 from smartcrossing.cli import main
 
@@ -38,3 +40,34 @@ def test_select_end_to_end(tmp_path):
     lines = [json.loads(x) for x in out.read_text(encoding="utf-8").splitlines()]
     assert sum(x["kind"] == "row" for x in lines) == 3 and cp.exists()
     assert next(x for x in lines if x["kind"] == "selection")["selected"]["iter"] in (0, 25, 50)
+
+
+def _run(tmp_path, n):
+    run = tmp_path / "run"
+    run.mkdir()
+    for i in range(n):
+        shutil.copyfile(BEST, run / f"ckpt_{i * 25:04d}.npz")
+    return run
+
+
+TINY = ["--seeds", "1", "--envs", "1", "--seconds", "2"]
+
+
+def test_select_needs_demands_0_3_and_0_5(tmp_path):
+    run = _run(tmp_path, 1)
+    with pytest.raises(SystemExit, match="0.3 and 0.5"):
+        main(["select", "--run", str(run), "--demands", "0.15,0.3", *TINY])
+    with pytest.raises(SystemExit, match="no ckpt"):
+        main(["select", "--run", str(tmp_path / "empty"), *TINY])
+
+
+def test_select_single_checkpoint_without_0_15_and_empty_selection(tmp_path):
+    """One checkpoint, no 0.15 in the demands (table shows '-'), a gate nobody passes: no selection, nothing copied."""
+    run = _run(tmp_path, 1)
+    out, cp = tmp_path / "s.jsonl", tmp_path / "best.npz"
+    res = main(["select", "--run", str(run), "--demands", "0.3,0.5", "--gate-min", "1.01", "--out", str(out),
+                "--copy-to", str(cp), *TINY])
+    assert res is None and not cp.exists()
+    lines = [json.loads(x) for x in out.read_text(encoding="utf-8").splitlines()]
+    assert [x["kind"] for x in lines] == ["row", "selection", "overall"]
+    assert lines[1]["selected"] is None and lines[1]["unconstrained"]["iter"] == 0 and lines[2]["selected"] is None
