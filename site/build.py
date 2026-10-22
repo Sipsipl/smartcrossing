@@ -1143,23 +1143,20 @@ def bench(found: dict, sel: dict, cfg: SimConfig, a) -> dict:
 GATE_CACHE = {}
 
 
-def _ckpt_path(c: dict) -> Path | None:
-    """The .npz of a discovered checkpoint (runs/ or the committed snapshot), or None."""
-    for q in (ROOT / c["file"], SNAPSHOT / "brains" / c["run"] / f"{c['id'].split('/')[-1]}.npz"):
-        if c["file"] and q.is_file():
-            return q
-    return None
-
-
 def gate_of(cid: str | None) -> dict | None:
     """Stop-gate rates (feasible cases) of a checkpoint, measured here (smartcrossing/gates.py, seconds):
-    {"safe": share that stop or pass without a crash, "stop": share that stop in front of the obstacle}."""
+    {"safe": share that stop or pass without a crash, "stop": share that stop in front of the obstacle}.
+    The checkpoint file in runs/ if it exists, else (snapshot brains: no checkpoint file) its weights in its
+    own physics."""
     c = FOUND.get(cid) if cid else None
-    path = _ckpt_path(c) if c else None
-    if path is None:
+    if c is None:
         return None
     if cid not in GATE_CACHE:
-        summary, _ = stop_gate(f"policy:{path}")
+        if c["file"] and (ROOT / c["file"]).is_file():
+            summary, _ = stop_gate(f"policy:{ROOT / c['file']}")
+        else:
+            payload = Brain(c["policy"]).payload()
+            summary, _ = stop_gate(cid, c["physics"], driver=lambda sim: policy_driver(sim, payload))
         GATE_CACHE[cid] = {"safe": summary["safe_rate_feasible"], "stop": summary["stop_rate_feasible"],
                            "cases": summary["feasible"]}
     return GATE_CACHE[cid]
