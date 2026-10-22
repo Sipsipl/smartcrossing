@@ -47,7 +47,12 @@ cd site/public && python3 -m http.server 8000                            # view 
 | `smartcrossing/bc.py` | Imitation: a new brain first learns from the old one (`ppo --init-bc`) |
 | `smartcrossing/gates.py` | Stopping test: does a car stop in front of an obstacle? |
 | `smartcrossing/evalset.py` | Standard evaluation (`cli evalset`): several traffic densities and random seeds + the stopping test |
-| `site/` | the website (German + English, `site/src/js/i18n*.js`); `site/src/js/sim.js` is the browser version of the simulation |
+| `smartcrossing/select.py` | Picking the best checkpoint of a training run (`cli select`): stopping test as a filter, then throughput |
+| `smartcrossing/deadlock.py` | Jam / gridlock study and the throughput-vs-density data of the website (`cli deadlock`, `deadlock-summarize`, `cloud`) |
+| `smartcrossing/protocol.py` | The fixed measurement settings: random seeds (selection vs. reporting), run length, traffic densities |
+| `smartcrossing/cli.py` | All commands (`python -m smartcrossing.cli --help`) |
+| `site/` | the website (German + English, `site/src/js/i18n*.js`); `site/src/js/sim.js` is the browser version of the simulation; `site/build.py` builds it (code in `site/sitebuild/`) |
+| `results/` | Small final results: best brains, evaluations, the website's snapshot `results/site/` |
 | `docs/PLAN.md` | Goals, decisions, architecture |
 | `docs/experiments.md` | Log of all training runs |
 
