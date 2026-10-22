@@ -449,7 +449,7 @@
  "fd.rise": " For the traffic controller the curve keeps rising to the end of the measurement: its capacity is higher still.",
  "fd.mini.aria": "Where the running simulation currently sits on the fundamental diagram of the learned cars",
  "fd.now": "Now: <b>{cars}</b> cars on the road · <b>{thr}</b> cars/min",
- "fd.wait": "The dot appears after a few seconds.",
+ "fd.wait": "The dot appears in {s} s of simulation time: like the cloud, it measures one full minute after the start-up phase.",
  "fd.me": "live now",
  "idx.fd-leg-cloud": "single measured minutes",
  "fd.max": " · ring = maximum {n}/min",
