@@ -5,8 +5,11 @@ fundamental-diagram data (throughput vs density and vs demand).
     poetry run python -m smartcrossing.cli deadlock --driver policy:results/round4_best.npz \
         --demands 0.3,0.5 --seeds 1000,2000,3000 --envs 8 --seconds 180 --out runs/deadlock/x.jsonl \
         [--noise policy|0.1] [--lamp zero|shuffle] [--workers 4]
-    poetry run python -m smartcrossing.deadlock summarize runs/deadlock/*.jsonl \
-        [--fundamental runs/deadlock/fundamental.json]
+    poetry run python -m smartcrossing.cli deadlock-summarize runs/deadlock/*.jsonl \
+        [--fundamental results/deadlock_fundamental.json --name round5_best=brain] [--json rows.json]
+    poetry run python -m smartcrossing.cli cloud --driver brain=policy:results/round5_best.npz --driver light \
+        --driver reservation --out results/fundamental_cloud.json --workers 4
+    poetry run python -m smartcrossing.cli incentives [--driver policy:results/round5_best.npz] [--cfg JSON]
 
 Deadlock (operational definition, ``detect``): the zone Z is the box incl. the curb rounding, Chebyshev
 distance max(|x|, |y|) <= W + Rc (16 m in the default world); the conflict area proper is max(|x|, |y|) <=
@@ -23,7 +26,6 @@ T = 10 s are counted as a sensitivity check. End causes (``end_cause``): a stuck
 ``censored`` = still running at the end.
 """
 
-import argparse
 import json
 import multiprocessing as mp
 import time
@@ -32,6 +34,7 @@ from pathlib import Path
 import numpy as np
 
 from .metrics import summarize
+from .protocol import ENVS, REPORT_SEEDS, SELECTION_SEEDS, SWEEP_DEMANDS, SWEEP_SECONDS
 from .sim import DONE_CRASH, DONE_OFFROAD, DONE_TIMEOUT, Sim, SimConfig
 
 SLOW_V = 0.3  # m/s: below this a car counts as standing (jam metric)
@@ -45,13 +48,6 @@ BLOCK_RANGE = 10.0  # m: a car within this distance in the +-BLOCK_CONE ahead bl
 BLOCK_CONE = np.radians(45.0)
 INNER_PAD = 2.0  # a car is "inner" (in the conflict area proper) when max(|x|, |y|) <= W + INNER_PAD
 LEAD_S, LAST_S = 5.0, 3.0  # lamp windows: before the deadlock began / before it ended
-DEMANDS = (0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5)
-# Seed split: SEEDS (= select.py / evalset.py) are SELECTION seeds, used while training rounds pick checkpoints.
-# REPORT_SEEDS are held-out: everything shown on the website (fundamental diagram, cloud, site bench) uses them,
-# so selection bias does not flatter the chosen brain.
-SEEDS = (1000, 2000, 3000)
-REPORT_SEEDS = (4000, 5000, 6000)
-ENVS, SECONDS = 8, 180.0
 MAN_NAMES = {1: "right", 2: "straight", 3: "left"}
 
 
@@ -92,11 +88,11 @@ def make_driver(spec: str, sim: Sim, noise=None, seed: int = 0):
 
 
 # ------------------------------------------------------------------ recording
-def record_run(spec: str, cfg: SimConfig, seed: int, envs: int = ENVS, seconds: float = SECONDS, noise=None,
-               lamp: str = "normal", hook=None):
+def record_run(spec: str, cfg: SimConfig, seed: int, envs: int = ENVS, seconds: float = SWEEP_SECONDS, noise=None,
+               lamp: str = "normal"):
     """Run ``spec`` and record the state BEFORE every step (alive, wreck, uid, x, y, th, v, arm, man, age),
     the emitted lamp (action[2]) and what the step removed (done_kind per slot). lamp: normal / zero / shuffle
-    (analyze._intervene on the received lamps). hook(sim, i) is called before step i (rendering).
+    (analyze._intervene on the received lamps).
     Returns (rec dict of (T, B, N) arrays + queue (T, B), summarize dict, sim)."""
     from .analyze import _intervene
 
@@ -110,8 +106,6 @@ def record_run(spec: str, cfg: SimConfig, seed: int, envs: int = ENVS, seconds: 
                uid=np.zeros((T, B, N), np.int64), arm=np.zeros((T, B, N), np.int8), man=np.zeros((T, B, N), np.int8),
                done=np.zeros((T, B, N), np.int8), queue=np.zeros((T, B), np.int32))
     for i in range(T):
-        if hook is not None:
-            hook(sim, i)
         for k in ("x", "y", "th", "v", "age", "alive", "wreck", "uid", "arm", "man"):
             rec[k][i] = getattr(sim, k)
         rec["queue"][i] = sim.queue.sum(1)
@@ -366,7 +360,7 @@ def _jsonable(o):
     raise TypeError(type(o))
 
 
-def sweep(drivers, demands=DEMANDS, seeds=SEEDS, envs=ENVS, seconds=SECONDS, noise=None, lamp="normal",
+def sweep(drivers, demands=SWEEP_DEMANDS, seeds=SELECTION_SEEDS, envs=ENVS, seconds=SWEEP_SECONDS, noise=None, lamp="normal",
           cfg_d=None, out=None, workers=1, log=print) -> list[dict]:
     """Every driver x demand x seed; appends one JSON line per run to ``out``."""
     jobs = [(d, cfg_d, dm, s, envs, seconds, noise, lamp) for d in drivers for dm in demands for s in seeds]
@@ -387,37 +381,6 @@ def sweep(drivers, demands=DEMANDS, seeds=SEEDS, envs=ENVS, seconds=SECONDS, noi
             f"deadlocks {ln['deadlocks']} ({ln['wall_s']} s)")
     log(f"deadlock sweep: {len(lines)} runs in {time.time() - t0:.0f} s" + (f" -> {out}" if out else ""))
     return lines
-
-
-def render_episodes(spec: str, cfg: SimConfig, seed: int, envs: int, seconds: float, eps, out_dir, pad_s=3.0,
-                    noise=None, lamp="normal", view=30.0) -> list[str]:
-    """Re-run a recorded run (same spec / cfg / seed / envs: deterministic) and save, per episode, a 9-frame
-    contact sheet + GIF of its env from pad_s before its start to pad_s after its end. Returns the file stems."""
-    from .render import contact_sheet, draw_frame, save_gif
-
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    pad = int(pad_s / cfg.dt)
-    frames = {k: [] for k in range(len(eps))}
-
-    def hook(sim, i):
-        for k, e in enumerate(eps):
-            if e["start"] - pad <= i <= e["end"] + pad and (i - e["start"]) % 3 == 0:
-                frames[k].append(draw_frame(sim, e["env"], 360, view=view, label=f"t={i * cfg.dt:.1f}s"))
-
-    record_run(spec, cfg, seed, envs, min(seconds, (max(e["end"] for e in eps) + pad + 1) * cfg.dt), noise, lamp,
-               hook=hook)
-    stems = []
-    for k, e in enumerate(eps):
-        fr = frames[k]
-        if not fr:
-            continue
-        stem = out_dir / f"dl_env{e['env']}_t{e['start'] * cfg.dt:.0f}"
-        pick = np.linspace(0, len(fr) - 1, 9).astype(int)
-        contact_sheet([fr[i] for i in pick]).save(f"{stem}_sheet.png")
-        save_gif(fr, f"{stem}.gif", fps=8)
-        stems.append(str(stem))
-    return stems
 
 
 # ------------------------------------------------------------------ aggregation
@@ -521,9 +484,10 @@ FUND_KEYS = ("demand_per_min", "cars_map_mean", "cars_box_mean", "density_veh_pe
 
 def fundamental(lines, names=None) -> dict:
     """Fundamental-diagram data: per driver a list of seed-averaged points (only plain runs: no noise, lamps
-    normal) plus the per-seed points. names: optional {spec label: display key}."""
+    normal). names: optional {spec label: display key}. The meta records the envs / seconds / seeds of the lines."""
     names = names or {}
-    rows = [r for r in aggregate(lines) if r["noise"] == "none" and r["lamp"] == "normal"]
+    plain = [ln for ln in lines if ln["noise"] == "none" and ln["lamp"] == "normal"]
+    setup = lambda key: sorted({ln[key] for ln in plain})  # noqa: E731
     out = {"meta": {
         "density": "cars_map_mean = mean number of driving cars on the map (box + 4 arms of L = 50 m, both "
                    "directions) per environment after a 30 s warm-up; density_veh_per_km = cars_map_mean / 0.2 km "
@@ -531,19 +495,14 @@ def fundamental(lines, names=None) -> dict:
         "throughput": "throughput_per_min = exits per minute over the whole run (as cli bench); "
                       "throughput_steady_per_min = after the 30 s warm-up",
         "demand": "demand (arrivals /s/arm, x 240 = cars/min); demand_per_min = measured arrivals",
-        "protocol": f"{ENVS} envs x {SECONDS:g} s, traffic seeds {sorted({ln['seed'] for ln in lines})}, default world (cli bench)",
-        "deadlock": f"deadlock = >= {N_MIN} cars standing (|v| < {SLOW_V} m/s) in the box zone for >= {T_MIN:g} s "
-                    "with no car driving out of the zone (smartcrossing/deadlock.py)"},
+        "protocol": f"envs {setup('envs')} x seconds {setup('seconds')}, traffic seeds {setup('seed')}, "
+                    "default world (cli deadlock)",
+        "deadlock": f"deadlock = >= {N_MIN} cars stuck in the box zone (net displacement < {STUCK_D:g} m over "
+                    f"{T_MIN:g} s), >= {N_INNER} of them inside the conflict area (smartcrossing/deadlock.py detect)"},
         "drivers": {}}
-    per_seed = {}
-    for ln in lines:
-        if ln["noise"] == "none" and ln["lamp"] == "normal":
-            per_seed.setdefault(label(ln["driver"]), []).append(
-                {"demand": ln["demand"], "seed": ln["seed"], "density": ln["cars_map_mean"],
-                 "throughput": ln["throughput_steady_per_min"]})
-    for r in rows:
+    for r in aggregate(plain):
         key = names.get(r["driver"], r["driver"])
-        d = out["drivers"].setdefault(key, {"label": r["driver"], "points": [], "per_seed": per_seed[r["driver"]]})
+        d = out["drivers"].setdefault(key, {"label": r["driver"], "points": []})
         d["points"].append({"demand": r["demand"], "density": r["cars_map_mean"],
                             "throughput": r["throughput_steady_per_min"], **{k: r[k] for k in FUND_KEYS}})
     return out
@@ -596,23 +555,32 @@ def incentives(cfg_d: dict, gamma: float = 0.99, ages=(20.0, 40.0), go_s: float 
 
 
 # ------------------------------------------------------------------ scatter cloud
-CLOUD_DEMANDS = (0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5)
+CLOUD_DEMANDS = SWEEP_DEMANDS
 CLOUD_WINDOW_S, CLOUD_STRIDE_S, CLOUD_SECONDS, CLOUD_ENVS, CLOUD_SEED = 60.0, 10.0, 270.0, 6, REPORT_SEEDS[0]  # held-out: seeds 4000..4006
 CLOUD_PER_DEMAND = 60  # points kept per (driver, demand) after thinning
 
 
+def cloud_windows(cars: np.ndarray, exits: np.ndarray, dt: float, stride_s: float = CLOUD_STRIDE_S):
+    """The cloud's window definition (the start page's live dot uses the same, js/pages.js fdWindow): cars (T, B) =
+    driving cars on the map before step i, exits (T + 1, B) = cumulative exits after i steps. A CLOUD_WINDOW_S
+    window ending every stride_s, only windows lying entirely after the WARMUP from the empty start (so the first
+    one ends at WARMUP + CLOUD_WINDOW_S). Returns [(end time s, density (B,), throughput per min (B,)), ...]:
+    density = mean cars over the window, throughput = exits in the window per minute."""
+    T = len(cars)
+    w, stride = int(round(CLOUD_WINDOW_S / dt)), int(round(stride_s / dt))
+    first = int(round(WARMUP / dt)) + w
+    return [(end * dt, cars[end - w:end].mean(0), (exits[end] - exits[end - w]) * (60.0 / CLOUD_WINDOW_S))
+            for end in range(first, T + 1, stride)]
+
+
 def cloud_job(job) -> list[list[float]]:
-    """One cloud cell (spec, cfg_d, demand, seed, envs, seconds) -> [[density, throughput, demand], ...]: a
-    sliding 60-s window every 10 s, per env, for windows lying entirely after the 30 s warm-up. Definitions are
-    those of the live dot on the site's start page: density = mean number of driving cars on the map over
-    the window, throughput = exits in the window, per minute."""
+    """One cloud cell (spec, cfg_d, demand, seed, envs, seconds) -> [[density, throughput, demand], ...] per env
+    and window (cloud_windows)."""
     spec, cfg_d, demand, seed, envs, seconds = job
     cfg = SimConfig(**{**(cfg_d or {}), "demand": demand})
     sim = Sim(cfg, envs, seed=seed)
     drv = make_driver(spec, sim)
     T = int(round(seconds / cfg.dt))
-    w, stride = int(round(CLOUD_WINDOW_S / cfg.dt)), int(round(CLOUD_STRIDE_S / cfg.dt))
-    first = int(round(WARMUP / cfg.dt)) + w
     cars = np.zeros((T, envs))
     exits = np.zeros((T + 1, envs))
     for i in range(T):
@@ -620,9 +588,7 @@ def cloud_job(job) -> list[list[float]]:
         sim.step(drv.act())
         exits[i + 1] = sim.stats.exits
     out = []
-    for end in range(first, T + 1, stride):
-        dens = cars[end - w:end].mean(0)
-        thr = (exits[end] - exits[end - w]) * (60.0 / CLOUD_WINDOW_S)
+    for _, dens, thr in cloud_windows(cars, exits, cfg.dt):
         out += [[round(float(d), 1), round(float(t), 1), demand] for d, t in zip(dens, thr)]
     return out
 
@@ -643,7 +609,8 @@ def cloud(drivers: dict, demands=CLOUD_DEMANDS, envs=CLOUD_ENVS, seconds=CLOUD_S
         "throughput": f"exits in the window per minute ({CLOUD_WINDOW_S:g}-s sliding window, one every "
                       f"{CLOUD_STRIDE_S:g} s, windows entirely after the {WARMUP:g} s warm-up)",
         "points": "[density, throughput, demand]; per driver and demand evenly thinned",
-        "protocol": f"{envs} envs x {seconds:g} s per demand {list(demands)}, default world, traffic seed {seed}+"},
+        "protocol": f"{envs} envs x {seconds:g} s per demand {list(demands)}, default world, traffic seed "
+                    f"{seed} + k for the k-th demand ({seed}..{seed + len(demands) - 1})"},
         "drivers": {}}
     for ki, key in enumerate(drivers):
         pts = []
@@ -657,23 +624,15 @@ def cloud(drivers: dict, demands=CLOUD_DEMANDS, envs=CLOUD_ENVS, seconds=CLOUD_S
     return out
 
 
-def main(argv=None):
-    p = argparse.ArgumentParser()
-    p.add_argument("cmd", choices=["summarize"])
-    p.add_argument("files", nargs="+")
-    p.add_argument("--fundamental", default=None, help="write the fundamental-diagram JSON here")
-    p.add_argument("--json", default=None, help="write the aggregated rows here")
-    a = p.parse_args(argv)
-    lines = [json.loads(s) for f in a.files for s in Path(f).read_text(encoding="utf-8").splitlines() if s.strip()]
+def summarize_files(files, names=None, fundamental_out=None, json_out=None, log=print) -> list[dict]:
+    """``cli deadlock-summarize``: aggregate sweep JSONL files and print the table; optionally write the rows
+    (json_out) and the fundamental-diagram JSON (names: {spec label: display key}, e.g. {"round5_best": "brain"})."""
+    lines = [json.loads(s) for f in files for s in Path(f).read_text(encoding="utf-8").splitlines() if s.strip()]
     rows = aggregate(lines)
-    print(table(rows))
-    if a.json:
-        Path(a.json).write_text(json.dumps(rows, indent=1), encoding="utf-8", newline="\n")
-    if a.fundamental:
-        names = {"round5_best": "brain", "round4_best": "brain_r4", "round2_best": "brain_r2"}
-        Path(a.fundamental).write_text(json.dumps(fundamental(lines, names), indent=1), encoding="utf-8",
-                                       newline="\n")
-
-
-if __name__ == "__main__":
-    main()
+    log(table(rows))
+    if json_out:
+        Path(json_out).write_text(json.dumps(rows, indent=1), encoding="utf-8", newline="\n")
+    if fundamental_out:
+        Path(fundamental_out).write_text(json.dumps(fundamental(lines, names), indent=1), encoding="utf-8",
+                                         newline="\n")
+    return rows
