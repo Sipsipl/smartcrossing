@@ -865,3 +865,42 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
 
   Gate safe 0.99 for both (stop_rate ~0.70). New main brain: r5_K_s1@475 -> results/round5_best.npz (fewest
   crashes; owner: rather a jam than a crash). s2@525 trades crashes for throughput and almost no timeouts.
+
+## Round 6: equal updates K vs D, both with more obstacle scenarios; new best r6_DO_s2 @750 (2026-10-22)
+- All arms continue runs/r5_K_s1/state.npz (iter 499, set/attention, r5_K recipe otherwise) for a FIXED 300
+  iterations (--iters 800), obstacle_envs 0.75 (was 0.5), 2 seeds each, GPU rollouts (2048 envs).
+  KO = demand ceiling 0.3, lo 0.15; DO = ceiling 0.5 (--set-ceiling 0.5, start 0.5), lo 0.1.
+- Wall time incl. checkpoint evals: KO 9.0 / 8.9 min (1.8 s/it), DO 23.0 / 21.2 min (4.6 / 4.2 s/it; dense
+  traffic fills the slots; partly overlapped with CPU `select` runs).
+- `cli select` (SELECTION seeds 1000/2000/3000, gate >= 0.95, crash@0.3 <= 6.76 = round5_best x 1.1 + 1;
+  results/round6_select.jsonl; thr/min at 0.5, crash+off/1000 at 0.3 / 0.5, gate safe / stop):
+
+  | run | selected | thr.5 | cr.3 / cr.5 | gate | LAST ckpt 799: thr.5, cr.5, gate safe / stop |
+  |---|---|---|---|---|---|
+  | round5_best (ref) | - | 70.3 | 5.2 / 45.8 | 0.99 / 0.70 | - |
+  | KO_s1 | @750 | 82.0 | 6.2 / 58.5 | 1.00 / 0.50 | 86.4, 46.2, 1.00 / 0.41 (passes; cr.3 13.2 fails crash limit) |
+  | KO_s2 | @675 | 88.0 | 6.0 / 51.8 | 0.97 / 0.59 | 88.3, 78.8, 0.86 / 0.27 (fails) |
+  | DO_s1 | @799 | 85.6 | 6.0 / 32.4 | 0.95 / 0.39 | = selected (passes) |
+  | DO_s2 | @750 | 94.9 | 6.4 / 36.3 | 0.95 / 0.44 | 92.8, 46.7, 0.93 / 0.47 (fails narrowly) |
+
+- Gate during training: safe_rate stays 0.93-1.0 in all runs, but stop_rate (stopping rather than driving
+  around an obstacle) keeps decaying from 0.68 to 0.27-0.47 - more obstacle envs did NOT preserve it. KO_s2
+  also lost safe_rate (0.86 at the end, crashes at 0.5 up to 80-115).
+- HELD-OUT seeds 4000/5000/6000 (results/round6_heldout.jsonl, results/round6_deadlock.jsonl; 8 envs x 120 s;
+  thr/min / crash+off per 1000 / timeouts per run / % time deadlocked):
+
+  | | 0.15 | 0.3 | 0.4 | 0.5 | gate safe / stop |
+  |---|---|---|---|---|---|
+  | round5_best | 33.1/5/0/0 | 61.6/11/8.3/11 | 64.4/35/17/34 | 61.3/56/51/50 | 0.99 / 0.71 |
+  | r6_DO_s1@799 | 33.3/4/0/0 | 65.8/7/0/1 | 86.5/8/0/2 | 86.4/44/14/27 | 0.955 / 0.39 |
+  | r6_DO_s2@750 | 33.3/2/0/0 | 66.1/4/0/0 | 84.8/13/0/3 | 94.8/28/8/12 | 0.955 / 0.44 |
+
+  DO_s2@750 at 0.5 per seed: thr 93.1/96.0/95.4, crash 29/29/26 (round5_best 60-62, 52-59) - not noise.
+- Decision: r6_DO_s2@750 -> results/round6_best.npz (new main brain candidate): +55 % throughput at 0.5 (above
+  the reservation's ~91/min on these numbers), half the crashes at 0.5, ~3x fewer at 0.3, almost no timeouts,
+  deadlock time 50 % -> 12 %. Sheet at 0.5 (runs/r6_render_d05): streams/platoons through the box, a jam
+  around a wreck still forms. With equal updates, dense-traffic training (DO) beats the control (KO) on both
+  seeds - round 5's "D is worse" was the update deficit.
+- Caveat: stop gate is only just passed (safe 0.955) and stop_rate fell to 0.44: the brain swerves around
+  obstacles instead of stopping. Neither arm keeps the stop skill inside training; the LAST checkpoint passes
+  in 2 of 4 runs (KO_s1, DO_s1), and only DO_s1 also meets the crash limit.
