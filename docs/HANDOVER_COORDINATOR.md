@@ -31,6 +31,7 @@ Owners, damit Kontext frisch ist und GPU-Training möglich wird.
   Agents in denselben Dateien), knappe Berichte (Zahlen, Pfade, keine Code-Dumps) anfordern.
   Subagents schauen sich Bilder/Screenshots selbst an; du nur stichprobenartig.
 - **Standard-Eval = `cli evalset`** (4 Nachfragen × 3 Verkehrs-Seeds × 8 Envs × 120 s + Anhaltetest, JSONL wie results/round4_eval.jsonl).
+- **Modellauswahl = `cli select` mit Gate-Filter** (alle Checkpoints eines Runs: Anhaltetest >= 0.95 als harter Filter, dann bester Durchsatz bei 0.5 unter Crash-Limit bei 0.3; `--every N`, `--workers 4`, `--copy-to`).
 - **Selbst evaluieren:** `pytest`, `cli bench` (JSON-Zeile), `cli render` (sheet.png,
   spacetime.png), `analyze.py`, Playwright-Screenshots der Website. Nie Erfolg behaupten ohne
   Beleg; Misserfolge ehrlich berichten.
@@ -66,6 +67,7 @@ Owners, damit Kontext frisch ist und GPU-Training möglich wird.
   Messung, Ausfall-Aufschlüsselung) und auf Basis der Liste handeln. Messen vor Optimieren.
 - **Robuste Zahlen:** Bench über mehrere Verkehrs-Seeds; ein einzelner Seed täuscht (±10–20
   Unfälle/1000). Immer mit Ampel/Verkehrsrechner und dem bisherigen besten Modell vergleichen.
+- **Seeds nach Zweck trennen:** Auswahl-Seeds 1000/2000/3000 (`select.py`, `evalset.py`, Training) – alles auf der Website (Bench, Fundamental, Wolke) nutzt die ungesehenen Berichts-Seeds 4000/5000/6000 (`deadlock.REPORT_SEEDS`), sonst schmeichelt die Auswahl dem gewählten Gehirn.
 - **Trainings:** vor dem Start Iterationen/min messen und Dauer hochrechnen; Zeitlimit im Auftrag;
   CPU-Last im Blick (Training + Website-Build gleichzeitig überbucht die Kerne).
 - **Berichte kritisch prüfen:** Subagent-Berichte und externe Handover sind Behauptungen. Gegen

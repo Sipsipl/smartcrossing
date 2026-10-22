@@ -48,6 +48,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "site")]
 
 from obs_labels import interface_key, obs_layout  # noqa: E402
+from smartcrossing.deadlock import REPORT_SEEDS  # noqa: E402
+from smartcrossing.gates import stop_gate  # noqa: E402
 from smartcrossing.policy import default_in_scale, init_params, layer_sizes, unpack  # noqa: E402
 from smartcrossing.policy_compat import INTERFACE_KEYS, interface_cfg, load_adapted_policy, physics_of  # noqa: E402
 from smartcrossing.sim import BRAKE_ACC, SimConfig, js_constants  # noqa: E402
@@ -67,15 +69,18 @@ DEMANDS = [0.05, 0.1, 0.15, 0.2, 0.3, 0.5]  # up to the start page slider maximu
 # shown before it (narrow crossing); override with --main / --history
 # Checkpoints are named <run>/<file stem> (found in runs/ or in the snapshot); a path to an
 # .npz anywhere (e.g. results/wide_s1ft2_ckpt2650.npz) works too if its weights match one.
-DEFAULT_MAIN = ["r4_S_s1/ckpt_0205"]  # = results/round4_best.npz (round 4: set / attention encoder, K=8 neighbours)
-DEFAULT_PREVIOUS = "r2_B_s1/ckpt_0639"  # = results/round2_best.npz, the main brain before round 4
+DEFAULT_MAIN = ["r5_K_s1/ckpt_0475"]  # = results/round5_best.npz (round 5: r4 brain trained on, picked by stop-gate selection; not the run's last checkpoint)
+DEFAULT_PREVIOUS = "r4_S_s1/ckpt_0205"  # = results/round4_best.npz, the main brain before round 5
 DEFAULT_HISTORY = "ppo17/ckpt_5250"
 # second brain for mixing on the start page; old brains (2 lamps, no brake light) cannot share a sim with the
 # main brain, so none for now (was wide_s0ft/ckpt_2850 = results/wide_s0ft_ckpt2850.npz)
 DEFAULT_MIX = ""
 TIMELINE_DEMANDS = [0.05, 0.15]
 BENCH_ENVS, BENCH_SECONDS = 8, 120.0
-BENCH_SEEDS = (1000, 2000, 3000)  # traffic seeds, the same for all drivers (paired); results are averaged
+# Traffic seeds, the same for all drivers (paired); results are averaged. These are the held-out REPORTING seeds
+# (deadlock.REPORT_SEEDS = 4000/5000/6000), not the SELECTION seeds 1000/2000/3000 that cli select / evalset use to
+# pick checkpoints: numbers on the website must not be flattered by the selection.
+BENCH_SEEDS = REPORT_SEEDS
 # Plain German names for known runs: run id -> (short label for chart markers, label, one-line
 # explanation). Shown on "Wie lernen sie?" instead of the raw ids; unmapped runs fall back to the id.
 RUN_INFO = {
@@ -152,8 +157,8 @@ RUN_INFO = {
     "r2_C_s2": ("R2c'", "Runde 2, Test: tempoabhängige Strafe, zweiter Lauf",
                 "Bestätigt: mit tempoabhängiger Strafe mehr Unfälle bei dichtem Verkehr."),
     "r4_S_s1": ("R4", "Runde 4: ein Mini-Netz für jeden Nachbarn + Aufmerksamkeit",
-                "Das aktuelle Gehirn: schaut auf bis zu 8 Nachbarn, jeder geht durch dasselbe kleine Netz, dann entscheidet eine „Aufmerksamkeit“, wer gerade zählt. "
-                "Erst hat es das vorige Gehirn nachgeahmt, dann 12 Minuten weitergelernt."),
+                "Schaut auf bis zu 8 Nachbarn, jeder geht durch dasselbe kleine Netz, dann entscheidet eine „Aufmerksamkeit“, wer gerade zählt. "
+                "Erst hat es das vorige Gehirn nachgeahmt, dann 12 Minuten weitergelernt – das Hauptgehirn bis Runde 5."),
     "r4_S_s2": ("R4'", "Runde 4: Mini-Netz + Aufmerksamkeit, zweiter Lauf",
                 "Anderer Zufallsstart, ähnlich gut – bei sehr dichtem Verkehr bleiben aber mehr Autos mitten auf der Kreuzung stecken."),
     "r4_M_s1": ("R4m", "Runde 4, Vergleich: bisheriges Netz weitertrainiert",
@@ -164,6 +169,19 @@ RUN_INFO = {
                 "Mehr Neuronen (128 × 128) helfen auch – aber nicht so viel wie das Mini-Netz pro Nachbar."),
     "r4_W_s2": ("R4w'", "Runde 4, Vergleich: breites Netz, zweiter Lauf",
                 "Anderer Zufallsstart, ähnlich."),
+    "r5_K_s1": ("R5", "Runde 5: weitergelernt (Kontrolle)",
+                "Das aktuelle Gehirn: das Gehirn aus Runde 4 hat unverändert weitertrainiert. Gewählt ist ein Zwischenstand (Schritt 475) mit wenigen Unfällen. "
+                "Ein stehendes Hindernis umfährt es zu etwa {safe} % sicher, hält aber nur in rund {stop} % der Fälle davor an – im weiteren Training ließ das Anhalten nach."),
+    "r5_K_s2": ("R5'", "Runde 5: weitergelernt, zweiter Lauf",
+                "Anderer Zufallsstart: bei dichtem Verkehr noch mehr Autos durch, dafür bleiben die Unfälle bei sehr dichtem Verkehr hoch."),
+    "r5_D_s1": ("R5d", "Runde 5, Test: Training mit dichtem Verkehr",
+                "Mehr Verkehr im Training: weniger Unfälle, dafür mehr Autos, die lange festsitzen – und nicht mehr Durchsatz als vorher."),
+    "r5_D_s2": ("R5d'", "Runde 5, Test: dichter Verkehr, zweiter Lauf", "Anderer Zufallsstart, ähnlich."),
+    "r5_DW_s1": ("R5w", "Runde 5, Test: dichter Verkehr + Warten kostet",
+                 "Zusätzlich wird Warten bestraft: weniger Unfälle als vorher, aber weiter viel Stau und kaum mehr Autos durch."),
+    "r5_DW_s2": ("R5w'", "Runde 5, Test: dichter Verkehr + Warten kostet, zweiter Lauf", "Anderer Zufallsstart, ähnlich."),
+    "r5_DWX_s1": ("R5x", "Runde 5, Test: dichter Verkehr, Warten kostet, Unfälle sechsmal so teuer",
+                  "Noch weniger Unfälle, dafür Stau statt Crash (nur ein kürzerer Lauf)."),
     "r1_x1": ("R1a", "Runde 1, Test: Unfälle so teuer wie bisher",
               "Kurzer Test: ähnlich gut wie mit dreifacher Strafe – der Unterschied ist Zufall."),
     "r1_x10": ("R1b", "Runde 1, Test: Unfälle zehnmal so teuer",
@@ -197,6 +215,7 @@ STEP_INFO = {
     "r1_main_x3": "Länger weitergelernt → rund 40 % weniger Unfälle als vorher: das Hauptgehirn bis Runde 2",
     "r2_B_s1": "Dazu Hindernisse im Training (Wracks, parkende Autos) → bremst viel öfter dahinter ab und reiht sich ein; noch Unfälle mitten auf der Kreuzung bei dichtem Verkehr",
     "r4_S_s1": "Neues Gehirn: ein gemeinsames Mini-Netz für jeden der bis zu 8 Nachbarn plus Aufmerksamkeit; erst das vorige Gehirn nachgeahmt, dann weitergelernt → im Vergleich (gleich lange trainiert wie das bisherige und ein doppelt so breites Netz) die wenigsten Unfälle",
+    "r5_K_s1": "Dasselbe Gehirn weitertrainiert, ein Zwischenstand mit wenigen Unfällen und hohem Durchsatz → bei dichtem Verkehr mehr Autos durch und weniger Unfälle; vor einem stehenden Hindernis hält es aber nur in etwa 70 % der Fälle an, sonst fährt es herum",
 }
 
 
@@ -275,8 +294,8 @@ RUN_INFO_EN = {
     "r2_C_s2": ("Round 2, test: speed-dependent penalty, second run",
                 "Confirmed: with the speed-dependent penalty there are more crashes in dense traffic."),
     "r4_S_s1": ("Round 4: a mini-network for every neighbour + attention",
-                "The current brain: looks at up to 8 neighbours, each goes through the same small network, then an “attention” decides who matters right now. "
-                "It first imitated the previous brain, then kept learning for 12 minutes."),
+                "Looks at up to 8 neighbours, each goes through the same small network, then an “attention” decides who matters right now. "
+                "It first imitated the previous brain, then kept learning for 12 minutes – the main brain up to round 5."),
     "r4_S_s2": ("Round 4: mini-network + attention, second run",
                 "Different random start, similarly good – but in very dense traffic more cars get stuck in the middle of the crossing."),
     "r4_M_s1": ("Round 4, comparison: previous network trained further",
@@ -287,6 +306,19 @@ RUN_INFO_EN = {
                 "More neurons (128 × 128) help too – but not as much as the mini-network per neighbour."),
     "r4_W_s2": ("Round 4, comparison: wide network, second run",
                 "Different random start, similar."),
+    "r5_K_s1": ("Round 5: trained on (control)",
+                "The current brain: the round 4 brain trained on, unchanged. An intermediate step (step 475) is chosen, with few crashes. "
+                "It gets past a standing obstacle safely in about {safe}% of cases, but stops in front of it in only about {stop}% – stopping faded with further training."),
+    "r5_K_s2": ("Round 5: trained on, second run",
+                "Different random start: even more cars get through in dense traffic, but crashes stay high in very dense traffic."),
+    "r5_D_s1": ("Round 5, test: training with dense traffic",
+                "More traffic in training: fewer crashes, but more cars stuck for a long time – and no more throughput than before."),
+    "r5_D_s2": ("Round 5, test: dense traffic, second run", "Different random start, similar."),
+    "r5_DW_s1": ("Round 5, test: dense traffic + waiting costs",
+                 "Waiting is penalised on top: fewer crashes than before, but still a lot of jamming and hardly more cars through."),
+    "r5_DW_s2": ("Round 5, test: dense traffic + waiting costs, second run", "Different random start, similar."),
+    "r5_DWX_s1": ("Round 5, test: dense traffic, waiting costs, crashes six times as costly",
+                  "Even fewer crashes, but jams instead of crashes (a single, shorter run)."),
     "r1_x1": ("Round 1, test: crashes as costly as before",
               "Short test: about as good as with triple penalty – the difference is chance."),
     "r1_x10": ("Round 1, test: crashes ten times as costly",
@@ -319,6 +351,7 @@ STEP_INFO_EN = {
     "r1_main_x3": "Kept learning for longer → about 40% fewer crashes than before: the main brain up to round 2",
     "r2_B_s1": "Plus obstacles in training (wrecks, parked cars) → brakes behind them far more often and queues up; still crashes in the middle of the crossing in dense traffic",
     "r4_S_s1": "New brain: one shared mini-network for each of the up to 8 neighbours plus attention; first imitated the previous brain, then kept learning → fewest crashes in the comparison (trained for the same time as the previous one and a network twice as wide)",
+    "r5_K_s1": "The same brain trained on, an intermediate step with few crashes and high throughput → more cars through and fewer crashes in dense traffic; but in front of a standing obstacle it stops in only about {stop}% of cases, otherwise it drives around",
 }
 
 
@@ -326,8 +359,11 @@ def run_info(run: str | None) -> dict:
     """Names / notes of a run for the pages: German in label / note / step, English in *_en."""
     short, label, note = RUN_INFO.get(run, (run, run, None)) if run else (None, None, None)
     label_en, note_en = RUN_INFO_EN.get(run, (label, None)) if run else (None, None)
+    cid = DEFAULT_MAIN[0]  # the notes with {safe} / {stop} are about the main brain's checkpoint
+    note, note_en = _gate_text(note, cid), _gate_text(note_en, cid)
     return {"short": short, "label": label, "label_en": label_en, "note": note, "note_en": note_en,
-            "step": STEP_INFO.get(run) if run else None, "step_en": STEP_INFO_EN.get(run) if run else None}
+            "step": _gate_text(STEP_INFO.get(run), cid) if run else None,
+            "step_en": _gate_text(STEP_INFO_EN.get(run), cid) if run else None}
 
 
 # nav entries: (file, German label); the English labels are js/i18n-en.js nav.<file>
@@ -1104,10 +1140,45 @@ def bench(found: dict, sel: dict, cfg: SimConfig, a) -> dict:
     return {"baselines_by_world": by_world, "main_world": main_world, "base_phys": base_worlds[main_world]}
 
 
+GATE_CACHE = {}
+
+
+def _ckpt_path(c: dict) -> Path | None:
+    """The .npz of a discovered checkpoint (runs/ or the committed snapshot), or None."""
+    for q in (ROOT / c["file"], SNAPSHOT / "brains" / c["run"] / f"{c['id'].split('/')[-1]}.npz"):
+        if c["file"] and q.is_file():
+            return q
+    return None
+
+
+def gate_of(cid: str | None) -> dict | None:
+    """Stop-gate rates (feasible cases) of a checkpoint, measured here (smartcrossing/gates.py, seconds):
+    {"safe": share that stop or pass without a crash, "stop": share that stop in front of the obstacle}."""
+    c = FOUND.get(cid) if cid else None
+    path = _ckpt_path(c) if c else None
+    if path is None:
+        return None
+    if cid not in GATE_CACHE:
+        summary, _ = stop_gate(f"policy:{path}")
+        GATE_CACHE[cid] = {"safe": summary["safe_rate_feasible"], "stop": summary["stop_rate_feasible"],
+                           "cases": summary["feasible"]}
+    return GATE_CACHE[cid]
+
+
+def _gate_text(text: str | None, cid: str) -> str | None:
+    """Fill {safe} / {stop} (whole percent of the stop gate of checkpoint cid) in a run note."""
+    if text is None or "{safe}" not in text and "{stop}" not in text:
+        return text
+    g = gate_of(cid)
+    if g is None:  # checkpoint not available (e.g. in tests): no number rather than a made-up one
+        return text.replace("{safe}", "?").replace("{stop}", "?")
+    return text.replace("{safe}", str(round(g["safe"] * 100))).replace("{stop}", str(round(g["stop"] * 100)))
+
+
 FUNDAMENTAL = ROOT / "results" / "deadlock_fundamental.json"
 FUNDAMENTAL_DRIVERS = ("brain", "light", "reservation")  # curves of the fundamental diagram on the site
 START_DEMAND_MAX = 0.5  # max of the start page demand slider
-FUNDAMENTAL_FIELDS = ("demand", "density", "throughput", "density_veh_per_km", "demand_per_min")
+FUNDAMENTAL_FIELDS = ("demand", "density", "throughput", "density_veh_per_km", "demand_per_min", "deadlock_time_frac")
 
 
 def fundamental_data():
@@ -1173,6 +1244,7 @@ def write_site(found: dict, sel: dict, bres: dict, cfg: SimConfig, kind: str, a)
         "reward": reward_of(found[main_id]["policy"].get("cfg") or {}) if main_id else None,
         "demands": DEMANDS,
         "fundamental": fundamental_data(),
+        "gate": {"main": gate_of(main_id), "previous": gate_of(sel["prev_id"]) if sel["prev_id"] != main_id else None},  # stop gate (measured at build)
         "bench_setup": {"envs": BENCH_ENVS, "seconds": BENCH_SECONDS, "seeds": len(BENCH_SEEDS)},
     }
     # side-by-side replays (same traffic) of the two rule-based drivers and the best policy
@@ -1216,6 +1288,8 @@ def main(argv=None):
     FOUND.update(found)
     print(f"  {len(found)} loadable checkpoints")
     sel = collect(found, a)
+    if gate_of(sel["main_id"]) is None:
+        print("WARNING: no stop gate for the main brain (checkpoint file not found); /vergleich shows no gate rates")
     bres = bench(found, sel, cfg, a)
     write_site(found, sel, bres, cfg, kind, a)
 

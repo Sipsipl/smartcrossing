@@ -5,6 +5,8 @@
   python -m smartcrossing.cli gate    --driver policy:<file> [--out cases.json]   (stop gate, gates.py)
   python -m smartcrossing.cli deadlock --driver ... --demands 0.3,0.5 --out runs/deadlock/x.jsonl
                                        [--noise policy|0.1] [--lamp zero|shuffle]   (deadlock.py)
+  python -m smartcrossing.cli select  --run runs/x [--run ...] [--every N] [--gate-min 0.95] [--ref results/round4_best.npz]
+                                       [--copy-to results/x.npz] --out results/x_select.jsonl --workers 4   (select.py)
   python -m smartcrossing.cli cloud --driver brain=policy:results/round4_best.npz --driver light --driver reservation
                                        --out results/fundamental_cloud.json --workers 4   (scatter cloud, deadlock.py)
 """
@@ -56,7 +58,7 @@ def cfg_from_args(a) -> SimConfig:
 
 def main(argv=None):
     p = argparse.ArgumentParser()
-    p.add_argument("cmd", choices=["bench", "render", "gate", "evalset", "deadlock", "cloud"])
+    p.add_argument("cmd", choices=["bench", "render", "gate", "evalset", "deadlock", "cloud", "select"])
     p.add_argument("--driver", action="append", default=None,
                    help="driver spec (default reservation); evalset: repeatable, one block of lines per driver")
     p.add_argument("--demand", type=float, default=0.15)
@@ -72,11 +74,24 @@ def main(argv=None):
     p.add_argument("--workers", type=int, default=1, help="evalset / deadlock: worker processes")
     p.add_argument("--noise", default=None, help="deadlock: action noise, 'policy' (trained std) or a fixed std")
     p.add_argument("--lamp", default="normal", choices=["normal", "zero", "shuffle"], help="deadlock: received lamps")
+    p.add_argument("--run", action="append", default=None, help="select: run dir with ckpt_*.npz (repeatable)")
+    p.add_argument("--every", type=int, default=1, help="select: every N-th checkpoint (first and last always)")
+    p.add_argument("--gate-min", type=float, default=0.95, help="select: min safe_rate_feasible of the stop gate")
+    p.add_argument("--crash-tol", type=float, default=1.1, help="select: crash+off/1000 at 0.3 <= ref * this + 1")
+    p.add_argument("--ref", default=None, help="select: reference checkpoint (default: the run's first one)")
+    p.add_argument("--copy-to", default=None, help="select: copy the overall selected checkpoint here")
     a = p.parse_args(argv)
     drivers = a.driver or ["reservation"]
     driver = drivers[-1]
     cfg = cfg_from_args(a)
-    if a.cmd == "cloud":
+    if a.cmd == "select":
+        from . import select
+
+        select.select(a.run, a.every, a.gate_min, a.crash_tol, ref=a.ref, workers=a.workers, out=a.out,
+                      copy_to=a.copy_to, cfg_d=json.loads(a.cfg) if a.cfg else None, envs=a.envs, seconds=a.seconds,
+                      demands=[float(x) for x in a.demands.split(",")] if a.demands else select.DEMANDS,
+                      seeds=[int(x) for x in a.seeds.split(",")] if a.seeds else select.SEEDS)
+    elif a.cmd == "cloud":
         from . import deadlock
 
         specs = dict(d.split("=", 1) if "=" in d else (deadlock.label(d), d) for d in drivers)

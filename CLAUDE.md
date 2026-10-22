@@ -10,6 +10,7 @@ poetry run pytest -q               # cuda test cases are skipped unless SC_TEST_
 poetry run python -m smartcrossing.cli bench --driver reservation --envs 8 --demand 0.15
 poetry run python -m smartcrossing.cli render --driver light --out runs/light   # sheet.png + episode.gif
 poetry run python -m smartcrossing.cli evalset --driver policy:results/round4_best.npz --driver reservation --out results/x_eval.jsonl --workers 4   # standard eval: 4 demands x 3 seeds + stop gate
+poetry run python -m smartcrossing.cli select --run runs/<name> --every 2 --workers 4 --out results/x_select.jsonl   # model selection: checkpoints with stop gate >= 0.95, best throughput at 0.5 under a crash limit
 ```
 
 ## Notes
@@ -24,5 +25,6 @@ poetry run python -m smartcrossing.cli evalset --driver policy:results/round4_be
   (CI runs pytest; Cloudflare deploys main to https://smartcrossing.pages.dev, other branches get previews).
 - `runs/` and `models/` are gitignored; commit small final artifacts under `results/` instead.
 - The learning agents must never get lane/rule information; baselines may.
+- Seeds by purpose: SELECTION seeds 1000/2000/3000 (`select.py`, `evalset.py`, training rounds); REPORTING / held-out seeds 4000/5000/6000 (`deadlock.REPORT_SEEDS`) for everything on the website (`site/build.py` bench, fundamental diagram, cloud).
 - `site/` is the only frontend. `site/src/js/sim.js` mirrors `sim.py`; its constants come from the generated
   `js/sim-config.js` (`sim.js_constants()`), parity is checked by `tests/test_sim_js_parity.py`.

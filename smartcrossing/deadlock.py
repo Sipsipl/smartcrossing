@@ -46,7 +46,11 @@ BLOCK_CONE = np.radians(45.0)
 INNER_PAD = 2.0  # a car is "inner" (in the conflict area proper) when max(|x|, |y|) <= W + INNER_PAD
 LEAD_S, LAST_S = 5.0, 3.0  # lamp windows: before the deadlock began / before it ended
 DEMANDS = (0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5)
+# Seed split: SEEDS (= select.py / evalset.py) are SELECTION seeds, used while training rounds pick checkpoints.
+# REPORT_SEEDS are held-out: everything shown on the website (fundamental diagram, cloud, site bench) uses them,
+# so selection bias does not flatter the chosen brain.
 SEEDS = (1000, 2000, 3000)
+REPORT_SEEDS = (4000, 5000, 6000)
 ENVS, SECONDS = 8, 180.0
 MAN_NAMES = {1: "right", 2: "straight", 3: "left"}
 
@@ -527,7 +531,7 @@ def fundamental(lines, names=None) -> dict:
         "throughput": "throughput_per_min = exits per minute over the whole run (as cli bench); "
                       "throughput_steady_per_min = after the 30 s warm-up",
         "demand": "demand (arrivals /s/arm, x 240 = cars/min); demand_per_min = measured arrivals",
-        "protocol": f"{ENVS} envs x {SECONDS:g} s, traffic seeds {list(SEEDS)}, default world (cli bench)",
+        "protocol": f"{ENVS} envs x {SECONDS:g} s, traffic seeds {sorted({ln['seed'] for ln in lines})}, default world (cli bench)",
         "deadlock": f"deadlock = >= {N_MIN} cars standing (|v| < {SLOW_V} m/s) in the box zone for >= {T_MIN:g} s "
                     "with no car driving out of the zone (smartcrossing/deadlock.py)"},
         "drivers": {}}
@@ -593,7 +597,7 @@ def incentives(cfg_d: dict, gamma: float = 0.99, ages=(20.0, 40.0), go_s: float 
 
 # ------------------------------------------------------------------ scatter cloud
 CLOUD_DEMANDS = (0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5)
-CLOUD_WINDOW_S, CLOUD_STRIDE_S, CLOUD_SECONDS, CLOUD_ENVS, CLOUD_SEED = 60.0, 10.0, 270.0, 6, 5000
+CLOUD_WINDOW_S, CLOUD_STRIDE_S, CLOUD_SECONDS, CLOUD_ENVS, CLOUD_SEED = 60.0, 10.0, 270.0, 6, REPORT_SEEDS[0]  # held-out: seeds 4000..4006
 CLOUD_PER_DEMAND = 60  # points kept per (driver, demand) after thinning
 
 
@@ -666,7 +670,7 @@ def main(argv=None):
     if a.json:
         Path(a.json).write_text(json.dumps(rows, indent=1), encoding="utf-8", newline="\n")
     if a.fundamental:
-        names = {"round4_best": "brain", "round2_best": "brain_r2"}
+        names = {"round5_best": "brain", "round4_best": "brain_r4", "round2_best": "brain_r2"}
         Path(a.fundamental).write_text(json.dumps(fundamental(lines, names), indent=1), encoding="utf-8",
                                        newline="\n")
 

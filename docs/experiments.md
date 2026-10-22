@@ -847,3 +847,21 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
 - Next: (1) equal-UPDATES comparison (fixed iterations, not minutes) for K vs D; (2) keep the stop skill while
   training on: more obstacle envs and/or periodic gate-based checkpoint selection (gate >= 0.95 as a hard
   filter); (3) longer runs.
+
+## Model selection with a stop-gate filter; new best r5_K_s1 @475 (2026-10-21)
+- `cli select` (smartcrossing/select.py): evaluates every (n-th) checkpoint (stop gate + bench at 0.15/0.3/0.5,
+  3 seeds) and picks, among checkpoints with gate safe_rate >= 0.95 and crash@0.3 <= ref x 1.1, the highest
+  throughput at 0.5 (results/round5_select.jsonl). Note: safe_rate stays ~0.98 during continued training;
+  stop_rate (stopping rather than driving around) decays to ~0.70 - the decay seen in round 5 is stop_rate.
+- Selection on r5_K_s1/s2 vs round4_best; the rule picked r5_K_s2@525, but r5_K_s1@475 dominated round4_best on
+  every metric. Confirmed on FRESH traffic seeds 4000-7000 (selection bias check; results/round5_confirm.jsonl;
+  thr/min / crash+off per 1000 / timeouts per 120 s run):
+
+  | | 0.15 | 0.3 | 0.4 | 0.5 |
+  |---|---|---|---|---|
+  | round4_best | 33.0/5/0 | 52.7/43/8 | 52.1/87/29 | 51.2/124/32 |
+  | r5_K_s1@475 | 33.2/5/0 | 61.3/14/8 | 65.9/36/16 | 62.6/52/45 |
+  | r5_K_s2@525 | 33.3/3/0 | 64.1/15/0 | 73.7/72/1 | 79.0/113/2 |
+
+  Gate safe 0.99 for both (stop_rate ~0.70). New main brain: r5_K_s1@475 -> results/round5_best.npz (fewest
+  crashes; owner: rather a jam than a crash). s2@525 trades crashes for throughput and almost no timeouts.
