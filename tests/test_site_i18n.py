@@ -45,7 +45,7 @@ def test_same_keys_in_both_languages():
 
 def test_js_keys_exist():
     de, en = load("de"), load("en")
-    dyn = {"obsrow.", "nb.", "note.thr.", "cmp.w."}  # keys built at runtime (feature names, more/fewer/same words)
+    dyn = {"obsrow.", "nb.", "note.thr.", "cmp.wd.", "cmp.wc."}  # keys built at runtime (feature names, more/fewer/same words)
     missing = {k for k in js_keys() if k not in de and k not in en and not any(k.startswith(p) for p in dyn)}
     assert not missing, f"keys used in js but not defined: {sorted(missing)}"
     for k in js_keys():
