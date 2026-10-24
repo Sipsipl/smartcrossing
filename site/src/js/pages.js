@@ -901,8 +901,8 @@
       const cb = peak("brain"), cr = peak("reservation");
       $("h-dense").textContent = res5 ? tx("cmp.dense", {
         dem: num(m5.demand_per_min, 0), b: num(m5.throughput_per_min, 0), r: num(res5.throughput_per_min, 0),
-        w: tx("cmp.w." + SCX.compare(m5.throughput_per_min, res5.throughput_per_min, 2, SCX.THR_REL)), c: num(m5.crash_cars_per_1000, 0),
-      }) + (cb !== null && cr !== null ? tx("cmp.cap", { cb: num(cb, 0), cr: num(cr, 0), w: tx("cmp.w." + SCX.compare(cb, cr, 2, SCX.THR_REL)) }) : "") : "";
+        w: tx("cmp.wd." + SCX.compare(m5.throughput_per_min, res5.throughput_per_min, 2, SCX.THR_REL)), c: num(m5.crash_cars_per_1000, 0),
+      }) + (cb !== null && cr !== null ? tx("cmp.cap", { cb: num(cb, 0), cr: num(cr, 0), w: tx("cmp.wc." + SCX.compare(cb, cr, 2, SCX.THR_REL)) }) : "") : "";
     }
     if ($("c-thr-note")) $("c-thr-note").textContent = groups.length > 1 ? tx("cmp.chartnote", { world: WORLD_NAMES[mainWorld].replace(/ \(.*/, "") }) : "";
     const drawInflow = () => SCX.lineChart($("c-thr"), {
