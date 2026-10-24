@@ -905,7 +905,7 @@
     });
     // one chart, two views: throughput by inflow (arriving cars/min) or by density (cars on the road = fundamental diagram)
     const hasFd = !!(D.fundamental && D.fundamental.drivers && Object.keys(D.fundamental.drivers).length);
-    let view = hasFd && (/[?&]view=density/.test(location.search) || location.hash === "#fundamental") ? "density" : "inflow";
+    let view = hasFd && !/[?&]view=inflow/.test(location.search) ? "density" : "inflow"; // density is the default view
     function fdNote() {
       const F = D.fundamental, S = F.setup || {};
       const dm = ["brain", "light", "reservation"].flatMap((k) => (F.drivers[k] || []).map((p) => p.demand_per_min));
