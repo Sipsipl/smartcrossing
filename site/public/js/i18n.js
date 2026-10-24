@@ -45,13 +45,15 @@
     const n = s.indexOf(".") < 0 && p >= 99 && p < 100 ? s + ".0" : s;
     return EN ? `${n}%` : `${n.replace(".", ",")} %`;
   };
-  /** Words for "cur vs prev" in running text: "more"/"fewer" only when the difference is at least 25 % of prev AND at
-   *  least minAbs in absolute terms; otherwise "same" (so the words always match the numbers shown). */
-  SCX.compare = (cur, prev, minAbs = 1) => {
+  /** Words for "cur vs prev" in running text: "more"/"fewer" only when the difference is at least rel (share of prev)
+   *  AND at least minAbs in absolute terms; otherwise "same" (so the words always match the numbers shown).
+   *  Crash rates are noisy (rel 0.25); throughputs are stable, so they use THR_REL. */
+  SCX.compare = (cur, prev, minAbs = 1, rel = 0.25) => {
     const d = cur - prev;
-    if (Math.abs(d) < minAbs || Math.abs(d) < 0.25 * Math.abs(prev)) return "same";
+    if (Math.abs(d) < minAbs || Math.abs(d) < rel * Math.abs(prev)) return "same";
     return d > 0 ? "more" : "fewer";
   };
+  SCX.THR_REL = 0.05; // throughput: 5 % and 2 cars/min count as a real difference
   SCX.pctInt = (v) => (EN ? `${v}%` : `${v} %`);
   SCX.group = (n) => n.toLocaleString(EN ? "en-US" : "de-DE");
   SCX.signed = (v, d = 2) => (v > 0 ? "+" : v < 0 ? "−" : "") + SCX.num(Math.abs(v), d);
