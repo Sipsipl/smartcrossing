@@ -29,6 +29,12 @@ checkpoints' extra carry the commit; scripts/runs_index.py lists the runs.
 - curriculum: per-env demand drawn from [demand_lo * ceiling, ceiling]; the ceiling rises
   when the training crash+offroad rate is low.
 
+- background mode (owner games / watches videos meanwhile): `--gpu-duty F` sleeps after each iteration
+  so the busy fraction is ~F (sleep = t_iter * (1/F - 1)); `runs/<name>/duty.txt` (a float, read every
+  iteration) overrides it while the run goes on. `--low-priority`: BELOW_NORMAL process priority
+  on Windows (also the spawned workers / eval; no-op elsewhere). `--eval-workers 0`: no background evals
+  while training (only the final checkpoint is evaluated).
+
   poetry run python -m smartcrossing.ppo --name ppo1 --iters 400 [--no-signal]
 """
 
@@ -51,6 +57,44 @@ from . import policy_set
 from .policy import default_in_scale, layer_sizes, linear_forward, param_count, save_npz
 from .ppo_common import LOG2PI, N_DONE, N_PRIV, PRIV_DEMAND_SCALE, PRIV_QUEUE_SCALE, git_info
 from .sim import DONE_CRASH, DONE_EXIT, DONE_OFFROAD, DONE_TIMEOUT, DONE_WRONG, Sim, SimConfig, act_dim, obs_dim
+
+LOW_PRIORITY_ENV = "SC_LOW_PRIORITY"  # set by --low-priority; spawned workers / eval lower themselves too
+BELOW_NORMAL_PRIORITY_CLASS = 0x4000
+
+
+def set_low_priority() -> bool:
+    """BELOW_NORMAL priority class for this process on Windows (ctypes, no dependency); elsewhere a no-op.
+    Returns whether it was applied."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    k32 = ctypes.windll.kernel32
+    k32.GetCurrentProcess.restype = wintypes.HANDLE  # (pseudo handle -1: must not be truncated to a 32-bit int)
+    k32.SetPriorityClass.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    k32.SetPriorityClass.restype = wintypes.BOOL
+    return bool(k32.SetPriorityClass(k32.GetCurrentProcess(), BELOW_NORMAL_PRIORITY_CLASS))
+
+
+def _maybe_low_priority():
+    if os.environ.get(LOW_PRIORITY_ENV) == "1":
+        set_low_priority()
+
+
+def read_duty(path: Path, default: float) -> float:
+    """GPU duty for the next pause: the float in `path` (duty.txt) if present and valid (clamped to
+    [0.02, 1]), else default."""
+    try:
+        return min(max(float(path.read_text(encoding="utf-8").strip()), 0.02), 1.0)
+    except (OSError, ValueError):
+        return default
+
+
+def duty_sleep(t_busy: float, duty: float) -> float:
+    """Pause after an iteration of t_busy seconds so that busy / (busy + pause) = duty."""
+    return t_busy * (1.0 / duty - 1.0) if 0 < duty < 1 else 0.0
+
 
 BATCH_KEYS = ("obs", "priv", "u", "logp", "adv", "ret", "val")  # per car-step arrays of a rollout
 
@@ -252,6 +296,7 @@ class Worker:
 
 def _worker_main(conn, kw):
     os.environ["OMP_NUM_THREADS"] = "1"
+    _maybe_low_priority()
     w = Worker(**kw)
     while True:
         cmd, args = conn.recv()
@@ -336,6 +381,8 @@ def eval_job(ckpt: str, out_path: str, it: int, demands, envs: int, seconds: flo
     ~1 s); appends one JSON line."""
     from . import evalset
     from .gates import stop_gate
+
+    _maybe_low_priority()
 
     world = {**(cfg_d or {}), "demand_range": None}
     rec = {"iter": it, "ckpt": ckpt}
@@ -422,6 +469,13 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--rollout-envs", type=int, default=0, help="torch rollout: envs (0 = workers x envs)")
     p.add_argument("--rollout-dtype", choices=("float32", "float64"), default="float32", help="torch rollout dtype")
     p.add_argument("--runs-dir", default="runs", help="parent folder of the run folder")
+    p.add_argument("--gpu-duty", type=float, default=1.0,
+                   help="background mode: busy fraction 0 < F <= 1 (pause t_iter * (1/F - 1) after each iteration); "
+                        "runs/<name>/duty.txt overrides it while running")
+    p.add_argument("--low-priority", action="store_true",
+                   help="BELOW_NORMAL process priority on Windows (also workers / eval processes)")
+    p.add_argument("--eval-workers", type=int, default=1, choices=(0, 1),
+                   help="background eval processes while training (0: only the final checkpoint is evaluated)")
     return p.parse_args(argv)
 
 
@@ -592,6 +646,9 @@ def train_loop(a, st: TrainState, out: Path, source, update, ctx, git: dict):
     cfg_d = st.cfg_d
     eval_proc = None
     t_start = time.time()
+    duty_file = out / "duty.txt"
+    if not 0 < a.gpu_duty <= 1:
+        raise SystemExit("--gpu-duty must be in (0, 1]")
     with open(out / "log.jsonl", "a", encoding="utf-8", newline="\n") as log:
         try:
             for it in range(st.it0, a.iters):
@@ -638,6 +695,10 @@ def train_loop(a, st: TrainState, out: Path, source, update, ctx, git: dict):
                     "t_roll": round(t1 - t0, 2),
                     "t_upd": round(time.time() - t1, 2),
                 }
+                duty = read_duty(duty_file, a.gpu_duty)
+                pause = duty_sleep(time.time() - t0, duty)
+                if duty < 1 or a.gpu_duty < 1 or duty_file.exists():
+                    rec["duty"], rec["t_sleep"] = round(duty, 3), round(pause, 2)
                 log.write(json.dumps(rec) + "\n")
                 log.flush()
                 print(json.dumps(rec), flush=True)
@@ -653,13 +714,15 @@ def train_loop(a, st: TrainState, out: Path, source, update, ctx, git: dict):
                     save_npz(ck, actor.p, st.a_sizes, cfg_d, st.in_scale, arch=st.a_arch, **extra)
                     if final and eval_proc is not None:
                         eval_proc.join()  # always evaluate the final policy
-                    if a.eval_every and (eval_proc is None or not eval_proc.is_alive()):
+                    if a.eval_every and (a.eval_workers or final) and (eval_proc is None or not eval_proc.is_alive()):
                         rdir = str(out / f"render_{it:04d}") if a.render_every and it % a.render_every == 0 else None
                         job = (str(ck), str(out / "eval.jsonl"), it, EVAL_DEMANDS, EVAL_ENVS, EVAL_SECONDS, rdir, cfg_d)
                         eval_proc = ctx.Process(target=eval_job, args=job)
                         eval_proc.start()
                 if final:
                     break  # --max-minutes reached (range() above was built with the original --iters)
+                if pause > 0:
+                    time.sleep(pause)
         finally:
             source.close()
             if eval_proc is not None:
@@ -669,6 +732,9 @@ def train_loop(a, st: TrainState, out: Path, source, update, ctx, git: dict):
 # ---------------------------------------------------------------- main
 def main(argv=None):
     a = parse_args(argv)
+    if a.low_priority:
+        os.environ[LOW_PRIORITY_ENV] = "1"  # inherited by the spawned workers / eval processes
+        set_low_priority()
     out = Path(a.runs_dir) / a.name
     out.mkdir(parents=True, exist_ok=True)
     st = build_state(a)
