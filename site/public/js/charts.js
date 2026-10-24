@@ -21,7 +21,7 @@
   }
 
   /**
-   * box: container element. opts: {series:[{name, color (css), points:[[x,y]], dash, width, dots}],
+   * box: container element. opts: {series:[{name, color (css), points:[[x,y]], dash, width, dots, note (legend only)}],
    *   xLabel, yLabel, xMin, xMax, yMin, yMax, yFmt, xFmt, markers:[{x, label}], height, directLabels,
    *   peaks:[{x, y, color, label}] (ringed maxima), clouds:[{color, points:[[x,y]], r, opacity}] (pale scatter behind the lines), compact (small chart: no legend)}
    * Returns the svg; svg.scales = {X, Y} maps data to svg user units (to overlay live elements).
@@ -33,7 +33,7 @@
     legend.className = "chart-legend";
     for (const s of opts.series) {
       const sp = document.createElement("span");
-      sp.innerHTML = `<i class="line-key${s.dash ? " dash" : ""}" style="border-color:${s.color}"></i>${s.name}`;
+      sp.innerHTML = `<i class="line-key${s.dash ? " dash" : ""}" style="border-color:${s.color}"></i>${s.name}${s.note ? `<span class="muted">&nbsp;· ${s.note}</span>` : ""}`;
       legend.appendChild(sp);
     }
     if (opts.series.length > 1 && !opts.compact) box.appendChild(legend);
@@ -99,8 +99,8 @@
         const p = s.points[s.points.length - 1];
         let y = Y(p[1]) + 4;
         // move away from labels already placed until it overlaps none (a few passes for crowded ends)
-        for (let pass = 0; pass < 6 && lastYs.some((o) => Math.abs(o - y) < 14); pass++) {
-          for (const o of lastYs) if (Math.abs(o - y) < 14) y = o + 14 * Math.sign(y - o || 1);
+        for (let pass = 0; pass < 6 && lastYs.some((o) => Math.abs(o - y) < 16); pass++) {
+          for (const o of lastYs) if (Math.abs(o - y) < 16) y = o + 16 * Math.sign(y - o || 1);
         }
         lastYs.push(y);
         const t = el("text", { x: X(p[0]) + 8, y, "text-anchor": "start" }, svg); t.textContent = s.name;

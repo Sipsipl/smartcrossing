@@ -52,12 +52,13 @@ def read_curve(ctx: Context, run: str, offset: int) -> list[dict]:
             "offroad": _pick(f, [r"centre\.offroad_rate", r"(train\.)?offroad(_rate)?", r".*\.offroad(_rate)?"]),
             "eval15": _pick(f, [r"eval\.d0\.15\.exit_ok", r"eval\..*0\.15.*exit_ok(_rate)?"]),
             "demand": _pick(f, [r"ceiling", r"demand"]),
+            "steps": _pick(f, [r"total_steps"]),  # PPO: car decisions so far, cumulative along the warm-start chain
         }
         if row["exit"] is None and row["eval15"] is None:
             continue
         if _pick(f, [r"train\.finished"]) == 0 and row["eval15"] is None:  # no car finished: no rates
             continue
-        rows.append({k: (round(v, 4) if isinstance(v, float) else v) for k, v in row.items() if v is not None})
+        rows.append({k: (int(v) if k == "steps" else round(v, 4) if isinstance(v, float) else v) for k, v in row.items() if v is not None})
     # thin out long logs (keep every eval point)
     if len(rows) > 400:
         step = len(rows) / 400
