@@ -201,6 +201,15 @@ def resolve(ctx: Context, spec: str) -> str:
     return cid
 
 
+def run_rollout_envs(ctx: Context, run: str) -> int | None:
+    """Parallel environments (crossings) of a PPO run: args.json rollout_envs, else workers * envs; or the snapshot's value."""
+    f = ctx.runs / run / "args.json"
+    if ctx.from_runs(run) and f.exists():
+        a = json.loads(f.read_text(encoding="utf-8"))
+        return a.get("rollout_envs") or (a["workers"] * a["envs"] if a.get("workers") and a.get("envs") else None)
+    return (ctx.manifest or {"runs": {}})["runs"].get(run, {}).get("rollout_envs")
+
+
 def run_world(ctx: Context, run: str) -> str | None:
     c = next((c for c in ctx.found.values() if c["run"] == run), None)
     if c is not None:
@@ -241,7 +250,8 @@ def write_snapshot(ctx: Context, used: list[str], chain_runs: list[str]):
     runs = sorted(set(chain_runs) | {found[cid]["run"] for cid in used})
     manifest = {
         "note": "written by site/build.py from runs/ (see its docstring); merged with runs/ or read alone",
-        "runs": {r: {"init": list(init_of(ctx, r)) if init_of(ctx, r) else None, "world": run_world(ctx, r)} for r in runs},
+        "runs": {r: {"init": list(init_of(ctx, r)) if init_of(ctx, r) else None, "world": run_world(ctx, r),
+                       "rollout_envs": run_rollout_envs(ctx, r)} for r in runs},
         "curves": {r: read_curve(ctx, r, 0) for r in sorted(set(chain_runs))},
     }
     if ctx.kind == "merge":  # keep what the snapshot knew about runs not in runs/

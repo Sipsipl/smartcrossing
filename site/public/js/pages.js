@@ -918,7 +918,7 @@
     const draw = () => (view === "density" ? SCX.lineChart($("c-thr"), fdChartOpts(["brain", "light", "reservation"], false)) : drawInflow());
     const seg = $("thr-view");
     if (hasFd) {
-      seg.innerHTML = [["inflow", "cmp.view.inflow"], ["density", "cmp.view.density"]].map(([v, k]) =>
+      seg.innerHTML = [["density", "cmp.view.density"], ["inflow", "cmp.view.inflow"]].map(([v, k]) =>
         `<input type="radio" name="thr-view" id="tv-${v}" value="${v}"${v === view ? " checked" : ""}><label for="tv-${v}">${tx(k)}</label>`).join("");
       seg.querySelectorAll("input").forEach((el) => el.addEventListener("change", () => { view = el.value; show(); }));
       fdNote();
