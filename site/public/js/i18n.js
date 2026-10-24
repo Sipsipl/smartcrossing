@@ -45,6 +45,13 @@
     const n = s.indexOf(".") < 0 && p >= 99 && p < 100 ? s + ".0" : s;
     return EN ? `${n}%` : `${n.replace(".", ",")} %`;
   };
+  /** Words for "cur vs prev" in running text: "more"/"fewer" only when the difference is at least 25 % of prev AND at
+   *  least minAbs in absolute terms; otherwise "same" (so the words always match the numbers shown). */
+  SCX.compare = (cur, prev, minAbs = 1) => {
+    const d = cur - prev;
+    if (Math.abs(d) < minAbs || Math.abs(d) < 0.25 * Math.abs(prev)) return "same";
+    return d > 0 ? "more" : "fewer";
+  };
   SCX.pctInt = (v) => (EN ? `${v}%` : `${v} %`);
   SCX.group = (n) => n.toLocaleString(EN ? "en-US" : "de-DE");
   SCX.signed = (v, d = 2) => (v > 0 ? "+" : v < 0 ? "−" : "") + SCX.num(Math.abs(v), d);

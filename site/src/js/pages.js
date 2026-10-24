@@ -304,8 +304,8 @@
   function crashVerdict(d) {
     const a = badPer1000(D.previous && pol(D.previous), d), b = badPer1000(pol(MAIN_ID), d);
     if (a === null || b === null) return null;
-    if (Math.abs(b - a) < 3 || (b <= 1.25 * a && b >= 0.8 * a)) return "note.cmp.same"; // parity within noise
-    return b < 0.5 * a ? "note.cmp.much" : b < a ? "note.cmp.fewer" : "note.cmp.more";
+    const c = SCX.compare(b, a, 1); // >= 25 % and >= 1 per 1000, else "about as many"
+    return c === "fewer" && b < 0.5 * a ? "note.cmp.much" : "note.cmp." + c;
   }
 
   /** What is new in the main brain vs the previous one (crash numbers from the bench data). */
@@ -321,7 +321,7 @@
       ? tx("note.set", {
         K: m.policy.arch.K, midw: tx(vm), mid,
         dense: dense && vd ? tx("note.dense", { dw: tx(vd), dense }) : "",
-        thr: num(thr, 0), thrprev: num(thrPrev, 0), dem: num(m.bench["0.5"].demand_per_min, 0),
+        thrw: tx("note.thr." + SCX.compare(thr, thrPrev, 1)), thr: num(thr, 0), thrprev: num(thrPrev, 0), dem: num(m.bench["0.5"].demand_per_min, 0),
         block: D.gate && D.gate.main ? pct(D.gate.main.block) : "?",
       })
       : tx("note.mlp", { much, mid });
@@ -894,6 +894,15 @@
       $("g-block").textContent = SCX.pct(G.block);
       const GP = D.gate.previous;
       if (GP) $("g-prev").textContent = tx("cmp.gateprev", { prev: SCX.pct(GP.stop), prevsafe: SCX.pct(GP.safe), prevblock: SCX.pct(GP.block) });
+    }
+    if ($("h-dense") && m5) {
+      const res5 = D.baselines.reservation["0.5"], F = D.fundamental && D.fundamental.drivers;
+      const peak = (k) => (F && F[k] && F[k].length ? Math.max(...F[k].map((q) => q.throughput)) : null);
+      const cb = peak("brain"), cr = peak("reservation");
+      $("h-dense").textContent = res5 ? tx("cmp.dense", {
+        dem: num(m5.demand_per_min, 0), b: num(m5.throughput_per_min, 0), r: num(res5.throughput_per_min, 0),
+        w: tx("cmp.w." + SCX.compare(m5.throughput_per_min, res5.throughput_per_min, 1)), c: num(m5.crash_cars_per_1000, 0),
+      }) + (cb !== null && cr !== null ? tx("cmp.cap", { cb: num(cb, 0), cr: num(cr, 0), w: tx("cmp.w." + SCX.compare(cb, cr, 1)) }) : "") : "";
     }
     if ($("c-thr-note")) $("c-thr-note").textContent = groups.length > 1 ? tx("cmp.chartnote", { world: WORLD_NAMES[mainWorld].replace(/ \(.*/, "") }) : "";
     const drawInflow = () => SCX.lineChart($("c-thr"), {
