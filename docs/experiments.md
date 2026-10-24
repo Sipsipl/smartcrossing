@@ -950,3 +950,14 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
   30 iterations): runs; ~6.0 s/it (r6_DO_s2: 4.15 s/it with 5-s wrecks, no blockades); train crash share
   2.5-2.8 % (r6 end: 1.2-1.7 %), obstacle hits per episode ~350 (r6: ~21) - the blockades are hit a lot, i.e.
   there is a training signal for stopping.
+
+## All obstacles show hazard lights; GPU background mode (2026-10-24, branch coordinator/round9, smokes only)
+- Owner 2026-10-24: hazard = not a participant. Parked-type obstacles (single and blockade bodies) now show the
+  hazard feature like wreck-type ones (sim.py / sim_torch.py: hazard = `wreck`; `parked` is drawing only).
+  Obstacles off bit-identical. Stop gate round6_best: safe_feasible 0.955 -> 1.0, stop_feasible 0.443 -> 0.432,
+  block_stop_feasible 0.875 -> 0.938 (its parked cases now carry hazard; old gate numbers not comparable).
+- ppo.py background mode: `--gpu-duty F` (pause t_iter * (1/F - 1) after each iteration; `runs/<name>/duty.txt`
+  overrides it live, log fields duty / t_sleep), `--low-priority` (BELOW_NORMAL on Windows, also spawned
+  workers / eval), `--eval-workers 0` (no background evals, final one still runs). Smoke (r6_DO_s2 state,
+  cuda rollout 1024 envs, obstacle_envs 0.75, obstacle_block 0.5, 10-s wrecks): duty 1.0: 0.94 s/it, GPU ~80 %;
+  duty 0.5: 0.94 busy + 0.94 sleep = 1.89 s/it, GPU ~43 %; duty.txt 0.25 live: 4.3 s/it, GPU ~31 % (idle ~8 %).

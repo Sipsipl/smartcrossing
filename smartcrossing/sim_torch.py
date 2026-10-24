@@ -318,7 +318,7 @@ class TorchSim:
             g(self.kappa) / cfg.kappa_max,
         ]
         if cfg.brake_light:  # brake light + hazard lights
-            feats += [(g(self.acc) < BRAKE_ACC).to(self.dtype), g((self.wreck & ~self.parked).to(self.dtype))]
+            feats += [(g(self.acc) < BRAKE_ACC).to(self.dtype), g(self.wreck.to(self.dtype))]
         else:  # legacy interface: acceleration
             feats += [g(self.acc) / cfg.brake_max]
         assert len(feats) == nb_features(cfg)

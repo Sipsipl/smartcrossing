@@ -4,7 +4,8 @@ standing obstacle on its path. Does it stop (or pass around it) without crashing
 Cases (one env each, all in one batched Sim): start speed (SPEEDS) x gap (GAPS: centre-to-centre
 distance along the road, as runs/diag_rearend/solo_wreck.py; bumper gap = gap - CAR_LENGTH) x
 position of the obstacle (POSITIONS: on the arm, at the box mouth, in the box) x obstacle type
-(a wreck with hazard lights / a parked car without) x distractors (0 or N_DISTRACT wrecks on the
+(wreck / parked; since 2026-10-24 both show hazard lights = not a participant, so the two kinds only differ
+in the drawing; earlier gate numbers had parked cases without hazard) x distractors (0 or N_DISTRACT wrecks on the
 other half of the road beside the path, which fill neighbour slots).
 
 Outcome per case (priority order): crash / offroad (at any time within `seconds`), stopped (came

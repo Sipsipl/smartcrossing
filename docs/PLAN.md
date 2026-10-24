@@ -35,6 +35,10 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
   stale docs/compat layers, unclear names) so no technical debt builds up. The coordinator decides
   when: between rounds, not while a sim change or training is in flight. Procedure: read-only audit
   first, then refactor with acceptance "pytest green + bench/parity identical before vs after".
+- Honest perception of non-participants (owner, 2026-10-24): all obstacles show hazard lights (single
+  obstacles and blockade bodies, wreck-type AND parked-type) - hazard = not a participant, hazard off = a
+  participant. Brake light off, lamp 0. `obstacle_parked` only changes the drawing (undimmed body + hazard blink).
+  Training semantics change only with obstacles on; obstacles off is bit-identical, old checkpoints unaffected.
 - Deliverable: a live, in-browser visualisation with a few sliders (keep it simple),
   incl. mixing agent types.
 

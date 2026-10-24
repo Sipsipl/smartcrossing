@@ -171,3 +171,29 @@ def test_reset_inplace_is_reproducible(demand_range):
     assert int(fresh.stats.spawned.sum()) > 0
     for name in ("alive", "uid", "x", "y", "queue", "man"):
         assert torch.equal(getattr(reused, name), getattr(fresh, name)), name
+
+
+def test_every_obstacle_shows_hazard_in_torch_obs():
+    """Owner 2026-10-24 (hazard = not a participant): parked-type and wreck-type obstacles both show the
+    hazard feature; brake light off, lamp 0. Hand-built numpy state copied into TorchSim, obs must agree."""
+    from smartcrossing.sim import NB_FEATURES, OBS_DIM
+    cfg = SimConfig(demand=0.0)
+    ref = Sim(cfg, 1, seed=0)
+    ref.alive[0, 0] = True
+    ref.x[0, 0], ref.y[0, 0], ref.th[0, 0], ref.v[0, 0] = 3.5, -30.0, np.pi / 2, 5.0
+    for n, (y, parked) in enumerate(((-20.0, True), (-10.0, False)), start=1):
+        ref.wreck[0, n] = ref.obstacle[0, n] = True
+        ref.parked[0, n] = parked
+        ref.wreck_left[0, n] = 100
+        ref.x[0, n], ref.y[0, n], ref.th[0, n] = 3.5, y, np.pi / 2
+    ts = TorchSim(cfg, 1, seed=0, device="cpu", dtype=torch.float64, rng="numpy")
+    for name, val in vars(ref).items():
+        cur = getattr(ts, name, None)
+        if isinstance(val, np.ndarray) and isinstance(cur, torch.Tensor) and tuple(cur.shape) == val.shape:
+            setattr(ts, name, torch.as_tensor(val, dtype=cur.dtype))
+    o_ref, o_t = ref.observe()[0, 0], ts.observe()[0, 0].numpy()
+    _close("obs", torch.as_tensor(o_t), o_ref)
+    blk = NB_FEATURES + cfg.n_signal
+    for k in range(2):
+        f = o_t[OBS_DIM + k * blk: OBS_DIM + (k + 1) * blk]
+        assert f[5] == 1 and f[8] == 1 and f[7] == 0 and f[NB_FEATURES:].sum() == 0

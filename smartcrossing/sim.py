@@ -163,14 +163,15 @@ class SimConfig:
     # cars drive: on the right half of an arm's incoming side (between the box edge and
     # OBSTACLE_ARM_END before the arm end, heading = driving direction) or inside the box (random
     # heading). An obstacle is a wreck physically (slot, collision, spawn clearance, obs "present") and
-    # either shows hazard lights (a wreck) or not (a parked car); it has no route, no reward and is not
+    # always shows hazard lights in the observation (owner 2026-10-24: hazard = not a participant; the
+    # parked/wreck kind only changes the drawing: a parked car keeps its normal body); it has no route, no reward and is not
     # counted as a crash (Stats.obstacles; cars that hit one: crashes + obstacle_hits). It appears only
     # where every car could still stop (obstacle_clear) and vanishes after obstacle_time.
     obstacle_envs: float = 0.0  # fraction of the environments with obstacle scenarios
     obstacle_rate: float = 0.3  # tries per second per obstacle env (~1/3 succeed in traffic: ~0.5 standing)
     obstacle_time: float = 10.0  # s an obstacle stays
     obstacle_max: int = 2  # at most this many obstacles at once per environment
-    obstacle_parked: float = 0.5  # share of parked cars (no hazard lights); the rest are wrecks
+    obstacle_parked: float = 0.5  # share drawn as parked cars (undimmed body; hazard lights like every obstacle)
     obstacle_box: float = 0.25  # share placed inside the box (else on an arm)
     # blockades (round 8; 0 = off and bit-identical): this share of the placements is a blockade instead of a
     # single obstacle: BLOCK_BODIES bodies crosswise across the FULL road width of an arm (both directions, curb
@@ -396,7 +397,7 @@ def grip_kappa(cfg: SimConfig, v):
 
 
 def hazard_on(t: float) -> bool:
-    """Whether the hazard lights of a wreck are lit at sim time t (drawing only)."""
+    """Whether the hazard lights of a wreck / obstacle are lit at sim time t (drawing only)."""
     return int(np.floor(t / (0.5 * HAZARD_PERIOD) + 1e-6)) % 2 == 0
 
 
@@ -481,7 +482,7 @@ class Sim:
         self.alive = np.zeros((B, N), dtype=bool)  # driving cars (controlled, observed, rewarded)
         self.wreck = np.zeros((B, N), dtype=bool)  # crashed cars standing as obstacles (see cfg.wreck_time)
         self.wreck_left = np.zeros((B, N), dtype=np.int64)  # steps until the wreck is removed
-        # obstacles (cfg.obstacle_*; also wreck = True): placed, not crashed; parked = no hazard lights
+        # obstacles (cfg.obstacle_*; also wreck = True): placed, not crashed; parked = drawn as a parked car only
         self.obstacle = np.zeros((B, N), dtype=bool)
         self.parked = np.zeros((B, N), dtype=bool)
         self.obst_env = np.arange(B) < int(round(cfg.obstacle_envs * B))
@@ -593,7 +594,7 @@ class Sim:
         f[..., 6] = self.kappa[b2, idx] / cfg.kappa_max  # visible: how hard it is turning
         if cfg.brake_light:
             f[..., 7] = self.acc[b2, idx] < BRAKE_ACC  # visible: brake lights
-            f[..., 8] = (self.wreck & ~self.parked)[b2, idx]  # visible: hazard lights (a wreck, not a parked car)
+            f[..., 8] = self.wreck[b2, idx]  # visible: hazard lights (every non-participant: wrecks and all obstacles)
         else:
             f[..., 7] = self.acc[b2, idx] / cfg.brake_max  # legacy interface: acceleration
         if cfg.signal_enabled:

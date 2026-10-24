@@ -78,18 +78,17 @@ def draw_frame(sim: Sim, b: int = 0, size: int = 512, view: float | None = None,
         corners = [(hl, hw), (hl, -hw), (-hl, -hw), (-hl, hw)]
         poly = [P(x + c * a - s * bb, y + s * a + c * bb) for a, bb in corners]
         wreck = bool(sim.wreck[b, n])
-        parked = bool(sim.parked[b, n])  # an obstacle without hazard lights: a normal-looking standing car
+        parked = bool(sim.parked[b, n])  # an obstacle drawn as a parked car: undimmed body, hazard lights too
         body = OBSTACLE_BODY if sim.obstacle[b, n] else MAN_COLOURS[int(sim.man[b, n])]
-        if wreck and not parked:  # a wreck: dimmed body, blinking hazard lights at the four corners
+        if wreck and not parked:  # a wreck: dimmed body
             body = tuple(int(0.45 * v + 30) for v in body)
         d.polygon(poly, fill=body, outline=GROUP_OUTLINE[int(sim.group[b, n]) % 4])
         r = max(1.5, 0.35 * sc)
-        if parked:  # nose marker only (no lamps lit)
+        if parked:  # nose marker (heading of the parked car)
             nx, ny = P(x + c * 2.0, y + s * 2.0)
             rr = max(1.5, 0.3 * sc)
             d.ellipse([nx - rr, ny - rr, nx + rr, ny + rr], fill=(0, 0, 0))
-            continue
-        if wreck:
+        if wreck:  # every non-participant: blinking hazard lights at the four corners
             if blink:
                 for a, bb in corners:
                     hx, hy = P(x + c * a * 0.9 - s * bb * 0.9, y + s * a * 0.9 + c * bb * 0.9)

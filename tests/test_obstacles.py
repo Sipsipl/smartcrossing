@@ -108,7 +108,8 @@ def test_obstacle_placement_keeps_clearance(block):
     assert n_new > 5 and (n_blocks > 2) == (block > 0)
 
 
-def test_parked_has_no_hazard_light():
+def test_every_obstacle_shows_hazard_light():
+    """Owner 2026-10-24: hazard = not a participant; parked-type obstacles show it too."""
     cfg = SimConfig(demand=0.0)
     sim = Sim(cfg, 1, seed=0)
     place(sim, 0, 3.5, -30.0, np.pi / 2, 5.0)
@@ -120,8 +121,9 @@ def test_parked_has_no_hazard_light():
     obs = sim.observe()[0, 0]
     blk = NB_FEATURES + cfg.n_signal
     nb = [obs[OBS_DIM + k * blk: OBS_DIM + (k + 1) * blk] for k in range(2)]
-    assert nb[0][5] == 1 and nb[0][8] == 0  # nearest: the parked car (present, no hazard)
-    assert nb[1][5] == 1 and nb[1][8] == 1  # the obstacle wreck shows its hazard lights
+    assert nb[0][5] == 1 and nb[0][8] == 1  # nearest: the parked-type obstacle (present, hazard lights)
+    assert nb[1][5] == 1 and nb[1][8] == 1  # the wreck-type obstacle shows its hazard lights
+    assert nb[0][7] == 0 and nb[0][NB_FEATURES:].sum() == 0  # brake light off, lamp 0
 
 
 def test_obstacle_hit_counts_as_crash_not_wreck_hit():
