@@ -177,6 +177,15 @@ crashes in the box; lamp unused so far.
    blocked, e.g. two wrecks side by side or a wreck plus a standing queue), so only stopping avoids the
    crash - outcome-only, no style cost (NOT a penalty for passing close to obstacles). Then longer DO
    runs; then GRU memory and a shared reward component (owner decision) against remaining deadlocks.
+4c. Curriculum rule (owner OK, 2026-10-24): the training demand ceiling grows with the brain. When the main
+   brain is stuck (deadlock) less than ~5 % of the time at the current ceiling (`cli deadlock`, report
+   seeds), raise the ceiling in the next round (keep sampling low demands). Not before: above capacity
+   (~96/min) more demand mostly means longer queues, more training crashes, slower runs and the n_slots
+   limit. Today (ceiling 0.5 /s/arm = 120/min) the brain is still stuck 12-23 % of the time there.
+   Practice obstacles stay part of the normal training world (no separate obstacle training): deadlocks
+   do not replace them (slow roll-in inside the box, they get rarer as the brain improves; the round-7
+   control with dense traffic but no blockades lost block stop 1.00 -> 0.75). Open check (optional):
+   a run with no artificial obstacles at all, real 10-s wrecks only.
 5. Then (D) norm experiments (lamp language, priority patterns) - (G) feeds directly into them.
 
 - (G) Deadlocks and decentralised negotiation (owner, 2026-10-14; the interesting part from a game-theory
