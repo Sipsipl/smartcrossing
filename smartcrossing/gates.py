@@ -12,6 +12,11 @@ to a standstill before the obstacle, no crash afterwards), passed (got past it w
 without crash), other (none of these, e.g. still creeping). A case is `feasible` when full braking
 from the first step stops the car in front of the obstacle.
 
+Block cases (round 8, reported separately as block_*; the cases above and their rates are unchanged): the same
+car in front of a blockade (sim.block_pose: BLOCK_BODIES bodies crosswise across the full road width, both
+directions) at BLOCK_POS, speeds x gaps x types x the car's lateral start (BLOCK_LATS: middle of the right half,
+next to the centre line). Nothing can be passed: the only safe outcome is stopping.
+
   poetry run python -m smartcrossing.cli gate --driver policy:results/round1_x3.npz
 """
 
@@ -20,7 +25,20 @@ import time
 
 import numpy as np
 
-from .sim import CAR_LENGTH, DISC_OFFSETS, DISC_R, DONE_CRASH, DONE_OFFROAD, STRAIGHT, Sim, SimConfig
+from .sim import (
+    BLOCK_BODIES,
+    BLOCK_CURB_MARGIN,
+    CAR_LENGTH,
+    DISC_OFFSETS,
+    DISC_R,
+    DONE_CRASH,
+    DONE_OFFROAD,
+    OBSTACLE_ARM_END,
+    STRAIGHT,
+    Sim,
+    SimConfig,
+    block_pose,
+)
 
 SPEEDS = (6.0, 10.0, 14.0)  # m/s at the start
 GAPS = (10.0, 20.0, 30.0)  # m, centre-to-centre distance car -> obstacle at the start
@@ -31,6 +49,8 @@ TYPES = ("wreck", "parked")
 N_DISTRACT = 3
 STOP_V = 0.1  # m/s: standstill
 OUTCOMES = ("stopped", "passed", "crash", "offroad", "other")
+BLOCK_POS = -19.0  # blockade line (canonical y; on the straight arm: |y| >= W + Rc + BLOCK_CURB_MARGIN)
+BLOCK_LATS = (0.5, 0.2)  # car's lateral start as a fraction of W (3.5 m / 1.4 m right of the centre line)
 
 
 def cases():
@@ -38,6 +58,11 @@ def cases():
     for v0, gap, pos, kind, nd in itertools.product(SPEEDS, GAPS, POSITIONS, TYPES, (0, N_DISTRACT)):
         out.append(dict(v0=v0, gap=gap, pos=pos, kind=kind, distract=nd))
     return out
+
+
+def block_cases():
+    return [dict(v0=v0, gap=gap, pos="block", kind=kind, distract=0, lat=lat)
+            for v0, gap, kind, lat in itertools.product(SPEEDS, GAPS, TYPES, BLOCK_LATS)]
 
 
 def braking_distance(cfg: SimConfig, v0: float) -> float:
@@ -50,7 +75,7 @@ def contact_dist(pos: str) -> float:
     """Centre distance along the road at which the car touches the obstacle (disc model): aligned
     obstacle -> front disc meets rear disc; crosswise (in the box) -> front disc meets the side."""
     reach = DISC_OFFSETS[-1] + DISC_R  # front of the car
-    return float(reach + (reach if OBST_HEADING[pos] == np.pi / 2 else DISC_R))
+    return float(reach + (reach if OBST_HEADING.get(pos) == np.pi / 2 else DISC_R))  # (block: crosswise)
 
 
 def feasible(cfg: SimConfig, v0: float, gap: float, pos: str) -> bool:
@@ -61,14 +86,21 @@ def feasible(cfg: SimConfig, v0: float, gap: float, pos: str) -> bool:
 def setup(sim: Sim, cs: list[dict]):
     """Place car (slot 0), obstacle (slot 1) and distractors (slots 2..) of case b in env b."""
     cfg = sim.cfg
-    lat = cfg.W / 2  # middle of the right half
     for b, c in enumerate(cs):
-        yo = POSITIONS[c["pos"]]
+        lat = cfg.W * c.get("lat", 0.5)  # (default: middle of the right half)
+        yo = obstacle_y(c)
         y0 = yo - c["gap"]
         sim.alive[b, 0] = True
         sim.x[b, 0], sim.y[b, 0], sim.th[b, 0], sim.v[b, 0] = lat, y0, np.pi / 2, c["v0"]
         sim.arm[b, 0], sim.man[b, 0], sim.uid[b, 0] = 0, STRAIGHT, b
-        slots = [(1, lat, yo, OBST_HEADING[c["pos"]], c["kind"] == "parked")]
+        parked = c["kind"] == "parked"
+        if c["pos"] == "block":  # sim.block_pose on arm 0 at distance -BLOCK_POS (u3 = 0: arm 0)
+            u = np.zeros(8)
+            u[5] = (-BLOCK_POS - (cfg.W + cfg.Rc + BLOCK_CURB_MARGIN)) / (cfg.L - OBSTACLE_ARM_END - (cfg.W + cfg.Rc + BLOCK_CURB_MARGIN))
+            bx, by, bth = block_pose(cfg, u)
+            slots = [(1 + j, bx[j], by[j], bth[j], parked) for j in range(BLOCK_BODIES)]
+        else:
+            slots = [(1, lat, yo, OBST_HEADING[c["pos"]], parked)]
         slots += [(2 + k, -lat, max(y0 + 2.0 + 6.0 * k, -cfg.L + 2.0), -np.pi / 2, False) for k in range(c["distract"])]
         for n, x, y, th, parked in slots:
             sim.wreck[b, n] = sim.obstacle[b, n] = True
@@ -78,15 +110,20 @@ def setup(sim: Sim, cs: list[dict]):
     sim._prev_dist = sim.dist_to_gate()
 
 
+def obstacle_y(c: dict) -> float:
+    return BLOCK_POS if c["pos"] == "block" else POSITIONS[c["pos"]]
+
+
 def stop_gate(spec: str, cfg_d: dict | None = None, seconds: float = 12.0, driver=None):
     """Run every case with driver `spec` (cli.make_driver) in the world cfg_d (traffic settings are
     replaced: no arrivals, no obstacle scenarios). ``driver``: optional factory sim -> driver used instead of
     cli.make_driver (``spec`` is then only the name in the summary), e.g. a brain without a checkpoint file.
-    Returns (summary dict, per-case rows)."""
+    The block cases run in the same batch (their own envs; cars are alone per env, so the other cases are
+    unchanged). Returns (summary dict, per-case rows: the cases() rows, then the block_cases() rows)."""
     from .cli import make_driver
 
     t0 = time.time()
-    cs = cases()
+    cs = cases() + block_cases()
     world = {**(cfg_d or {}), "demand": 0.0, "demand_range": None, "obstacle_envs": 0.0, "wreck_time": 1000.0,
              "n_slots": 2 + N_DISTRACT}
     sim = Sim(SimConfig(**world), len(cs), seed=0)
@@ -96,7 +133,7 @@ def stop_gate(spec: str, cfg_d: dict | None = None, seconds: float = 12.0, drive
     out = np.full(B, "", dtype=object)
     stopped = np.zeros(B, bool)
     passed = np.zeros(B, bool)
-    yo = np.array([POSITIONS[c["pos"]] for c in cs])
+    yo = np.array([obstacle_y(c) for c in cs])
     for _ in range(int(round(seconds / sim.cfg.dt))):
         sim.step(drv.act())
         k = sim.done_kind[:, 0]
@@ -124,6 +161,9 @@ def _rates(rows):
 
 
 def summarize_gate(rows, spec="", wall=0.0) -> dict:
+    """Summary of the cases() rows (the comparable gate numbers) plus block_* fields of the block rows."""
+    block = [r for r in rows if r["pos"] == "block"]
+    rows = [r for r in rows if r["pos"] != "block"]
     feas = [r for r in rows if r["feasible"]]
     s = {"driver": spec, "cases": len(rows), **{o: sum(r["outcome"] == o for r in rows) for o in OUTCOMES}}
     s["stop_rate"], s["safe_rate"] = _rates(rows)
@@ -131,5 +171,12 @@ def summarize_gate(rows, spec="", wall=0.0) -> dict:
     s["stop_rate_feasible"], s["safe_rate_feasible"] = _rates(feas)
     for key, vals in (("pos", POSITIONS), ("kind", TYPES), ("distract", (0, N_DISTRACT)), ("v0", SPEEDS)):
         s[f"stop_by_{key}"] = {str(v): _rates([r for r in feas if r[key] == v])[0] for v in vals}
+    if block:  # (nothing can be passed: safe = stopped)
+        bf = [r for r in block if r["feasible"]]
+        s["block_cases"], s["block_feasible"] = len(block), len(bf)
+        s["block_outcomes"] = {o: sum(r["outcome"] == o for r in block) for o in OUTCOMES}
+        s["block_stop_rate"] = _rates(block)[0]
+        s["block_stop_rate_feasible"] = _rates(bf)[0]
+        s["block_stop_by_v0"] = {str(v): _rates([r for r in bf if r["v0"] == v])[0] for v in SPEEDS}
     s["wall_s"] = round(wall, 1)
     return s

@@ -91,7 +91,8 @@ def evalset(drivers, out=None, cfg_d: dict | None = None, demands=EVAL_DEMANDS, 
                 f.write(json.dumps(line) + "\n")
     for line in lines:
         if line["kind"] == "gate":
-            log(f"{line['driver']}: gate stop_rate_feasible {line['stop_rate_feasible']}, crash {line['crash']}")
+            log(f"{line['driver']}: gate stop_rate_feasible {line['stop_rate_feasible']}, crash {line['crash']}, "
+                f"block_stop_rate_feasible {line.get('block_stop_rate_feasible')}")
         else:
             log(f"{line['driver']} d={line['demand']} seed={line['seed']}: thr {line['throughput_per_min']}, "
                 f"crash/1000 {line['crash_cars_per_1000']}")

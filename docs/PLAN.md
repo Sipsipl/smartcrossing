@@ -96,7 +96,9 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
   live dot uses the same one: site/src/js/fdwindow.js, node-tested); `cli incentives` = reward accounting of a stuck car.
 - Obstacle scenarios (training option, round 2): SimConfig `obstacle_envs` (fraction of envs; 0 = off and
   bit-identical), `obstacle_rate`, `obstacle_time`, `obstacle_max`, `obstacle_parked`, `obstacle_box`: wrecks /
-  parked cars appear on a path (never closer than a car could stop).
+  parked cars appear on a path (never closer than a car could stop). `obstacle_block` (round 8; 0 = off, bit-identical):
+  that share of the placements is a blockade of 3 bodies crosswise across the full road width of an arm (both
+  directions), so only stopping avoids the crash; the stop gate reports its block cases as `block_*`.
 - `smartcrossing/policy.py` (shared MLP, numpy, `PolicyDriver`). The old ES trainer was removed
   (history only); ES checkpoints still load via `policy_compat.py`.
   `smartcrossing/policy_compat.py`: running old checkpoints (observation-layout remap by

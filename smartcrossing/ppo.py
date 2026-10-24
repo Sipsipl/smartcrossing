@@ -343,7 +343,8 @@ def eval_job(ckpt: str, out_path: str, it: int, demands, envs: int, seconds: flo
         s = evalset.bench_one(f"policy:{ckpt}", SimConfig(**{**world, "demand": d}), EVAL_SEED, envs, seconds)
         rec[f"d{d:g}"] = evalset.keep(s, (*evalset.KEEP_KEYS, "queued_end"))
     g, _ = stop_gate(f"policy:{ckpt}", world)
-    rec["gate"] = {k: g[k] for k in ("stop_rate_feasible", "safe_rate_feasible", "stop_rate", "crash", "offroad")}
+    rec["gate"] = {k: g[k] for k in ("stop_rate_feasible", "safe_rate_feasible", "stop_rate", "crash", "offroad",
+                                      "block_stop_rate_feasible")}
     with open(out_path, "a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(rec) + "\n")
     if render_dir:

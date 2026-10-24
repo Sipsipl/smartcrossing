@@ -43,6 +43,11 @@ SPAWN_MAX_PER_STEP = 3  # at most this many cars enter per arm and step (side by
 SPEED_TAU = 0.5  # s, time constant of the legacy speed_control interface
 OBSTACLE_ARM_END = 20.0  # arm obstacles stay at least this far inside the arm end (room after spawning)
 OBSTACLE_BOX_MARGIN = 1.0  # box obstacles: centre within |x|, |y| <= W - margin
+# blockades (cfg.obstacle_block): BLOCK_BODIES standing bodies crosswise side by side, centres 2W / BLOCK_BODIES
+# apart, cover the full road width (both directions; W = 7: gaps of 0.07 m between the bodies and 0.03 m to
+# the curbs, far below a car's width); the line stands where the arm is straight (|centre| >= W + Rc + margin)
+BLOCK_BODIES = 3
+BLOCK_CURB_MARGIN = 1.0
 
 N_RAYS = 5
 RAY_ANGLES = np.radians([-60.0, -30.0, 0.0, 30.0, 60.0])
@@ -167,6 +172,12 @@ class SimConfig:
     obstacle_max: int = 2  # at most this many obstacles at once per environment
     obstacle_parked: float = 0.5  # share of parked cars (no hazard lights); the rest are wrecks
     obstacle_box: float = 0.25  # share placed inside the box (else on an arm)
+    # blockades (round 8; 0 = off and bit-identical): this share of the placements is a blockade instead of a
+    # single obstacle: BLOCK_BODIES bodies crosswise across the FULL road width of an arm (both directions, curb
+    # to curb: no gap to pass, not even through the oncoming half), so only stopping avoids the crash. Same
+    # rules otherwise (obstacle_clear for every body, obstacle_time, obstacle_parked for the whole group;
+    # placed while fewer than obstacle_max obstacle bodies stand and BLOCK_BODIES slots are free).
+    obstacle_block: float = 0.0
 
 
 # own state: canonical pos (2, /POS_SCALE), heading (2), speed, manoeuvre one-hot (3),
@@ -245,6 +256,29 @@ def obstacle_pose(cfg: SimConfig, u):
     s = (zero + (k == 1)) - (zero + (k == 3))
     h = ch + k * (np.pi / 2)
     return c * cx - s * cy, s * cx + c * cy, (h + np.pi) % (2 * np.pi) - np.pi
+
+
+def block_pose(cfg: SimConfig, u):
+    """World poses (x, y, th), each (..., BLOCK_BODIES), of a blockade's bodies from the uniforms u (..., 8)
+    (see Sim._obstacles): arm from u3 (as obstacle_pose), distance of the line to the centre in
+    [W + Rc + BLOCK_CURB_MARGIN, L - OBSTACLE_ARM_END] from u5, bodies crosswise (canonical heading 0 or pi
+    from u6) at lateral centres (j - (BLOCK_BODIES - 1) / 2) * 2W / BLOCK_BODIES. numpy or torch arrays."""
+    stack = __import__("torch").stack if hasattr(u, "clamp") else np.stack
+    r0 = cfg.W + cfg.Rc + BLOCK_CURB_MARGIN
+    r = r0 + (cfg.L - OBSTACLE_ARM_END - r0) * u[..., 5]
+    zero = 0.0 * u[..., 0]
+    k = (u[..., 3] * 4).floor().clamp(0, 3) if hasattr(u, "clamp") else np.clip(np.floor(u[..., 3] * 4), 0, 3)
+    ch = np.pi * (zero + (u[..., 6] < 0.5))
+    c = (zero + (k == 0)) - (zero + (k == 2))
+    s = (zero + (k == 1)) - (zero + (k == 3))
+    h = (ch + k * (np.pi / 2) + np.pi) % (2 * np.pi) - np.pi
+    step = 2 * cfg.W / BLOCK_BODIES
+    xs, ys = [], []
+    for j in range(BLOCK_BODIES):
+        cx = (j - (BLOCK_BODIES - 1) / 2) * step + zero
+        xs.append(c * cx + s * r)
+        ys.append(s * cx - c * r)
+    return stack(xs, -1), stack(ys, -1), stack([h] * BLOCK_BODIES, -1)
 
 
 def act_dim(cfg: SimConfig) -> int:
@@ -736,32 +770,43 @@ class Sim:
     # ------------------------------------------------------------------ obstacles
     def _obstacles(self):
         """Obstacle scenarios (cfg.obstacle_*): in each obstacle env, with probability obstacle_rate * dt
-        try to place one obstacle. Uniforms u (B, 7), drawn every step (streams stay aligned): place?,
-        parked?, then obstacle_pose's. Placed only if a slot is free, fewer than obstacle_max stand and
-        every occupied slot keeps obstacle_clear (no car is forced to crash into it)."""
+        try to place one obstacle (or, with obstacle_block, a blockade of BLOCK_BODIES bodies). Uniforms
+        u (B, 7) (B, 8 with obstacle_block > 0), drawn every step (streams stay aligned): place?, parked?,
+        then obstacle_pose's / block_pose's, blockade? (u7). Placed only if enough slots are free (the
+        first free ones), fewer than obstacle_max obstacle bodies stand and every occupied slot keeps
+        obstacle_clear to every new body (no car is forced to crash into it)."""
         cfg = self.cfg
-        u = self.obst_rng.random((self.B, 7))
+        nu = 8 if cfg.obstacle_block > 0 else 7
+        u = self.obst_rng.random((self.B, nu))
         occ = self.alive | self.wreck
+        blk = u[:, 7] < cfg.obstacle_block if nu == 8 else np.zeros(self.B, dtype=bool)
+        need = np.where(blk, BLOCK_BODIES, 1)
         want = (self.obst_env & (u[:, 0] < cfg.obstacle_rate * cfg.dt) & (self.obstacle.sum(1) < cfg.obstacle_max)
-                & (~occ).any(1))
+                & ((~occ).sum(1) >= need))
         if not want.any():
             return
-        x, y, th = obstacle_pose(cfg, u)
+        x, y, th = (a[:, None] for a in obstacle_pose(cfg, u))  # (B, bodies)
+        if nu == 8:
+            bx, by, bth = block_pose(cfg, u)
+            x, y, th = (np.where(blk[:, None], p, q) for p, q in ((bx, x), (by, y), (bth, th)))
+        used = np.arange(x.shape[1]) < need[:, None]
         vx, vy = self.v * np.cos(self.th), self.v * np.sin(self.th)
-        clear = obstacle_clear(cfg, x[:, None] - self.x, y[:, None] - self.y, vx, vy)
-        ok = want & (clear | ~occ).all(1)
-        b = np.nonzero(ok)[0]
-        if len(b) == 0:
-            return
-        n = np.argmin(occ[b], 1)
-        self.wreck[b, n] = self.obstacle[b, n] = True
-        self.parked[b, n] = u[b, 1] < cfg.obstacle_parked
-        self.wreck_left[b, n] = obstacle_steps(cfg)
-        self.x[b, n], self.y[b, n], self.th[b, n] = x[b], y[b], th[b]
-        self.v[b, n] = self.acc[b, n] = self.kappa[b, n] = self.age[b, n] = 0.0
-        self.sig[b, n] = 0.0
-        self.arm[b, n], self.man[b, n], self.uid[b, n], self.group[b, n] = 0, 0, -1, 0
-        self.stats.obstacles[b] += 1
+        clear = obstacle_clear(cfg, x[:, :, None] - self.x[:, None], y[:, :, None] - self.y[:, None], vx[:, None], vy[:, None])
+        ok = want & ((clear | ~occ[:, None]).all(2) | ~used).all(1)
+        rank = np.cumsum(~occ, 1)  # body j goes into the (j + 1)-th free slot
+        for j in range(x.shape[1]):
+            b = np.nonzero(ok & (need > j))[0]
+            if len(b) == 0:
+                break
+            n = np.argmax(~occ[b] & (rank[b] == j + 1), 1)
+            self.wreck[b, n] = self.obstacle[b, n] = True
+            self.parked[b, n] = u[b, 1] < cfg.obstacle_parked
+            self.wreck_left[b, n] = obstacle_steps(cfg)
+            self.x[b, n], self.y[b, n], self.th[b, n] = x[b, j], y[b, j], th[b, j]
+            self.v[b, n] = self.acc[b, n] = self.kappa[b, n] = self.age[b, n] = 0.0
+            self.sig[b, n] = 0.0
+            self.arm[b, n], self.man[b, n], self.uid[b, n], self.group[b, n] = 0, 0, -1, 0
+            self.stats.obstacles[b] += 1
 
     # ------------------------------------------------------------------ spawning
     def _spawn_clear(self, sx, sy, h, x, y, vx, vy, alive):

@@ -12,7 +12,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from conftest import CUDA, DEVICES  # noqa: E402
-from smartcrossing.sim import STAT_NAMES, Sim, SimConfig, act_dim  # noqa: E402
+from smartcrossing.sim import BLOCK_BODIES, STAT_NAMES, Sim, SimConfig, act_dim  # noqa: E402
 from smartcrossing.sim_torch import TorchSim  # noqa: E402
 
 TOL = 1e-9
@@ -49,6 +49,9 @@ def _close(name, t, ref, mask=None, tol=TOL):
     dict(n_slots=24, r_time=0.02, demand_range=(0.2, 0.5), crash_cost_speed="own", obstacle_envs=0.5,
          obstacle_rate=2.0, obstacle_time=3.0, obstacle_max=3,
          wreck_time=5.0),  # (long wrecks block the traffic so much that no obstacle gets hit in the short run)
+    # round 8: blockades (full road width, several bodies at once) in half of the placements
+    dict(n_slots=32, r_time=0.02, demand_range=(0.2, 0.5), obstacle_envs=0.5, obstacle_rate=2.0, obstacle_time=3.0,
+         obstacle_max=3, obstacle_block=0.5, wreck_time=5.0),
     # more neighbour slots (set encoder interface); and more slots than cars (padding)
     dict(n_slots=24, demand=0.5, n_neighbours=10, L=30.0),  # short arms: exits within the short cuda run
     dict(n_slots=6, demand=0.5, n_neighbours=10, L=30.0),
@@ -63,8 +66,9 @@ def test_torch_matches_numpy(device, cfg_kw):
     rng = np.random.default_rng(3)
     kinds = np.zeros(6, np.int64)
     worst = 0.0
-    n_wreck_seen = n_parked_seen = n_obst_wreck_seen = 0
+    n_wreck_seen = n_parked_seen = n_obst_wreck_seen = n_blocks = 0
     for t in range(steps):
+        placed = ref.stats.obstacles.copy()
         o_ref = ref.observe()
         o_t = ts.observe()
         worst = max(worst, _close(f"obs@{t}", o_t, o_ref))
@@ -78,6 +82,7 @@ def test_torch_matches_numpy(device, cfg_kw):
         assert np.array_equal(ts.obstacle.cpu().numpy(), ref.obstacle), f"obstacle@{t}"
         assert np.array_equal(ts.parked.cpu().numpy(), ref.parked), f"parked@{t}"
         n_wreck_seen += int(ref.wreck.sum())
+        n_blocks += int((ref.stats.obstacles - placed >= BLOCK_BODIES).sum())  # a blockade in one step
         n_parked_seen += int(ref.parked.sum())
         n_obst_wreck_seen += int((ref.obstacle & ~ref.parked).sum())
         assert np.array_equal(ts.done_kind.cpu().numpy(), ref.done_kind), f"done_kind@{t}"
@@ -100,11 +105,13 @@ def test_torch_matches_numpy(device, cfg_kw):
     if cfg.obstacle_envs > 0:  # obstacles of both kinds appeared and were hit
         assert ref.stats.obstacles.sum() >= 4 and n_parked_seen > 0 and n_obst_wreck_seen > 0
         assert ref.stats.obstacle_hits.sum() > 0 or steps < 300  # (the short cuda run may have none)
+    assert (n_blocks > 0) == (cfg.obstacle_block > 0), n_blocks
     print(f"[{device}] max abs deviation over {steps} steps: {worst:.3g}; done kinds {kinds.tolist()}")
 
 
 @CUDA
-@pytest.mark.parametrize("extra", [{}, dict(obstacle_envs=0.5, obstacle_rate=2.0, crash_cost_speed="own")])
+@pytest.mark.parametrize("extra", [{}, dict(obstacle_envs=0.5, obstacle_rate=2.0, crash_cost_speed="own"),
+                                   dict(obstacle_envs=0.5, obstacle_rate=2.0, obstacle_block=0.5)])
 def test_cuda_graph_matches_eager(extra):
     """The CUDA-graph replay of step() gives the same trajectory as eager stepping (torch rng)."""
     cfg = SimConfig(n_slots=24, demand=0.4, **extra)
