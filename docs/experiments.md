@@ -961,3 +961,48 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
   workers / eval), `--eval-workers 0` (no background evals, final one still runs). Smoke (r6_DO_s2 state,
   cuda rollout 1024 envs, obstacle_envs 0.75, obstacle_block 0.5, 10-s wrecks): duty 1.0: 0.94 s/it, GPU ~80 %;
   duty 0.5: 0.94 busy + 0.94 sleep = 1.89 s/it, GPU ~43 %; duty.txt 0.25 live: 4.3 s/it, GPU ~31 % (idle ~8 %).
+
+## Round 7: blockades in training (2026-10-24, branch coordinator/round9)
+- Arms: round-6 DO recipe (runs/r6_DO_s2/args.json: dense curriculum ceiling 0.5 / lo 0.1, obstacle_envs 0.75,
+  crash cost x3, n_slots 40, 8 neighbours), continued from runs/r6_DO_s2/state.npz (iter 799) for 300 iterations
+  (--iters 1100), current world (10-s wrecks, hazard on all obstacles). DOB_s1 / DOB_s2: obstacle_block 0.5;
+  DO_s1: control, obstacle_block 0. GPU background mode (owner gaming): cuda rollout 1024 envs x 32 steps,
+  --gpu-duty 0.5 --low-priority --eval-workers 1: 2.64 s/it (1.32 busy + 1.32 sleep, effective duty 0.50), ~13 min
+  per run. Train obstacle hits per iteration fell from 28-70 (blockade arms, first iterations) to 1-2.
+- Selection (results/round7_select.jsonl, selection seeds, gate >= 0.95, ref round6_best; stop / block = stop and
+  block-stop rate feasible). LAST checkpoints: DOB_s1@1099 gate 1.00 / 0.41 / block 1.00 (passes);
+  DO_s1@1099 0.93 / 0.34 / 0.75 (FAILS); DOB_s2@1099 0.98 / 0.46 / 1.00 (passes). All DOB checkpoints from
+  iter 900 on have block stop 1.00; the control stays at 0.69-0.88 and fails the gate in 3 of 7 checkpoints.
+  Selected: DOB_s1@1050, DO_s1@1050, DOB_s2@950 (overall); DOB_s2@1099 had the best crash/throughput balance.
+- HELD-OUT seeds 4000/5000/6000 (results/round7_heldout.jsonl, results/round7_deadlock.jsonl; 8 envs x 120 s, no
+  obstacles; thr/min / crash+off per 1000 / timeouts per 1000 / % time deadlocked):
+
+  | | 0.15 | 0.3 | 0.4 | 0.5 | gate safe / stop / block stop |
+  |---|---|---|---|---|---|
+  | round6_best | 33.2/4/0 | 66.0/5/0/0.2 | 82.7/18/1 | 88.0/47/5/22 | 1.00 / 0.43 / 0.94 |
+  | r7_DOB_s1@1050 | 33.3/2/0 | 66.2/4/0/0.3 | 83.5/12/2 | 97.6/18/3/11 | 0.98 / 0.39 / 1.00 |
+  | r7_DOB_s2@1099 | 33.3/3/0 | 65.8/4/0/2.7 | 86.2/6/0 | 88.9/26/7/22 | 0.98 / 0.46 / 1.00 |
+
+  At 0.5 per seed: DOB_s1@1050 thr 102.5/95.3/94.9 vs round6_best 86.6/93.8/83.6, crash+off 19/36/32 vs 96/67/45
+  (better on every seed). DOB_s2@1099 is noisier at 0.5 (thr 79.4 on seed 5000). (Old round-6 numbers were
+  measured with 5-s wrecks; round6_best in the 10-s world: 88/min at 0.5, deadlock time 22 %.)
+- Lamp (owner question: with honest hazard marking, is the lamp used more clearly?). Emitted lamp, held-out
+  seeds, mean / share > 0 (stuck = deadlock module's stuck cars, approach = outside the box zone driving inwards):
+
+  | brain | demand | approach | moving in zone | stuck | leaving |
+  |---|---|---|---|---|---|
+  | round6_best | 0.3 | +0.44 / 78 % | -0.83 / 2 % | -0.92 / 0 % | -0.77 / 1 % |
+  | round6_best | 0.5 | +0.40 / 75 % | -0.80 / 4 % | -0.85 / 3 % | -0.64 / 7 % |
+  | DOB_s1@1050 | 0.3 | +0.36 / 74 % | -0.82 / 3 % | -0.82 / 0 % | -0.69 / 5 % |
+  | DOB_s1@1050 | 0.5 | +0.31 / 71 % | -0.83 / 3 % | -0.86 / 3 % | -0.62 / 8 % |
+
+  The lamp is an "approaching" announcement (on before the box, off inside it); stuck and moving cars in the zone
+  do not differ, so it is not a "stuck" / yield signal. Lamp-zeroed receivers (0.3 / 0.5): round6_best crash+off
+  5 -> 41 / 46 -> 136, thr 88 -> 74 at 0.5, DL time 22 -> 35 %; DOB_s1@1050 4 -> 19 / 18 -> 69, thr 98 -> 89,
+  DL time 11 -> 17 %. Both still depend strongly on the lamp; the pattern did not become clearer (slightly
+  weaker on approach), and the new brain is somewhat less lamp-dependent in relative throughput terms.
+- Decision: r7_DOB_s1@1050 -> results/round7_best.npz: +11 % throughput and 0.4x crashes at 0.5 vs round6_best on
+  held-out seeds, deadlock time halved (22 -> 11 %), gate safe 0.98, block stop 1.00 (0.94). Blockade training
+  also keeps the gate: the control (DO_s1) lost block stop and the gate in the same 300 iterations. Caveat: the
+  candidate pick among two passing checkpoints used held-out numbers; the old-case stop rate stays ~0.4 (passing
+  single obstacles is still preferred over stopping).
