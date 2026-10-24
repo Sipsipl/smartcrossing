@@ -1006,3 +1006,7 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
   also keeps the gate: the control (DO_s1) lost block stop and the gate in the same 300 iterations. Caveat: the
   candidate pick among two passing checkpoints used held-out numbers; the old-case stop rate stays ~0.4 (passing
   single obstacles is still preferred over stopping).
+- Fresh-seed check (seeds 7000-10000, never used for any choice; the held-out seeds had been used to pick between
+  the two round-7 candidates): thr/min / crash+off per 1000 / timeouts at 0.3, 0.4, 0.5 -
+  round6_best 66.4/9/0.5, 86.0/12/2.5, 92.1/40/5.2; round7_best (DOB_s1@1050) 67.2/1/0, 89.6/3/0, 99.4/20/3.8;
+  DOB_s2@1099 67.2/3/0, 85.5/9/5.2, 94.5/25/11.2 (results/round7_confirm_fresh.jsonl). round7_best confirmed.
