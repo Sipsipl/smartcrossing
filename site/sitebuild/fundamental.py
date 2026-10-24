@@ -2,6 +2,7 @@
 fundamental diagram + scatter cloud (read from the deadlock study's committed results)."""
 
 import json
+import re
 
 from smartcrossing.gates import stop_gate
 
@@ -16,7 +17,8 @@ FUNDAMENTAL_FIELDS = ("demand", "density", "throughput", "density_veh_per_km", "
 
 def gate_of(ctx: Context, cid: str | None) -> dict | None:
     """Stop-gate rates (feasible cases) of a checkpoint, measured here (smartcrossing/gates.py, seconds):
-    {"safe": share that stop or pass without a crash, "stop": share that stop in front of the obstacle}.
+    {"safe": share that stop or pass without a crash, "stop": share that stop in front of a single obstacle,
+    "block": share that stop in front of a full-width blockade (nothing can be passed)}.
     The checkpoint file in runs/ if it exists, else (snapshot brains: no checkpoint file) its weights in its
     own physics. None for an unknown checkpoint."""
     c = ctx.found.get(cid) if cid else None
@@ -29,18 +31,19 @@ def gate_of(ctx: Context, cid: str | None) -> dict | None:
             payload = Brain(c["policy"]).payload()
             summary, _ = stop_gate(cid, c["physics"], driver=lambda sim: policy_driver(sim, payload))
         ctx.gates[cid] = {"safe": summary["safe_rate_feasible"], "stop": summary["stop_rate_feasible"],
-                          "cases": summary["feasible"]}
+                          "block": summary["block_stop_rate_feasible"], "cases": summary["feasible"]}
     return ctx.gates[cid]
 
 
 def gate_text(ctx: Context, text: str | None, cid: str | None) -> str | None:
-    """Fill {safe} / {stop} (whole percent of the stop gate of checkpoint cid) in a run text."""
-    if text is None or "{safe}" not in text and "{stop}" not in text:
+    """Fill {safe} / {stop} / {block} (whole percent of the stop gate of checkpoint cid) in a run text."""
+    keys = ("safe", "stop", "block")
+    if text is None or not any("{" + k + "}" in text for k in keys):
         return text
     g = gate_of(ctx, cid)
-    if g is None:  # checkpoint not available (e.g. in tests): no number rather than a made-up one
-        return text.replace("{safe}", "?").replace("{stop}", "?")
-    return text.replace("{safe}", str(round(g["safe"] * 100))).replace("{stop}", str(round(g["stop"] * 100)))
+    for k in keys:  # checkpoint not available (e.g. in tests): no number rather than a made-up one
+        text = text.replace("{" + k + "}", "?" if g is None else str(round(g[k] * 100)))
+    return text
 
 
 def fundamental_data(ctx: Context):
@@ -53,11 +56,31 @@ def fundamental_data(ctx: Context):
     raw = json.loads(path.read_text(encoding="utf-8"))
     drivers = {k: [{f: p[f] for f in FUNDAMENTAL_FIELDS} for p in raw["drivers"][k]["points"]]
                for k in FUNDAMENTAL_DRIVERS if k in raw["drivers"]}
-    out = {"drivers": drivers, "cloud": cloud_data(ctx)}
+    out = {"drivers": drivers, "cloud": cloud_data(ctx), "setup": setup_of(raw, ctx)}
     if "brain" in drivers:  # start value of the traffic slider = the brain's capacity: its maximum mean throughput
         cap = max(p["throughput"] for p in drivers["brain"])
         out["max_throughput"] = round(cap, 1)
         out["start_demand"] = start_demand(cap)
+    return out
+
+
+def setup_of(raw: dict, ctx: Context) -> dict:
+    """Measurement setup of the diagram for its footnote, read from the two result files' meta texts (envs, seconds per
+    run, traffic seeds, warm-up, cloud window / step); fields that cannot be read are left out."""
+    meta = raw.get("meta", {})
+    out = {}
+    m = re.search(r"envs \[(\d+)\] x seconds \[([\d.]+)\], traffic seeds \[([^\]]*)\]", meta.get("protocol", ""))
+    if m:
+        out.update(envs=int(m.group(1)), seconds=float(m.group(2)), seeds=len(m.group(3).split(",")))
+    m = re.search(r"after a (\d+) s warm-up", meta.get("density", ""))
+    if m:
+        out["warmup"] = int(m.group(1))
+    path = ctx.root / "results" / "fundamental_cloud.json"
+    if path.exists():
+        cm = json.loads(path.read_text(encoding="utf-8")).get("meta", {}).get("throughput", "")
+        m = re.search(r"(\d+)-s sliding window, one every (\d+) s", cm)
+        if m:
+            out.update(window=int(m.group(1)), step=int(m.group(2)))
     return out
 
 

@@ -45,7 +45,7 @@ def test_same_keys_in_both_languages():
 
 def test_js_keys_exist():
     de, en = load("de"), load("en")
-    dyn = {"obsrow.", "nb."}  # keys built at runtime from feature names
+    dyn = {"obsrow.", "nb.", "note.thr.", "cmp.wd.", "cmp.wc."}  # keys built at runtime (feature names, more/fewer/same words)
     missing = {k for k in js_keys() if k not in de and k not in en and not any(k.startswith(p) for p in dyn)}
     assert not missing, f"keys used in js but not defined: {sorted(missing)}"
     for k in js_keys():
@@ -76,7 +76,7 @@ def test_build_texts_have_english():
     for run, e in STEP_INFO.items():
         assert set(e) == {"de", "en"} and e["de"] and e["en"] and ph(e["de"]) == ph(e["en"]), run
     assert all(run_info(r)["note_en"] and run_info(r)["label_en"] for r in RUN_INFO)
-    info = run_info("r6_DO_s2", lambda s: s and s.replace("{stop}", "70").replace("{safe}", "99"))
+    info = run_info("r7_DOB_s1", lambda s: s and s.replace("{stop}", "70").replace("{safe}", "99").replace("{block}", "100"))
     assert "70 %" in info["step"] and "70%" in info["step_en"] and "{" not in info["note"] + info["note_en"]
     assert run_info("unknown_run") == {"short": "unknown_run", "label": "unknown_run", "label_en": "unknown_run",
                                        "note": None, "note_en": None, "step": None, "step_en": None}

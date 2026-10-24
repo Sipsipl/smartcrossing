@@ -111,15 +111,16 @@
    *  maximum of each ringed. keys: which drivers; compact: small chart for the start page. */
   function fdChartOpts(keys, compact) {
     const used = FD_DRIVERS.filter(([k]) => keys.includes(k) && fdPoints(k).length);
-    // compact chart: no label at the ring (it would collide with the live dot); the legend names the maximum
+    // no label at the ring (labels of close maxima overlapped, and the compact chart has the live dot there):
+    // the legend names the maximum of each curve
     const peaks = used.map(([k, name, col]) => {
       const pk = fdPeak(fdPoints(k));
-      return { x: pk[0], y: pk[1], color: SCX.cssVar(col), label: compact ? null : tx("fd.peak", { n: num(pk[1], 0) }) };
+      return { x: pk[0], y: pk[1], color: SCX.cssVar(col) };
     });
     const allPts = (k) => [...fdPoints(k), ...fdCloud(k)];
     return {
       clouds: used.filter(([k]) => fdCloud(k).length).map(([k, name, col]) => ({ color: SCX.cssVar(col), points: fdCloud(k), r: compact ? 2.2 : 2.4, opacity: compact ? 0.3 : 0.22 })),
-      series: used.map(([k, name, col]) => ({ name: tx(name), color: SCX.cssVar(col), dots: !compact, points: [[0, 0], ...fdPoints(k)] })),
+      series: used.map(([k, name, col]) => ({ name: tx(name), color: SCX.cssVar(col), dots: !compact, points: [[0, 0], ...fdPoints(k)], note: compact ? undefined : tx("fd.peak", { n: num(fdPeak(fdPoints(k))[1], 0) }) })),
       peaks, xMin: 0, yMin: 0, yMax: compact ? Math.max(...used.flatMap(([k]) => allPts(k).map((p) => p[1]))) * 1.1 : undefined, xMax: compact ? Math.ceil(Math.max(...used.flatMap(([k]) => allPts(k).map((p) => p[0]))) * 1.05) : undefined,
       xLabel: tx("fd.xlabel"), yLabel: tx(compact ? "fd.ylabel" : "fd.ylabel.big"),
       yFmt: (v, tip) => (tip ? num(v) : String(Math.round(v))), xFmt: (v) => String(Math.round(v)),
@@ -303,8 +304,8 @@
   function crashVerdict(d) {
     const a = badPer1000(D.previous && pol(D.previous), d), b = badPer1000(pol(MAIN_ID), d);
     if (a === null || b === null) return null;
-    if (Math.abs(b - a) < 3 || (b <= 1.25 * a && b >= 0.8 * a)) return "note.cmp.same"; // parity within noise
-    return b < 0.5 * a ? "note.cmp.much" : b < a ? "note.cmp.fewer" : "note.cmp.more";
+    const c = SCX.compare(b, a, 1); // >= 25 % and >= 1 per 1000, else "about as many"
+    return c === "fewer" && b < 0.5 * a ? "note.cmp.much" : "note.cmp." + c;
   }
 
   /** What is new in the main brain vs the previous one (crash numbers from the bench data). */
@@ -320,7 +321,8 @@
       ? tx("note.set", {
         K: m.policy.arch.K, midw: tx(vm), mid,
         dense: dense && vd ? tx("note.dense", { dw: tx(vd), dense }) : "",
-        thr: num(thr, 0), thrprev: num(thrPrev, 0), dem: num(m.bench["0.5"].demand_per_min, 0),
+        thrw: tx("note.thr." + SCX.compare(thr, thrPrev, 2, SCX.THR_REL)), thr: num(thr, 0), thrprev: num(thrPrev, 0), dem: num(m.bench["0.5"].demand_per_min, 0),
+        block: D.gate && D.gate.main ? pct(D.gate.main.block) : "?",
       })
       : tx("note.mlp", { much, mid });
   }
@@ -429,6 +431,7 @@
       },
       onRefresh: (c) => { SCX.renderSelHead(c, $("selhead")); renderOutputs(c); drawHist(); },
     });
+    document.querySelectorAll("[data-nbk]").forEach((e) => { e.textContent = (SCX.layoutFor(cx.sim.cfg) || D.layout).k_neighbours; });
     function nextAction(c, n) {
       const t = c.typeOf(n);
       const a = Array.from(SC.forward(t.policy, c.obs, n * SC.obsDim(c.sim.cfg)));
@@ -649,6 +652,11 @@
 
   function initLernen() {
     drawReward();
+    // lead: car decisions ("driving steps") of the PPO chain up to the main brain (logged cumulatively; curves.py "steps")
+    const mainPoint = ((D.timelines || {})[mainMethod] || []).find((p) => p.id === MAIN_ID);
+    const stepRows = mainPoint ? Object.values((D.curves || {})[mainMethod] || {}).flat().filter((r) => r.steps !== undefined && r.x <= mainPoint.gen) : [];
+    if (stepRows.length) $("train-steps").textContent = SCX.group(Math.round(stepRows.reduce((b, r) => (r.x > b.x ? r : b)).steps / 1e7) * 10);
+    else $("train-steps-part").hidden = true;
     const methods = Object.keys(D.timelines).sort((a, b) => (a === "es" ? -1 : 1) - (b === "es" ? -1 : 1));
     let method = methods.includes(mainMethod) ? mainMethod : methods[0];
     let idx = 0, extra = null; // extra: a dead-end run shown instead of the timeline
@@ -883,11 +891,21 @@
     if (G && $("g-safe")) {
       $("g-safe").textContent = SCX.pct(G.safe);
       $("g-stop").textContent = SCX.pct(G.stop);
+      $("g-block").textContent = SCX.pct(G.block);
       const GP = D.gate.previous;
-      if (GP) $("g-prev").textContent = tx("cmp.gateprev", { prev: SCX.pct(GP.stop), prevsafe: SCX.pct(GP.safe) });
+      if (GP) $("g-prev").textContent = tx("cmp.gateprev", { prev: SCX.pct(GP.stop), prevsafe: SCX.pct(GP.safe), prevblock: SCX.pct(GP.block) });
+    }
+    if ($("h-dense") && m5) {
+      const res5 = D.baselines.reservation["0.5"], F = D.fundamental && D.fundamental.drivers;
+      const peak = (k) => (F && F[k] && F[k].length ? Math.max(...F[k].map((q) => q.throughput)) : null);
+      const cb = peak("brain"), cr = peak("reservation");
+      $("h-dense").textContent = res5 ? tx("cmp.dense", {
+        dem: num(m5.demand_per_min, 0), b: num(m5.throughput_per_min, 0), r: num(res5.throughput_per_min, 0),
+        w: tx("cmp.wd." + SCX.compare(m5.throughput_per_min, res5.throughput_per_min, 2, SCX.THR_REL)), c: num(m5.crash_cars_per_1000, 0),
+      }) + (cb !== null && cr !== null ? tx("cmp.cap", { cb: num(cb, 0), cr: num(cr, 0), w: tx("cmp.wc." + SCX.compare(cb, cr, 2, SCX.THR_REL)) }) : "") : "";
     }
     if ($("c-thr-note")) $("c-thr-note").textContent = groups.length > 1 ? tx("cmp.chartnote", { world: WORLD_NAMES[mainWorld].replace(/ \(.*/, "") }) : "";
-    const draw = () => SCX.lineChart($("c-thr"), {
+    const drawInflow = () => SCX.lineChart($("c-thr"), {
       series: [
         { name: tx("chart.demand"), color: SCX.cssVar("--c5"), dash: true, points: dem.map((d) => [demPerMin(d), demPerMin(d)]) },
         ...rows.map((r) => ({ name: r.name, color: SCX.cssVar(r.color), dots: true, points: dem.filter((d) => r.b[d]).map((d) => [demPerMin(d), r.b[d].throughput_per_min]) })),
@@ -896,16 +914,33 @@
       yFmt: (v, tip) => (tip ? num(v) : String(Math.round(v))), xFmt: (v) => String(Math.round(v)), xTipFmt: (v) => tx("chart.xtip", { n: Math.round(v) }),
       xMin: 0, yMin: 0, directLabels: true, height: 300, aria: tx("chart.aria"),
     });
-    draw();
-    window.addEventListener("resize", debounce(draw, 200));
-    if (D.fundamental && $("c-fd")) {
-      const drawFd = () => SCX.lineChart($("c-fd"), fdChartOpts(["brain", "light", "reservation"], false));
+    // one chart, two views: throughput by inflow (arriving cars/min) or by density (cars on the road = fundamental diagram)
+    const hasFd = !!(D.fundamental && D.fundamental.drivers && Object.keys(D.fundamental.drivers).length);
+    let view = hasFd && !/[?&]view=inflow/.test(location.search) ? "density" : "inflow"; // density is the default view
+    function fdNote() {
+      const F = D.fundamental, S = F.setup || {};
+      const dm = ["brain", "light", "reservation"].flatMap((k) => (F.drivers[k] || []).map((p) => p.demand_per_min));
       $("fd-caps").innerHTML = fdCaps();
-      drawFd();
-      window.addEventListener("resize", debounce(drawFd, 200));
-    } else if ($("fundamental")) {
-      for (const id of ["fundamental", "c-fd", "fd-caps"]) $(id).hidden = true;
+      $("fd-note").textContent = tx("cmp.fd-note", {
+        lo: num(Math.min(...dm), 0), hi: num(Math.max(...dm), 0), min: S.seconds ? Math.round(S.seconds / 60) : "?", envs: S.envs || "?", warm: S.warmup || "?",
+        seeds: S.seeds || "?", win: S.window || "?", step: S.step || "?", n: fdCloud("brain").length,
+      });
     }
+    const draw = () => (view === "density" ? SCX.lineChart($("c-thr"), fdChartOpts(["brain", "light", "reservation"], false)) : drawInflow());
+    const seg = $("thr-view");
+    if (hasFd) {
+      seg.innerHTML = [["density", "cmp.view.density"], ["inflow", "cmp.view.inflow"]].map(([v, k]) =>
+        `<input type="radio" name="thr-view" id="tv-${v}" value="${v}"${v === view ? " checked" : ""}><label for="tv-${v}">${tx(k)}</label>`).join("");
+      seg.querySelectorAll("input").forEach((el) => el.addEventListener("change", () => { view = el.value; show(); }));
+      fdNote();
+    } else { seg.hidden = true; $("thr-explain").hidden = true; }
+    function show() {
+      $("view-inflow").hidden = view !== "inflow";
+      $("view-density").hidden = view !== "density";
+      draw();
+    }
+    show();
+    window.addEventListener("resize", debounce(draw, 200));
     $("bench-setup").textContent = tx("cmp.setup", { envs: D.bench_setup.envs, min: Math.round(D.bench_setup.seconds / 60), seeds: D.bench_setup.seeds, built: D.built });
   }
 

@@ -49,7 +49,9 @@ from .sim import (
     SPEED_TAU,
     STAT_NAMES,
     STRAIGHT,
+    BLOCK_BODIES,
     SimConfig,
+    block_pose,
     free_flow_time,
     nb_features,
     obstacle_clear,
@@ -316,7 +318,7 @@ class TorchSim:
             g(self.kappa) / cfg.kappa_max,
         ]
         if cfg.brake_light:  # brake light + hazard lights
-            feats += [(g(self.acc) < BRAKE_ACC).to(self.dtype), g((self.wreck & ~self.parked).to(self.dtype))]
+            feats += [(g(self.acc) < BRAKE_ACC).to(self.dtype), g(self.wreck.to(self.dtype))]
         else:  # legacy interface: acceleration
             feats += [g(self.acc) / cfg.brake_max]
         assert len(feats) == nb_features(cfg)
@@ -505,33 +507,47 @@ class TorchSim:
     def _obstacles(self):
         """As sim.Sim._obstacles (masked, no branches)."""
         cfg = self.cfg
+        nu = 8 if cfg.obstacle_block > 0 else 7
         if self.rng_mode == "numpy":
-            u = self._t(self.obst_rng.random((self.B, 7)))
+            u = self._t(self.obst_rng.random((self.B, nu)))
         else:
-            u = torch.rand(self.B, 7, generator=self.gen, device=self.device, dtype=self.dtype)
+            u = torch.rand(self.B, nu, generator=self.gen, device=self.device, dtype=self.dtype)
         occ = self.alive | self.wreck
-        x, y, th = obstacle_pose(cfg, u)
+        free = ~occ
+        x, y, th = (a[:, None] for a in obstacle_pose(cfg, u))  # (B, bodies)
+        if nu == 8:  # blockades (sim.py)
+            blk = u[:, 7] < cfg.obstacle_block
+            bx, by, bth = block_pose(cfg, u)
+            x, y, th = (torch.where(blk[:, None], p, q) for p, q in ((bx, x), (by, y), (bth, th)))
+            need = torch.where(blk, BLOCK_BODIES, 1)
+        else:
+            need = torch.ones(self.B, dtype=torch.int64, device=self.device)
+        used = torch.arange(x.shape[1], device=self.device)[None, :] < need[:, None]
         vx, vy = self.v * torch.cos(self.th), self.v * torch.sin(self.th)
-        clear = (obstacle_clear(cfg, x[:, None] - self.x, y[:, None] - self.y, vx, vy) | ~occ).all(1)
+        clear = obstacle_clear(cfg, x[:, :, None] - self.x[:, None], y[:, :, None] - self.y[:, None], vx[:, None], vy[:, None])
+        clear = ((clear | ~occ[:, None]).all(2) | ~used).all(1)
         ok = (self.obst_env & (u[:, 0] < cfg.obstacle_rate * cfg.dt) & (self.obstacle.sum(1) < cfg.obstacle_max)
-              & (~occ).any(1) & clear)
-        n = torch.argmax((~occ).to(torch.int8), 1)  # first free slot
-        sel = ok[:, None] & (self._arange_N[None, :] == n[:, None])
-        self.wreck = self.wreck | sel
-        self.obstacle = self.obstacle | sel
-        self.parked = torch.where(sel, (u[:, 1] < cfg.obstacle_parked)[:, None], self.parked)
-        self.wreck_left = torch.where(sel, obstacle_steps(cfg), self.wreck_left)
-        self.x = torch.where(sel, x[:, None], self.x)
-        self.y = torch.where(sel, y[:, None], self.y)
-        self.th = torch.where(sel, th[:, None], self.th)
-        for name in ("v", "acc", "kappa", "age"):
-            setattr(self, name, torch.where(sel, 0.0, getattr(self, name)))
-        self.sig = torch.where(sel[..., None], 0.0, self.sig)
-        self.arm = torch.where(sel, 0, self.arm)
-        self.man = torch.where(sel, 0, self.man)
-        self.uid = torch.where(sel, -1, self.uid)
-        self.group = torch.where(sel, 0, self.group)
-        self.stats.obstacles += ok
+              & (free.sum(1) >= need) & clear)
+        rank = torch.cumsum(free.to(torch.int64), 1)  # body j goes into the (j + 1)-th free slot
+        parked = (u[:, 1] < cfg.obstacle_parked)[:, None]
+        for j in range(x.shape[1]):
+            okj = ok & (need > j)
+            sel = okj[:, None] & free & (rank == j + 1)
+            self.wreck = self.wreck | sel
+            self.obstacle = self.obstacle | sel
+            self.parked = torch.where(sel, parked, self.parked)
+            self.wreck_left = torch.where(sel, obstacle_steps(cfg), self.wreck_left)
+            self.x = torch.where(sel, x[:, j, None], self.x)
+            self.y = torch.where(sel, y[:, j, None], self.y)
+            self.th = torch.where(sel, th[:, j, None], self.th)
+            for name in ("v", "acc", "kappa", "age"):
+                setattr(self, name, torch.where(sel, 0.0, getattr(self, name)))
+            self.sig = torch.where(sel[..., None], 0.0, self.sig)
+            self.arm = torch.where(sel, 0, self.arm)
+            self.man = torch.where(sel, 0, self.man)
+            self.uid = torch.where(sel, -1, self.uid)
+            self.group = torch.where(sel, 0, self.group)
+            self.stats.obstacles += okj
 
     # ------------------------------------------------------------------ spawning
     def _spawn_clear(self, sx, sy, h, x, y, vx, vy, alive):

@@ -56,6 +56,7 @@ def aggregate(lines: list[dict], specs: list[str]) -> list[dict]:
         rows.append({"kind": "row", "ckpt": spec.removeprefix("policy:"),
                      "iter": int(m.group(1)) if (m := re.search(r"ckpt_(\d+)", spec)) else None,
                      "safe_rate_feasible": g["safe_rate_feasible"], "stop_rate_feasible": g["stop_rate_feasible"],
+                     "block_stop_rate_feasible": g.get("block_stop_rate_feasible"),
                      "thr": {str(d): mean("throughput_per_min", d) for d in ds},
                      "crash": {str(d): mean("crash_cars_per_1000", d) for d in ds}})
     return rows
@@ -64,10 +65,11 @@ def aggregate(lines: list[dict], specs: list[str]) -> list[dict]:
 def table(rows, marks=None) -> str:
     marks = marks or {}
     f = lambda v: f"{'-':>7}" if v is None else f"{v:>7.1f}"  # noqa: E731  (demand not measured)
-    out = [f"{'ckpt':<28}{'gate':>6}{'stop':>6}{'thr.3':>7}{'thr.5':>7}{'cr.15':>7}{'cr.3':>7}{'cr.5':>7}"]
+    g = lambda v: f"{'-':>6}" if v is None else f"{v:>6.2f}"  # noqa: E731  (older gate lines: no block cases)
+    out = [f"{'ckpt':<28}{'gate':>6}{'stop':>6}{'block':>6}{'thr.3':>7}{'thr.5':>7}{'cr.15':>7}{'cr.3':>7}{'cr.5':>7}"]
     for r in rows:
         name = Path(r["ckpt"]).parent.name + "/" + Path(r["ckpt"]).stem
-        out.append(f"{name:<28}{r['safe_rate_feasible']:>6.2f}{r['stop_rate_feasible']:>6.2f}"
+        out.append(f"{name:<28}{r['safe_rate_feasible']:>6.2f}{r['stop_rate_feasible']:>6.2f}{g(r.get('block_stop_rate_feasible'))}"
                    f"{f(r['thr'].get('0.3'))}{f(r['thr'].get('0.5'))}{f(r['crash'].get('0.15'))}"
                    f"{f(r['crash'].get('0.3'))}{f(r['crash'].get('0.5'))}  {marks.get(r['ckpt'], '')}")
     return "\n".join(out)

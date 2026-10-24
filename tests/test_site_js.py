@@ -70,3 +70,17 @@ for (const lang of ["de", "en"]) {{
 console.log(JSON.stringify(res));""", tmp_path, vals)
     assert out["de"] == ["–", "0 %", "50 %", "98 %", "99,0 %", "99,9 %", "99,9 %", "99,9 %", "100 %"]
     assert out["en"] == ["–", "0%", "50%", "98%", "99.0%", "99.9%", "99.9%", "99.9%", "100%"]
+
+
+def test_compare_words_match_numbers(tmp_path):
+    """SCX.compare: 'more'/'fewer' only for >= 25 % AND >= minAbs difference, else 'same' (symmetric)."""
+    cases = [[1, 4, 1], [4, 6, 1], [1, 1.5, 1], [0, 0, 1], [30, 20, 1], [96.2, 86.7, 1], [20.5, 4.3, 1], [5, 5.9, 1]]
+    out = node(f"""
+const vm = require("vm"), fs = require("fs");
+const ctx = {{ location: {{ search: "?lang=de" }}, localStorage: {{ setItem() {{}}, getItem() {{ return null; }} }},
+  navigator: {{ language: "de-DE" }}, document: {{ documentElement: {{}}, querySelectorAll: () => [] }} }};
+ctx.window = ctx;
+vm.createContext(ctx);
+vm.runInContext(fs.readFileSync({json.dumps(str(JS / "i18n.js"))}, "utf8"), ctx);
+console.log(JSON.stringify(PAYLOAD.map(([c, p, m]) => ctx.SCX.compare(c, p, m))));""", tmp_path, cases)
+    assert out == ["fewer", "fewer", "same", "same", "more", "same", "more", "same"]

@@ -904,3 +904,109 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
 - Caveat: stop gate is only just passed (safe 0.955) and stop_rate fell to 0.44: the brain swerves around
   obstacles instead of stopping. Neither arm keeps the stop skill inside training; the LAST checkpoint passes
   in 2 of 4 runs (KO_s1, DO_s1), and only DO_s1 also meets the crash limit.
+
+## World change: wreck_time 5 -> 10 s (owner, 2026-10-24)
+- `SimConfig.wreck_time` default 5.0 -> 10.0 (sim.py, sim_torch.py, sim.js via sim-config.js). Reason: at very high
+  demand deadlocks dissolved unrealistically because crashes cleared after 5 s. wreck_time is a world setting,
+  not interface: all brains (also old checkpoints) now drive in the 10-s world.
+- All site numbers (bench, fundamental diagram, cloud) re-measured in the new world; earlier rounds (1-7) were
+  measured with 5 s wrecks, so their numbers are not comparable with the new ones.
+
+## Blockade scenarios: obstacles that cannot be passed around (2026-10-24, branch coordinator/blocked, no training)
+- Why: round 6 lost the stop skill (gate stop_rate 0.71 -> 0.44 at safe ~0.96) because single obstacles can be
+  passed around. New SimConfig `obstacle_block` (default 0 = off, bit-identical: state hashes of the old code
+  reproduced, tests/test_obstacles.py): this share of the obstacle placements is a BLOCKADE = 3 standing bodies
+  (BLOCK_BODIES) crosswise side by side across the FULL road width of an arm (both directions, curb to curb:
+  even swerving into the oncoming half is blocked, like a crash site), centres 2W/3 apart (W = 7: gaps 0.07 m
+  between the bodies, 0.03 m to the curbs; a car needs 1.8 m). Line distance to the centre in [W + Rc + 1,
+  L - 20] = [17, 30] m (the arm is straight there, no widening at the curb rounding). Same rules as single
+  obstacles: every body obstacle_clear to every car (only where every approaching car - incoming AND outgoing -
+  can still stop), obstacle_time, one wreck/parked draw for the whole group, placed while fewer than
+  obstacle_max obstacle bodies stand and 3 slots are free (stats.obstacles counts bodies). sim.py + sim_torch.py
+  (parity cpu + cuda incl. CUDA graph); sim.js not touched (training-only option). Outcome-only: no reward change.
+- Stop gate: 36 block cases (speeds x gaps x wreck/parked x car lateral start 3.5 / 1.4 m right of the centre;
+  blockade at y = -19) in the same batch, reported as separate `block_*` fields (the 108 old cases and their
+  numbers are unchanged); `cli gate`, `evalset`, `select` (column `block`) and ppo eval lines show
+  `block_stop_rate_feasible`. Nothing can be passed: safe = stopped.
+
+  | brain | gate safe / stop (old cases) | block stop (feasible 32 / all 36) | failures (feasible) |
+  |---|---|---|---|
+  | round5_best | 0.989 / 0.705 | 0.906 / 0.806 | 3 x off-road at gap 30 (10/14 m/s) |
+  | round6_best | 0.955 / 0.443 | 0.875 / 0.778 | 4 x off-road at gap 30 (6/10/14 m/s) |
+  | round4_best | 0.989 / 0.989 | 0.719 / 0.639 | 8 x crash into the blockade, 1 x off-road |
+
+  Both brains mostly DO stop when nothing can be passed; the feasible failures are swerves to the curb (off-road)
+  when the blockade is seen from far (30 m), i.e. trying to get around; the 4 infeasible cases (14 m/s, 10 m) crash.
+  The older round4_best (which never passes single obstacles) crashes INTO blockades: a crosswise row of bodies
+  is a new constellation; it is no harder for the newer brains than a single obstacle.
+- Placements (round6_best, obstacle_envs 1, 16 envs x 90 s, seed 1000; per env-minute): blockades 3.7 / 2.3 / 0.6
+  at demand 0.1 / 0.3 / 0.5 with obstacle_block 1 (singles at block 0: 5.4 / 2.2 / 0.8). Crashes rise a lot with
+  blockades (demand 0.5: 25 -> 116 (block 0.5) -> 147 (block 1)), but few are direct obstacle hits (0-8): mostly
+  car-car crashes in the queues / the jammed box (exiting cars cannot leave through a blocked arm).
+- Sheet (runs: scratch, round6_best, demand 0.2, obstacle_envs 1, obstacle_block 1, seed 4000, 60 s): blockades are
+  drawn as 3 grey (parked) or hazard-lit bodies across the arm; incoming cars queue in front of them, but exiting
+  cars bunch up on the box side of the blockade and two pairs crash there (4 crash cars, 1 obstacle hit).
+- GPU smoke (r6_DO_s2 recipe, --init runs/r6_DO_s2/state.npz, wreck_time 10, obstacle_block 0.5, 2048 envs,
+  30 iterations): runs; ~6.0 s/it (r6_DO_s2: 4.15 s/it with 5-s wrecks, no blockades); train crash share
+  2.5-2.8 % (r6 end: 1.2-1.7 %), obstacle hits per episode ~350 (r6: ~21) - the blockades are hit a lot, i.e.
+  there is a training signal for stopping.
+
+## All obstacles show hazard lights; GPU background mode (2026-10-24, branch coordinator/round9, smokes only)
+- Owner 2026-10-24: hazard = not a participant. Parked-type obstacles (single and blockade bodies) now show the
+  hazard feature like wreck-type ones (sim.py / sim_torch.py: hazard = `wreck`; `parked` is drawing only).
+  Obstacles off bit-identical. Stop gate round6_best: safe_feasible 0.955 -> 1.0, stop_feasible 0.443 -> 0.432,
+  block_stop_feasible 0.875 -> 0.938 (its parked cases now carry hazard; old gate numbers not comparable).
+- ppo.py background mode: `--gpu-duty F` (pause t_iter * (1/F - 1) after each iteration; `runs/<name>/duty.txt`
+  overrides it live, log fields duty / t_sleep), `--low-priority` (BELOW_NORMAL on Windows, also spawned
+  workers / eval), `--eval-workers 0` (no background evals, final one still runs). Smoke (r6_DO_s2 state,
+  cuda rollout 1024 envs, obstacle_envs 0.75, obstacle_block 0.5, 10-s wrecks): duty 1.0: 0.94 s/it, GPU ~80 %;
+  duty 0.5: 0.94 busy + 0.94 sleep = 1.89 s/it, GPU ~43 %; duty.txt 0.25 live: 4.3 s/it, GPU ~31 % (idle ~8 %).
+
+## Round 7: blockades in training (2026-10-24, branch coordinator/round9)
+- Arms: round-6 DO recipe (runs/r6_DO_s2/args.json: dense curriculum ceiling 0.5 / lo 0.1, obstacle_envs 0.75,
+  crash cost x3, n_slots 40, 8 neighbours), continued from runs/r6_DO_s2/state.npz (iter 799) for 300 iterations
+  (--iters 1100), current world (10-s wrecks, hazard on all obstacles). DOB_s1 / DOB_s2: obstacle_block 0.5;
+  DO_s1: control, obstacle_block 0. GPU background mode (owner gaming): cuda rollout 1024 envs x 32 steps,
+  --gpu-duty 0.5 --low-priority --eval-workers 1: 2.64 s/it (1.32 busy + 1.32 sleep, effective duty 0.50), ~13 min
+  per run. Train obstacle hits per iteration fell from 28-70 (blockade arms, first iterations) to 1-2.
+- Selection (results/round7_select.jsonl, selection seeds, gate >= 0.95, ref round6_best; stop / block = stop and
+  block-stop rate feasible). LAST checkpoints: DOB_s1@1099 gate 1.00 / 0.41 / block 1.00 (passes);
+  DO_s1@1099 0.93 / 0.34 / 0.75 (FAILS); DOB_s2@1099 0.98 / 0.46 / 1.00 (passes). All DOB checkpoints from
+  iter 900 on have block stop 1.00; the control stays at 0.69-0.88 and fails the gate in 3 of 7 checkpoints.
+  Selected: DOB_s1@1050, DO_s1@1050, DOB_s2@950 (overall); DOB_s2@1099 had the best crash/throughput balance.
+- HELD-OUT seeds 4000/5000/6000 (results/round7_heldout.jsonl, results/round7_deadlock.jsonl; 8 envs x 120 s, no
+  obstacles; thr/min / crash+off per 1000 / timeouts per 1000 / % time deadlocked):
+
+  | | 0.15 | 0.3 | 0.4 | 0.5 | gate safe / stop / block stop |
+  |---|---|---|---|---|---|
+  | round6_best | 33.2/4/0 | 66.0/5/0/0.2 | 82.7/18/1 | 88.0/47/5/22 | 1.00 / 0.43 / 0.94 |
+  | r7_DOB_s1@1050 | 33.3/2/0 | 66.2/4/0/0.3 | 83.5/12/2 | 97.6/18/3/11 | 0.98 / 0.39 / 1.00 |
+  | r7_DOB_s2@1099 | 33.3/3/0 | 65.8/4/0/2.7 | 86.2/6/0 | 88.9/26/7/22 | 0.98 / 0.46 / 1.00 |
+
+  At 0.5 per seed: DOB_s1@1050 thr 102.5/95.3/94.9 vs round6_best 86.6/93.8/83.6, crash+off 19/36/32 vs 96/67/45
+  (better on every seed). DOB_s2@1099 is noisier at 0.5 (thr 79.4 on seed 5000). (Old round-6 numbers were
+  measured with 5-s wrecks; round6_best in the 10-s world: 88/min at 0.5, deadlock time 22 %.)
+- Lamp (owner question: with honest hazard marking, is the lamp used more clearly?). Emitted lamp, held-out
+  seeds, mean / share > 0 (stuck = deadlock module's stuck cars, approach = outside the box zone driving inwards):
+
+  | brain | demand | approach | moving in zone | stuck | leaving |
+  |---|---|---|---|---|---|
+  | round6_best | 0.3 | +0.44 / 78 % | -0.83 / 2 % | -0.92 / 0 % | -0.77 / 1 % |
+  | round6_best | 0.5 | +0.40 / 75 % | -0.80 / 4 % | -0.85 / 3 % | -0.64 / 7 % |
+  | DOB_s1@1050 | 0.3 | +0.36 / 74 % | -0.82 / 3 % | -0.82 / 0 % | -0.69 / 5 % |
+  | DOB_s1@1050 | 0.5 | +0.31 / 71 % | -0.83 / 3 % | -0.86 / 3 % | -0.62 / 8 % |
+
+  The lamp is an "approaching" announcement (on before the box, off inside it); stuck and moving cars in the zone
+  do not differ, so it is not a "stuck" / yield signal. Lamp-zeroed receivers (0.3 / 0.5): round6_best crash+off
+  5 -> 41 / 46 -> 136, thr 88 -> 74 at 0.5, DL time 22 -> 35 %; DOB_s1@1050 4 -> 19 / 18 -> 69, thr 98 -> 89,
+  DL time 11 -> 17 %. Both still depend strongly on the lamp; the pattern did not become clearer (slightly
+  weaker on approach), and the new brain is somewhat less lamp-dependent in relative throughput terms.
+- Decision: r7_DOB_s1@1050 -> results/round7_best.npz: +11 % throughput and 0.4x crashes at 0.5 vs round6_best on
+  held-out seeds, deadlock time halved (22 -> 11 %), gate safe 0.98, block stop 1.00 (0.94). Blockade training
+  also keeps the gate: the control (DO_s1) lost block stop and the gate in the same 300 iterations. Caveat: the
+  candidate pick among two passing checkpoints used held-out numbers; the old-case stop rate stays ~0.4 (passing
+  single obstacles is still preferred over stopping).
+- Fresh-seed check (seeds 7000-10000, never used for any choice; the held-out seeds had been used to pick between
+  the two round-7 candidates): thr/min / crash+off per 1000 / timeouts at 0.3, 0.4, 0.5 -
+  round6_best 66.4/9/0.5, 86.0/12/2.5, 92.1/40/5.2; round7_best (DOB_s1@1050) 67.2/1/0, 89.6/3/0, 99.4/20/3.8;
+  DOB_s2@1099 67.2/3/0, 85.5/9/5.2, 94.5/25/11.2 (results/round7_confirm_fresh.jsonl). round7_best confirmed.

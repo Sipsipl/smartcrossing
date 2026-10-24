@@ -35,6 +35,10 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
   stale docs/compat layers, unclear names) so no technical debt builds up. The coordinator decides
   when: between rounds, not while a sim change or training is in flight. Procedure: read-only audit
   first, then refactor with acceptance "pytest green + bench/parity identical before vs after".
+- Honest perception of non-participants (owner, 2026-10-24): all obstacles show hazard lights (single
+  obstacles and blockade bodies, wreck-type AND parked-type) - hazard = not a participant, hazard off = a
+  participant. Brake light off, lamp 0. `obstacle_parked` only changes the drawing (undimmed body + hazard blink).
+  Training semantics change only with obstacles on; obstacles off is bit-identical, old checkpoints unaffected.
 - Deliverable: a live, in-browser visualisation with a few sliders (keep it simple),
   incl. mixing agent types.
 
@@ -43,7 +47,7 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
   Kinematic unicycle with curvature, steering-rate and grip limits, dt=0.1 s. Cars spawn at a
   random lateral offset on the right half of the road in driving direction (`spawn_right`, default
   for baselines and learners; own spot if clear, else uniform among the clear spots; up to 3 per arm
-  and step, side by side), must exit through target arm. Crashed cars stay 5 s as wrecks (hazard
+  and step, side by side), must exit through target arm. Crashed cars stay 10 s as wrecks (was 5 s until round 7) (hazard
   lights, driving into one = crash). Car-car collision via
   3 discs per car, off-road via rounded-corner distance. Removal on crash/offroad/exit/timeout.
   Observations are mirror-neutral: own state in a canonical frame (entry arm = south; position
@@ -96,7 +100,9 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
   live dot uses the same one: site/src/js/fdwindow.js, node-tested); `cli incentives` = reward accounting of a stuck car.
 - Obstacle scenarios (training option, round 2): SimConfig `obstacle_envs` (fraction of envs; 0 = off and
   bit-identical), `obstacle_rate`, `obstacle_time`, `obstacle_max`, `obstacle_parked`, `obstacle_box`: wrecks /
-  parked cars appear on a path (never closer than a car could stop).
+  parked cars appear on a path (never closer than a car could stop). `obstacle_block` (round 8; 0 = off, bit-identical):
+  that share of the placements is a blockade of 3 bodies crosswise across the full road width of an arm (both
+  directions), so only stopping avoids the crash; the stop gate reports its block cases as `block_*`.
 - `smartcrossing/policy.py` (shared MLP, numpy, `PolicyDriver`). The old ES trainer was removed
   (history only); ES checkpoints still load via `policy_compat.py`.
   `smartcrossing/policy_compat.py`: running old checkpoints (observation-layout remap by
@@ -171,6 +177,15 @@ crashes in the box; lamp unused so far.
    blocked, e.g. two wrecks side by side or a wreck plus a standing queue), so only stopping avoids the
    crash - outcome-only, no style cost (NOT a penalty for passing close to obstacles). Then longer DO
    runs; then GRU memory and a shared reward component (owner decision) against remaining deadlocks.
+4c. Curriculum rule (owner OK, 2026-10-24): the training demand ceiling grows with the brain. When the main
+   brain is stuck (deadlock) less than ~5 % of the time at the current ceiling (`cli deadlock`, report
+   seeds), raise the ceiling in the next round (keep sampling low demands). Not before: above capacity
+   (~96/min) more demand mostly means longer queues, more training crashes, slower runs and the n_slots
+   limit. Today (ceiling 0.5 /s/arm = 120/min) the brain is still stuck 12-23 % of the time there.
+   Practice obstacles stay part of the normal training world (no separate obstacle training): deadlocks
+   do not replace them (slow roll-in inside the box, they get rarer as the brain improves; the round-7
+   control with dense traffic but no blockades lost block stop 1.00 -> 0.75). Open check (optional):
+   a run with no artificial obstacles at all, real 10-s wrecks only.
 5. Then (D) norm experiments (lamp language, priority patterns) - (G) feeds directly into them.
 
 - (G) Deadlocks and decentralised negotiation (owner, 2026-10-14; the interesting part from a game-theory
@@ -217,10 +232,13 @@ crashes in the box; lamp unused so far.
   A = more exploration; B = A + obstacle scenarios (some envs start with a wreck/standing car on a
   path); C = B + crash cost by OWN impact speed (standing car pays only the base cost; still
   outcome-only physics). The owner decides on C after the numbers.
-- (F) Geometry variety (long term): roundabout-like and non-right-angled crossings, then a whole
-  village (road network; cars start/end at driveways or the map edge). Needs geometry-independent
-  inputs (C), a road-graph representation instead of the hard-coded 4-arm crossing, and route
-  information (next turn) as input instead of only the exit arm.
+- (F) Geometry variety (long term; owner 2026-10-24): after the two open core problems (stop skill,
+  deadlocks) are solved. Order: (1) a non-right-angled crossing (closest to today's setup), (2) a motorway
+  on-ramp / merge (Autobahnzufahrt: merging into a flowing stream, gap acceptance - owner's wish), (3) a
+  roundabout, (4) later a whole village (road network; cars start/end at driveways or the map edge). Needs
+  geometry-independent inputs (C), a road-graph representation instead of the hard-coded 4-arm crossing,
+  and route information (next turn / merge) as input instead of only the exit arm; likely retraining from
+  scratch per geometry family.
 - Run tracking (owner, 2026-10-11), with the next refactoring step: git commit hash (+ dirty flag)
   in every run's args.json, full state.npz of important runs kept under results/ (cloud runs were
   lost), a small script listing runs/ (name, commit, settings, key metrics). The owner needs no
@@ -237,7 +255,7 @@ crashes in the box; lamp unused so far.
   too; owner, 2026-10-11): fewer crashes / space problems at the map edge. This gives up the
   "does a driving side emerge on its own" question (earlier runs already showed the cars agree on a
   side); the other norm questions in (D) remain.
-- Wrecks: crashed cars stay for 5 s as standing obstacles (driving into one = own crash) with hazard
+- Wrecks: crashed cars stay for 10 s (owner change 2026-10-24; was 5 s until round 7) as standing obstacles (driving into one = own crash) with hazard
   lights that other cars can see (a physically visible signal, no rule information), then vanish.
   Mirror in sim.js / site rendering.
 - Higher fixed crash/off-road cost, see (E).

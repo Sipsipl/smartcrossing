@@ -54,6 +54,7 @@ def test_ppo_main_fresh_resume_and_index(tmp_path):
     assert all(r.get("critic_warmup") for r in log[8:12])
     np.testing.assert_array_equal(np.load(run / "state.npz")["actor"], actor_before)
     assert log[-1]["total_steps"] == sum(r["car_steps"] for r in log)
+    assert not any("duty" in r or "t_sleep" in r for r in log)  # no background mode: log unchanged
     # the runs index lists the run and skips folders that are not runs
     (runs / "junk").mkdir()
     (runs / "notes.txt").write_text("x", encoding="utf-8")
@@ -77,6 +78,44 @@ def test_ppo_main_torch_rollout_cpu(tmp_path):
               "--rollout-envs", "3", *TINY])
     log = _log(tmp_path / "gpu_path")
     assert len(log) == 2 and log[-1]["car_steps"] > 0
+
+
+def test_background_mode_duty(tmp_path, monkeypatch):
+    """--gpu-duty pauses t_iter * (1/F - 1) after each iteration; runs/<name>/duty.txt overrides it while running;
+    --eval-workers 0 skips the background evals but the final checkpoint is still evaluated."""
+    assert ppo.duty_sleep(2.0, 0.5) == 2.0 and ppo.duty_sleep(2.0, 1.0) == 0.0 and ppo.duty_sleep(1.0, 0.25) == 3.0
+    assert ppo.read_duty(tmp_path / "missing.txt", 0.7) == 0.7
+    (tmp_path / "d.txt").write_text(" 0.4 ", encoding="utf-8")
+    assert ppo.read_duty(tmp_path / "d.txt", 1.0) == 0.4
+    (tmp_path / "d.txt").write_text("junk", encoding="utf-8")
+    assert ppo.read_duty(tmp_path / "d.txt", 0.9) == 0.9
+    slept = []
+    monkeypatch.setattr(ppo.time, "sleep", slept.append)
+    jobs = []
+    real_ctx = ppo.mp.get_context("spawn")
+
+    class Ctx:  # eval processes are only recorded; rollout workers run for real
+        def Process(self, target, args, **kw):
+            if target is ppo.eval_job:
+                jobs.append(args[2])
+                return type("P", (), {"start": lambda s: None, "join": lambda s, timeout=None: None,
+                                      "is_alive": lambda s: False})()
+            return real_ctx.Process(target=target, args=args, **kw)
+
+        def Pipe(self, *a, **kw):
+            return real_ctx.Pipe(*a, **kw)
+
+    monkeypatch.setattr(ppo.mp, "get_context", lambda method: Ctx())
+    ppo.main(["--name", "bg", "--iters", "3", "--runs-dir", str(tmp_path), "--gpu-duty", "0.5", "--eval-workers", "0",
+              *TINY, "--eval-every", "1"])
+    log = _log(tmp_path / "bg")
+    assert [r["duty"] for r in log] == [0.5] * 3 and len(slept) == 2  # (no pause after the final iteration)
+    assert jobs == [2]  # --eval-workers 0: only the final checkpoint is evaluated
+    (tmp_path / "bg" / "duty.txt").write_text("1", encoding="utf-8")
+    ppo.main(["--name", "bg", "--iters", "5", "--runs-dir", str(tmp_path), "--gpu-duty", "0.5",
+              "--init", str(tmp_path / "bg" / "state.npz"), *TINY])
+    log = _log(tmp_path / "bg")
+    assert [r["duty"] for r in log[3:]] == [1.0, 1.0] and all(r["t_sleep"] == 0 for r in log[3:]) and len(slept) == 2
 
 
 def test_eval_job_uses_the_run_world(tmp_path, monkeypatch):

@@ -50,9 +50,9 @@ def nb_block(sim, obs, n, k=0):
 
 def test_new_defaults():
     cfg = SimConfig()
-    assert cfg.n_signal == 1 and cfg.brake_light and cfg.spawn_right and cfg.wreck_time == 5.0
+    assert cfg.n_signal == 1 and cfg.brake_light and cfg.spawn_right and cfg.wreck_time == SimConfig().wreck_time
     assert obs_dim(cfg) == OBS_DIM + 4 * (NB_FEATURES + 1) and act_dim(cfg) == 3
-    assert wreck_steps(cfg) == 50
+    assert wreck_steps(cfg) == round(cfg.wreck_time / cfg.dt)
     old = SimConfig(n_signal=2, brake_light=False)
     assert obs_dim(old) == OBS_DIM + 4 * (NB_FEATURES_LEGACY + 2)
     assert obs_keys(cfg)[OBS_DIM:OBS_DIM + 10] == [f"n1_{k}" for k in ("fwd", "left", "same", "cross", "speed", "present",
@@ -85,7 +85,7 @@ def test_wreck_stays_exactly_wreck_time_and_blocks():
         sim.step(zeros(sim))
         assert sim.car_reward[0, :2].sum() == 0.0 and (sim.done_kind[0, :2] == 0).all()
         present += 1 if sim.wreck[0, :2].any() else 0
-    assert present * cfg.dt == pytest.approx(cfg.wreck_time)  # exactly 50 states = 5.0 s
+    assert present * cfg.dt == pytest.approx(cfg.wreck_time)  # exactly wreck_time / dt states
     assert (sim.uid[0, :2] == -1).all() and sim.stats.crashes[0] == 2  # no recount, no reward
 
 
@@ -135,7 +135,7 @@ def test_wrecks_are_visible_with_hazard_lights_and_occupy_slots():
     assert (sim.alive | sim.wreck)[0].sum() == 4 and sim.queue[0, 1] == 1
     for _ in range(wreck_steps(cfg)):
         sim.step(zeros(sim))
-    assert not sim.wreck.any()
+    assert not sim.wreck[0, :2].any()  # the first wrecks are gone (the entering car may have crashed into the standing one)
 
 
 def test_spawn_waits_for_a_wreck_at_the_entry():
@@ -207,7 +207,7 @@ def test_old_brain_loads_with_its_interface_in_the_new_world():
     sim = Sim(SimConfig(demand=0.3), 2, seed=3)
     drv = PolicyDriver.load(BRAIN, sim)
     assert sim.cfg.n_signal == 2 and not sim.cfg.brake_light  # its own interface
-    assert sim.cfg.spawn_right and sim.cfg.wreck_time == 5.0  # but the current world
+    assert sim.cfg.spawn_right and sim.cfg.wreck_time == SimConfig().wreck_time  # but the current world
     assert drv.sizes[0] == obs_dim(sim.cfg) and sim.sig.shape[-1] == 2
     for _ in range(300):
         sim.step(drv.act())

@@ -12,7 +12,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from conftest import CUDA, DEVICES  # noqa: E402
-from smartcrossing.sim import STAT_NAMES, Sim, SimConfig, act_dim  # noqa: E402
+from smartcrossing.sim import BLOCK_BODIES, STAT_NAMES, Sim, SimConfig, act_dim  # noqa: E402
 from smartcrossing.sim_torch import TorchSim  # noqa: E402
 
 TOL = 1e-9
@@ -47,7 +47,11 @@ def _close(name, t, ref, mask=None, tol=TOL):
          spawn_right=False, wreck_time=0.0),
     # round 2: crash cost by own impact speed + obstacle scenarios (wrecks and parked cars) in half the envs
     dict(n_slots=24, r_time=0.02, demand_range=(0.2, 0.5), crash_cost_speed="own", obstacle_envs=0.5,
-         obstacle_rate=2.0, obstacle_time=3.0, obstacle_max=3),
+         obstacle_rate=2.0, obstacle_time=3.0, obstacle_max=3,
+         wreck_time=5.0),  # (long wrecks block the traffic so much that no obstacle gets hit in the short run)
+    # round 8: blockades (full road width, several bodies at once) in half of the placements
+    dict(n_slots=32, r_time=0.02, demand_range=(0.2, 0.5), obstacle_envs=0.5, obstacle_rate=2.0, obstacle_time=3.0,
+         obstacle_max=3, obstacle_block=0.5, wreck_time=5.0),
     # more neighbour slots (set encoder interface); and more slots than cars (padding)
     dict(n_slots=24, demand=0.5, n_neighbours=10, L=30.0),  # short arms: exits within the short cuda run
     dict(n_slots=6, demand=0.5, n_neighbours=10, L=30.0),
@@ -62,8 +66,9 @@ def test_torch_matches_numpy(device, cfg_kw):
     rng = np.random.default_rng(3)
     kinds = np.zeros(6, np.int64)
     worst = 0.0
-    n_wreck_seen = n_parked_seen = n_obst_wreck_seen = 0
+    n_wreck_seen = n_parked_seen = n_obst_wreck_seen = n_blocks = 0
     for t in range(steps):
+        placed = ref.stats.obstacles.copy()
         o_ref = ref.observe()
         o_t = ts.observe()
         worst = max(worst, _close(f"obs@{t}", o_t, o_ref))
@@ -77,6 +82,7 @@ def test_torch_matches_numpy(device, cfg_kw):
         assert np.array_equal(ts.obstacle.cpu().numpy(), ref.obstacle), f"obstacle@{t}"
         assert np.array_equal(ts.parked.cpu().numpy(), ref.parked), f"parked@{t}"
         n_wreck_seen += int(ref.wreck.sum())
+        n_blocks += int((ref.stats.obstacles - placed >= BLOCK_BODIES).sum())  # a blockade in one step
         n_parked_seen += int(ref.parked.sum())
         n_obst_wreck_seen += int((ref.obstacle & ~ref.parked).sum())
         assert np.array_equal(ts.done_kind.cpu().numpy(), ref.done_kind), f"done_kind@{t}"
@@ -99,11 +105,13 @@ def test_torch_matches_numpy(device, cfg_kw):
     if cfg.obstacle_envs > 0:  # obstacles of both kinds appeared and were hit
         assert ref.stats.obstacles.sum() >= 4 and n_parked_seen > 0 and n_obst_wreck_seen > 0
         assert ref.stats.obstacle_hits.sum() > 0 or steps < 300  # (the short cuda run may have none)
+    assert (n_blocks > 0) == (cfg.obstacle_block > 0), n_blocks
     print(f"[{device}] max abs deviation over {steps} steps: {worst:.3g}; done kinds {kinds.tolist()}")
 
 
 @CUDA
-@pytest.mark.parametrize("extra", [{}, dict(obstacle_envs=0.5, obstacle_rate=2.0, crash_cost_speed="own")])
+@pytest.mark.parametrize("extra", [{}, dict(obstacle_envs=0.5, obstacle_rate=2.0, crash_cost_speed="own"),
+                                   dict(obstacle_envs=0.5, obstacle_rate=2.0, obstacle_block=0.5)])
 def test_cuda_graph_matches_eager(extra):
     """The CUDA-graph replay of step() gives the same trajectory as eager stepping (torch rng)."""
     cfg = SimConfig(n_slots=24, demand=0.4, **extra)
@@ -163,3 +171,29 @@ def test_reset_inplace_is_reproducible(demand_range):
     assert int(fresh.stats.spawned.sum()) > 0
     for name in ("alive", "uid", "x", "y", "queue", "man"):
         assert torch.equal(getattr(reused, name), getattr(fresh, name)), name
+
+
+def test_every_obstacle_shows_hazard_in_torch_obs():
+    """Owner 2026-10-24 (hazard = not a participant): parked-type and wreck-type obstacles both show the
+    hazard feature; brake light off, lamp 0. Hand-built numpy state copied into TorchSim, obs must agree."""
+    from smartcrossing.sim import NB_FEATURES, OBS_DIM
+    cfg = SimConfig(demand=0.0)
+    ref = Sim(cfg, 1, seed=0)
+    ref.alive[0, 0] = True
+    ref.x[0, 0], ref.y[0, 0], ref.th[0, 0], ref.v[0, 0] = 3.5, -30.0, np.pi / 2, 5.0
+    for n, (y, parked) in enumerate(((-20.0, True), (-10.0, False)), start=1):
+        ref.wreck[0, n] = ref.obstacle[0, n] = True
+        ref.parked[0, n] = parked
+        ref.wreck_left[0, n] = 100
+        ref.x[0, n], ref.y[0, n], ref.th[0, n] = 3.5, y, np.pi / 2
+    ts = TorchSim(cfg, 1, seed=0, device="cpu", dtype=torch.float64, rng="numpy")
+    for name, val in vars(ref).items():
+        cur = getattr(ts, name, None)
+        if isinstance(val, np.ndarray) and isinstance(cur, torch.Tensor) and tuple(cur.shape) == val.shape:
+            setattr(ts, name, torch.as_tensor(val, dtype=cur.dtype))
+    o_ref, o_t = ref.observe()[0, 0], ts.observe()[0, 0].numpy()
+    _close("obs", torch.as_tensor(o_t), o_ref)
+    blk = NB_FEATURES + cfg.n_signal
+    for k in range(2):
+        f = o_t[OBS_DIM + k * blk: OBS_DIM + (k + 1) * blk]
+        assert f[5] == 1 and f[8] == 1 and f[7] == 0 and f[NB_FEATURES:].sum() == 0

@@ -13,8 +13,8 @@
 <div class="wrap">
 <!-- HEADER -->
 <h1 data-i18n="learn.wie-lernen-die-autos-2">Wie lernen die Autos?</h1>
-<p data-i18n="learn.niemand-bringt-den-autos" class="lead">Niemand bringt den Autos das Fahren bei. Sie probieren es einfach – sehr, sehr oft – und bekommen Punkte dafür, wie es gelaufen ist.
-Daraus wird nach und nach ein Gehirn, das fahren kann.</p>
+<p data-i18n="learn.niemand-bringt-den-autos" class="lead">Die Autos bekommen keine Verkehrsregeln. Sie fahren immer wieder über die Kreuzung<span id="train-steps-part"> (im letzten Trainingsstrang rund <b id="train-steps"></b> Millionen Fahrschritte; ein Fahrschritt ist eine Entscheidung eines Autos)</span>
+und bekommen Punkte für das Ergebnis: Ankommen gibt Plus, Unfall und Warten kosten. Ein Lernverfahren passt ihr Gehirn so an, dass mehr Punkte herauskommen.</p>
 
 <svg data-i18n-attr="aria-label=learn.aria-lernschleife-fahren-bewerten" class="diagram wide-only" viewBox="0 0 640 300" role="img" aria-label="Lernschleife: fahren, bewerten, Gewichte anpassen, wiederholen">
   
@@ -50,80 +50,32 @@ Daraus wird nach und nach ein Gehirn, das fahren kann.</p>
 <rect class="box" x="10" y="355" width="260" height="84" rx="12"/><text x="26" y="385"><tspan data-i18n="learn.wiederholen-2" font-weight="700">4 · Wiederholen</tspan></text><text data-i18n="learn.hunderte-male-jedes-mal" class="sub" x="26" y="409">Hunderte Male, jedes Mal</text><text data-i18n="learn.mit-dem-etwas-besseren" class="sub" x="26" y="427">mit dem etwas besseren Gehirn.</text>
 <path class="arrow" d="M272 397 H298 V52 H278" marker-end="url(#ah)"/></svg>
 
-<h2 data-i18n="learn.die-punkte-belohnung">Die Punkte (Belohnung)</h2>
-<p data-i18n="learn.die-autos-bekommen-nur">Die Autos bekommen nur für das <b>Ergebnis</b> Punkte, nie für einen Fahrstil. Niemand sagt „fahr rechts“ oder „bremse vor der Kurve“, es gibt keine Spuren und keine Regeln. Was funktioniert, finden die Autos selbst heraus.</p>
+<h2 data-i18n="learn.die-punkte-belohnung">Belohnung</h2>
+<p class="sub" data-i18n="learn.belohnung-sub">Wofür gibt es Punkte?</p>
+<p data-i18n="learn.die-autos-bekommen-nur">Die Autos bekommen nur für das <b>Ergebnis</b> Punkte, nie für einen Fahrstil. Es gibt keine Vorgabe wie „fahr rechts“ oder „bremse vor der Kurve“, keine Spuren und keine Regeln. Was funktioniert, finden die Autos selbst heraus.</p>
 <div data-i18n-attr="aria-label=learn.aria-punkteskala-der-belohnung" id="reward" class="reward" aria-label="Punkteskala der Belohnung"></div>
 <p class="muted small" id="reward-note"></p>
 
-<h2 data-i18n="learn.zwei-lernmethoden">Zwei Lernmethoden</h2>
-<div class="two">
-  <div class="card">
-    <h3 data-i18n="learn.evolution-evolution-strategies" style="margin-top:0">Evolution (Evolution Strategies)</h3>
-    <svg data-i18n-attr="aria-label=learn.aria-evolution-viele-leicht" class="diagram" viewBox="0 0 300 150" role="img" aria-label="Evolution: viele leicht veränderte Gehirne, die besten zeigen die Richtung">
-      <g fill="var(--muted)" opacity="0.55">
-        <circle cx="70" cy="40" r="9"/><circle cx="40" cy="80" r="9"/><circle cx="72" cy="118" r="9"/><circle cx="118" cy="128" r="9"/>
-      </g>
-      <g fill="var(--good)"><circle cx="160" cy="28" r="10"/><circle cx="196" cy="86" r="10"/><circle cx="168" cy="108" r="9" opacity="0.6"/></g>
-      <circle cx="110" cy="76" r="15" fill="var(--accent)"/>
-      <text x="110" y="81" text-anchor="middle" style="fill:var(--accent-ink);font-size:13px;font-weight:700">G</text>
-      <path class="arrow" d="M128 70 L196 52" marker-end="url(#ah)"/>
-      <circle cx="232" cy="46" r="15" fill="var(--accent)"/>
-      <text x="232" y="51" text-anchor="middle" style="fill:var(--accent-ink);font-size:13px;font-weight:700">G'</text>
-      <text data-i18n="learn.varianten-gruen-mehr-punkte" class="sub" x="150" y="146" text-anchor="middle" style="font-size:11px">48 Varianten · grün = mehr Punkte</text>
-    </svg>
-    <p data-i18n="learn.wir-nehmen-das-aktuelle">Wir nehmen das aktuelle Gehirn und machen <b>48 leicht veränderte Kopien</b> (die Gewichte werden ein wenig zufällig verwackelt).
-      Jede Kopie fährt eine Weile. Dann schauen wir: Welche Veränderungen haben mehr Punkte gebracht? In <b>diese Richtung</b> wird das Gehirn verschoben.
-      Eine Runde heißt <b>Generation</b>.</p>
-    <p data-i18n="learn.vorteil-sehr-einfach-und" class="muted small">Vorteil: sehr einfach und robust. Nachteil: Es zählt nur die Gesamtpunktzahl aller Autos – welches Auto was falsch gemacht hat, erfährt das Verfahren nicht. Das macht es langsam.</p>
-  </div>
-  <div class="card">
-    <h3 data-i18n="learn.ppo-proximal-policy-optimization" style="margin-top:0">PPO (Proximal Policy Optimization)</h3>
-    <svg data-i18n-attr="aria-label=learn.aria-ppo-jedes-auto" class="diagram" viewBox="0 0 300 150" role="img" aria-label="PPO: jedes Auto lernt aus seinen eigenen Erfahrungen, alle teilen ein Gehirn">
-      <circle cx="150" cy="75" r="17" fill="var(--accent)"/>
-      <text x="150" y="80" text-anchor="middle" style="fill:var(--accent-ink);font-size:13px;font-weight:700">G</text>
-      <g>
-        <rect x="24" y="18" width="34" height="16" rx="4" fill="#4287f5"/><rect x="236" y="22" width="34" height="16" rx="4" fill="#f5a623"/>
-        <rect x="30" y="112" width="34" height="16" rx="4" fill="#f0f0f0" stroke="var(--line)"/><rect x="232" y="110" width="34" height="16" rx="4" fill="#4287f5"/>
-      </g>
-      <g class="arrow" style="stroke-width:2">
-        <path d="M62 30 L130 66" marker-end="url(#ah)"/><path d="M232 34 L170 66" marker-end="url(#ah)"/>
-        <path d="M66 116 L132 86" marker-end="url(#ah)"/><path d="M230 114 L168 86" marker-end="url(#ah)"/>
-      </g>
-      <text data-i18n="learn.jedes-auto-meldet-was" class="sub" x="150" y="146" text-anchor="middle" style="font-size:11px">jedes Auto meldet, was ihm half</text>
-    </svg>
-    <p data-i18n="learn.hier-lernt-das-gehirn">Hier lernt das Gehirn aus den <b>Erlebnissen jedes einzelnen Autos</b>: Was hat es gesehen, was hat es getan, und wie ging es danach für <em>dieses</em> Auto aus?
-      Handlungen, die besser liefen als erwartet, werden wahrscheinlicher; schlechtere seltener – aber immer nur in kleinen, vorsichtigen Schritten.</p>
-    <p data-i18n="learn.alle-autos-teilen-trotzdem" class="muted small">Alle Autos teilen trotzdem ein Gehirn: Was eines lernt, können alle. Das ist meist viel schneller als Evolution, aber kniffliger einzustellen.</p>
-  </div>
-</div>
+<h2 data-i18n="learn.lernverfahren">Lernverfahren</h2>
+<p class="sub" data-i18n="learn.verfahren-sub">Wie aus Punkten ein besseres Gehirn wird</p>
+<p data-i18n="learn.eine-runde">Eine Trainingsrunde hat drei Schritte: Die Autos <b>fahren</b> eine Weile, jedes Auto bekommt <b>Punkte</b> für sein eigenes Ergebnis, und aus dem Erlebten werden die <b>gemeinsamen Gewichte angepasst</b>. Handlungen, die besser liefen als erwartet, werden wahrscheinlicher, schlechtere seltener – in kleinen, vorsichtigen Schritten. Das Verfahren heißt PPO (Proximal Policy Optimization).</p>
+<p class="muted small" data-i18n="learn.verfahren-historie">Frühe Gehirne entstanden durch Evolution: Kopien mit kleinen zufälligen Änderungen fahren, die besseren bleiben. Seit PPO ist das Training schneller, weil jedes Auto aus dem lernt, was es selbst getan hat.</p>
 
-<h2 data-i18n="learn.viele-autos-gleichzeitig-arbeiten">Viele Autos gleichzeitig: Arbeiten sie zusammen?</h2>
-<p data-i18n="learn.in-einer-simulation-fahren">In einer Simulation fahren immer viele Autos auf einmal, und damit es schneller geht, laufen viele Kreuzungen nebeneinander.
-  Abgesprochen wird dabei nichts. Ob die Autos aufeinander Rücksicht nehmen, hängt davon ab, wie gezählt wird:</p>
-<div class="two">
-  <div class="card">
-    <h3 data-i18n="learn.ppo-ein-gehirn-fuer" style="margin-top:0">PPO: ein Gehirn für alle</h3>
-    <svg data-i18n-attr="aria-label=learn.aria-ppo-in-allen" class="diagram" viewBox="0 0 300 112" role="img" aria-label="PPO: in allen Kreuzungen fährt dasselbe Gehirn, jedes Auto bekommt seine eigenen Punkte"><rect class="box" x="10" y="8" width="86" height="74" rx="8"/><rect x="11" y="37" width="84" height="16" fill="var(--line)"/><rect x="45" y="9" width="16" height="72" fill="var(--line)"/><circle cx="25" cy="45" r="9" fill="var(--accent)"/><text x="25" y="49" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px;font-weight:700">G</text><circle cx="53" cy="23" r="9" fill="var(--accent)"/><text x="53" y="27" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px;font-weight:700">G</text><circle cx="81" cy="45" r="9" fill="var(--accent)"/><text x="81" y="49" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px;font-weight:700">G</text><text data-i18n="learn.je-auto" class="sub" x="53" y="100" text-anchor="middle" style="font-size:11px">+ / − je Auto</text><rect class="box" x="107" y="8" width="86" height="74" rx="8"/><rect x="108" y="37" width="84" height="16" fill="var(--line)"/><rect x="142" y="9" width="16" height="72" fill="var(--line)"/><circle cx="122" cy="45" r="9" fill="var(--accent)"/><text x="122" y="49" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px;font-weight:700">G</text><circle cx="150" cy="23" r="9" fill="var(--accent)"/><text x="150" y="27" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px;font-weight:700">G</text><circle cx="178" cy="45" r="9" fill="var(--accent)"/><text x="178" y="49" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px;font-weight:700">G</text><text data-i18n="learn.je-auto-2" class="sub" x="150" y="100" text-anchor="middle" style="font-size:11px">+ / − je Auto</text><rect class="box" x="204" y="8" width="86" height="74" rx="8"/><rect x="205" y="37" width="84" height="16" fill="var(--line)"/><rect x="239" y="9" width="16" height="72" fill="var(--line)"/><circle cx="219" cy="45" r="9" fill="var(--accent)"/><text x="219" y="49" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px;font-weight:700">G</text><circle cx="247" cy="23" r="9" fill="var(--accent)"/><text x="247" y="27" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px;font-weight:700">G</text><circle cx="275" cy="45" r="9" fill="var(--accent)"/><text x="275" y="49" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px;font-weight:700">G</text><text data-i18n="learn.je-auto-3" class="sub" x="247" y="100" text-anchor="middle" style="font-size:11px">+ / − je Auto</text></svg>
-    <p data-i18n="learn.jedes-auto-in-jeder">Jedes Auto in jeder Kreuzung wird vom <b>selben Gehirn</b> gesteuert. Punkte bekommt jedes Auto <b>nur für sich</b> – eine Teamwertung gibt es nicht.
-      Trotzdem lohnt sich Rücksicht: Bei einem Zusammenstoß kassieren <em>beide</em> Autos Minuspunkte, je schneller, desto mehr. Und weil beide dasselbe Gehirn sind,
-      schadet eine Angewohnheit, die Unfälle baut, ihm gleich doppelt.</p>
-  </div>
-  <div class="card">
-    <h3 data-i18n="learn.evolution-jede-kopie-fuer" style="margin-top:0">Evolution: jede Kopie für sich</h3>
-    <svg data-i18n-attr="aria-label=learn.aria-evolution-jede-veraenderte" class="diagram" viewBox="0 0 300 112" role="img" aria-label="Evolution: jede veränderte Kopie fährt in eigenen Kreuzungen, gezählt wird die Summe aller Autos"><rect class="box" x="10" y="8" width="86" height="74" rx="8"/><rect x="11" y="37" width="84" height="16" fill="var(--line)"/><rect x="45" y="9" width="16" height="72" fill="var(--line)"/><circle cx="25" cy="45" r="9" fill="var(--accent)"/><text x="25" y="49" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px;font-weight:700">A</text><circle cx="53" cy="23" r="9" fill="var(--accent)"/><text x="53" y="27" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px;font-weight:700">A</text><circle cx="81" cy="45" r="9" fill="var(--accent)"/><text x="81" y="49" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px;font-weight:700">A</text><text data-i18n="learn.teampunkte" class="sub" x="53" y="100" text-anchor="middle" style="font-size:11px">Σ = Teampunkte</text><rect class="box" x="107" y="8" width="86" height="74" rx="8"/><rect x="108" y="37" width="84" height="16" fill="var(--line)"/><rect x="142" y="9" width="16" height="72" fill="var(--line)"/><circle cx="122" cy="45" r="9" fill="var(--good)"/><text x="122" y="49" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px;font-weight:700">B</text><circle cx="150" cy="23" r="9" fill="var(--good)"/><text x="150" y="27" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px;font-weight:700">B</text><circle cx="178" cy="45" r="9" fill="var(--good)"/><text x="178" y="49" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px;font-weight:700">B</text><text data-i18n="learn.teampunkte-2" class="sub" x="150" y="100" text-anchor="middle" style="font-size:11px">Σ = Teampunkte</text><rect class="box" x="204" y="8" width="86" height="74" rx="8"/><rect x="205" y="37" width="84" height="16" fill="var(--line)"/><rect x="239" y="9" width="16" height="72" fill="var(--line)"/><circle cx="219" cy="45" r="9" fill="var(--muted)"/><text x="219" y="49" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px;font-weight:700">C</text><circle cx="247" cy="23" r="9" fill="var(--muted)"/><text x="247" y="27" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px;font-weight:700">C</text><circle cx="275" cy="45" r="9" fill="var(--muted)"/><text x="275" y="49" text-anchor="middle" style="fill:var(--accent-ink);font-size:11px;font-weight:700">C</text><text data-i18n="learn.teampunkte-3" class="sub" x="247" y="100" text-anchor="middle" style="font-size:11px">Σ = Teampunkte</text></svg>
-    <p data-i18n="learn.jede-veraenderte-kopie-a">Jede veränderte Kopie (A, B, C …) fährt in <b>eigenen, getrennten Kreuzungen</b>, und dort fahren nur Autos mit genau dieser Kopie. Alle Kopien bekommen denselben Verkehr, damit der Vergleich fair ist.
-      Gezählt wird die <b>Summe aller Autos</b>, also ein Teamergebnis: Kopien, deren Autos gemeinsam gut durchkommen, ziehen das Gehirn in ihre Richtung.</p>
-  </div>
-</div>
+<h2 data-i18n="learn.ein-gehirn-fuer-alle">Ein Gehirn für alle</h2>
+<p class="sub" data-i18n="learn.gehirn-alle-sub">Viele Autos, eine Kopie desselben Netzes</p>
+<svg data-i18n-attr="aria-label=learn.aria-ein-netz" class="diagram" viewBox="0 0 300 170" role="img" aria-label="Ein Netz steuert mehrere Autos, jedes Auto bekommt seine eigenen Punkte"><rect class="box" x="90" y="8" width="120" height="36" rx="10"/><text data-i18n="learn.netz-box" x="150" y="31" text-anchor="middle" style="font-weight:700">Ein Netz</text><g class="arrow" style="stroke-width:2"><path d="M111.15 46 L39 92" marker-end="url(#ah)"/><path d="M137.4 46 L114 92" marker-end="url(#ah)"/><path d="M163.65 46 L189 92" marker-end="url(#ah)"/><path d="M189.9 46 L264 92" marker-end="url(#ah)"/></g><rect x="22" y="96" width="34" height="18" rx="4" fill="#4287f5"/><rect class="box" x="22" y="124" width="34" height="20" rx="10"/><text x="39" y="139" text-anchor="middle" style="font-size:13px;font-weight:700">+2</text><rect x="97" y="96" width="34" height="18" rx="4" fill="#f5a623"/><rect class="box" x="97" y="124" width="34" height="20" rx="10"/><text x="114" y="139" text-anchor="middle" style="font-size:13px;font-weight:700">−4</text><rect x="172" y="96" width="34" height="18" rx="4" fill="#f0f0f0" stroke="var(--line)"/><rect class="box" x="172" y="124" width="34" height="20" rx="10"/><text x="189" y="139" text-anchor="middle" style="font-size:13px;font-weight:700">+1</text><rect x="247" y="96" width="34" height="18" rx="4" fill="#4287f5"/><rect class="box" x="247" y="124" width="34" height="20" rx="10"/><text x="264" y="139" text-anchor="middle" style="font-size:13px;font-weight:700">+3</text><text data-i18n="learn.netz-punkte" class="sub" x="150" y="163" text-anchor="middle" style="font-size:11px">jedes Auto zählt seine eigenen Punkte</text></svg>
+<p data-i18n="learn.gehirn-alle-text">Im Training fährt jedes Auto mit einer Kopie desselben Netzes – also mit denselben Gewichten, aber mit seinen eigenen Beobachtungen. Lernt das Netz etwas dazu, gilt das sofort für alle Autos. Über die Dachlampe können die Autos einander Signale geben; was ein Signal bedeutet, legen sie selbst fest. Punkte bekommt jedes Auto für sein eigenes Ergebnis. Rücksicht lohnt sich trotzdem: Bei einem Zusammenstoß sitzt auf beiden Seiten dasselbe Netz, und es verliert doppelt. Damit das Training schneller geht, laufen {{TRAIN_ENVS}} Kreuzungen gleichzeitig, jede für sich.</p>
 
 <h2 data-i18n="learn.lernkurve">Lernkurve</h2>
-<p data-i18n="learn.wie-viele-der-autos">Wie viele der Autos sind während des Trainings angekommen, verunglückt oder von der Straße abgekommen? Die Nummern markieren, wo ich am Training etwas geändert habe:</p>
+<p class="sub" data-i18n="learn.kurve-sub">Wie sich das Training entwickelt hat</p>
+<p data-i18n="learn.wie-viele-der-autos">Anteil der Autos, die während des Trainings angekommen, verunglückt oder von der Straße abgekommen sind. Die Nummern markieren, wo ich am Training etwas geändert habe:</p>
 <div id="curves"></div>
 <ol id="chain-legend" class="phases small"></ol>
 <p data-i18n="learn.gemessen-beim-training-selbst" class="muted small">Gemessen beim Training selbst: Dort wird die Verkehrsmenge langsam gesteigert, sobald es gut läuft. Zwischen den Läufen haben sich auch Belohnung und Simulation geändert –
   die Kurve ist also eher ein Tagebuch als eine saubere Messung. Saubere Messungen stehen unter der Zeitreise.</p>
 
 <h2 data-i18n="learn.zeitreise">Zeitreise</h2>
+<p class="sub" data-i18n="learn.zeit-sub">Das Gehirn in verschiedenen Trainingsstufen</p>
 <p data-i18n="learn.hier-faehrt-jeweils-ein">Hier fährt jeweils ein gespeicherter Zwischenstand des Gehirns. Schieb den Regler und vergleiche: Am Anfang fahren die Autos wild durcheinander,
   später kommen die meisten an. (Alle Zwischenstände fahren mit genau demselben Verkehr.)</p>
 <div class="sim-layout">
@@ -139,7 +91,7 @@ Daraus wird nach und nach ein Gehirn, das fahren kann.</p>
     <div class="group">
       <h3 data-i18n="learn.irrwege-und-seitenwege">Irrwege und Seitenwege</h3>
       <p data-i18n="learn.nicht-jeder-trainingslauf-klappt" class="hint">Nicht jeder Trainingslauf klappt. Manchmal finden die Autos ein Schlupfloch in den Punkteregeln,
-        manchmal bringt eine Idee einfach nichts. Klick zeigt, wie sie fahren:</p>
+        manchmal bringt eine Idee nichts. Klick zeigt, wie sie fahren:</p>
       <div class="method-tabs" id="tt-others"></div>
     </div>
   </aside>

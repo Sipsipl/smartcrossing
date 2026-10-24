@@ -103,7 +103,7 @@ def test_discovery_chain_and_snapshot(tmp_path):
     assert "params" in r and "layers" not in r and r["params"][0] == round(d["params"][0], 2)
     # the stop gate of a snapshot brain (no checkpoint file) runs from its weights; unknown ids have none
     g = F.gate_of(snap_ctx, "r1_a/ckpt_0001")
-    assert set(g) == {"safe", "stop", "cases"} and 0 <= g["stop"] <= g["safe"] <= 1
+    assert set(g) == {"safe", "stop", "block", "cases"} and 0 <= g["stop"] <= g["safe"] <= 1 and 0 <= g["block"] <= 1
     assert F.gate_of(snap_ctx, "nope/x") is None and F.gate_text(snap_ctx, "{stop} %", "nope/x") == "? %"
 
 
