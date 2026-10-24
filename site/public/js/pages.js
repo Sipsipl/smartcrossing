@@ -322,6 +322,7 @@
         K: m.policy.arch.K, midw: tx(vm), mid,
         dense: dense && vd ? tx("note.dense", { dw: tx(vd), dense }) : "",
         thr: num(thr, 0), thrprev: num(thrPrev, 0), dem: num(m.bench["0.5"].demand_per_min, 0),
+        block: D.gate && D.gate.main ? pct(D.gate.main.block) : "?",
       })
       : tx("note.mlp", { much, mid });
   }
@@ -890,8 +891,9 @@
     if (G && $("g-safe")) {
       $("g-safe").textContent = SCX.pct(G.safe);
       $("g-stop").textContent = SCX.pct(G.stop);
+      $("g-block").textContent = SCX.pct(G.block);
       const GP = D.gate.previous;
-      if (GP) $("g-prev").textContent = tx("cmp.gateprev", { prev: SCX.pct(GP.stop), prevsafe: SCX.pct(GP.safe) });
+      if (GP) $("g-prev").textContent = tx("cmp.gateprev", { prev: SCX.pct(GP.stop), prevsafe: SCX.pct(GP.safe), prevblock: SCX.pct(GP.block) });
     }
     if ($("c-thr-note")) $("c-thr-note").textContent = groups.length > 1 ? tx("cmp.chartnote", { world: WORLD_NAMES[mainWorld].replace(/ \(.*/, "") }) : "";
     const drawInflow = () => SCX.lineChart($("c-thr"), {

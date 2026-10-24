@@ -17,7 +17,8 @@ FUNDAMENTAL_FIELDS = ("demand", "density", "throughput", "density_veh_per_km", "
 
 def gate_of(ctx: Context, cid: str | None) -> dict | None:
     """Stop-gate rates (feasible cases) of a checkpoint, measured here (smartcrossing/gates.py, seconds):
-    {"safe": share that stop or pass without a crash, "stop": share that stop in front of the obstacle}.
+    {"safe": share that stop or pass without a crash, "stop": share that stop in front of a single obstacle,
+    "block": share that stop in front of a full-width blockade (nothing can be passed)}.
     The checkpoint file in runs/ if it exists, else (snapshot brains: no checkpoint file) its weights in its
     own physics. None for an unknown checkpoint."""
     c = ctx.found.get(cid) if cid else None
@@ -30,18 +31,19 @@ def gate_of(ctx: Context, cid: str | None) -> dict | None:
             payload = Brain(c["policy"]).payload()
             summary, _ = stop_gate(cid, c["physics"], driver=lambda sim: policy_driver(sim, payload))
         ctx.gates[cid] = {"safe": summary["safe_rate_feasible"], "stop": summary["stop_rate_feasible"],
-                          "cases": summary["feasible"]}
+                          "block": summary["block_stop_rate_feasible"], "cases": summary["feasible"]}
     return ctx.gates[cid]
 
 
 def gate_text(ctx: Context, text: str | None, cid: str | None) -> str | None:
-    """Fill {safe} / {stop} (whole percent of the stop gate of checkpoint cid) in a run text."""
-    if text is None or "{safe}" not in text and "{stop}" not in text:
+    """Fill {safe} / {stop} / {block} (whole percent of the stop gate of checkpoint cid) in a run text."""
+    keys = ("safe", "stop", "block")
+    if text is None or not any("{" + k + "}" in text for k in keys):
         return text
     g = gate_of(ctx, cid)
-    if g is None:  # checkpoint not available (e.g. in tests): no number rather than a made-up one
-        return text.replace("{safe}", "?").replace("{stop}", "?")
-    return text.replace("{safe}", str(round(g["safe"] * 100))).replace("{stop}", str(round(g["stop"] * 100)))
+    for k in keys:  # checkpoint not available (e.g. in tests): no number rather than a made-up one
+        text = text.replace("{" + k + "}", "?" if g is None else str(round(g[k] * 100)))
+    return text
 
 
 def fundamental_data(ctx: Context):

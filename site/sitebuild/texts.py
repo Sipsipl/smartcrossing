@@ -3,7 +3,7 @@
 RUN_INFO: run id -> {"short": chart marker, "de": (label, note), "en": (label, note)}; shown instead of the raw
 run ids (unmapped runs fall back to the id). STEP_INFO: run id -> {"de": ..., "en": ...}, one line per phase of the
 main training chain next to the numbered markers of the learning curve ("what changed -> what happened").
-Plain words, no run ids. ``{safe}`` / ``{stop}`` are filled with the stop-gate percentages of the main brain's
+Plain words, no run ids. ``{safe}`` / ``{stop}`` / ``{block}`` are filled with the stop-gate percentages of the main brain's
 checkpoint at build time. One entry per run holds both languages, so a missing English text is impossible
 (tests/test_site_i18n.py).
 """
@@ -379,15 +379,46 @@ RUN_INFO = {
     "r6_DO_s2": {
         "short": "R6",
         "de": ("Runde 6: sehr dichter Verkehr + mehr Hindernis-Szenen, zweiter Lauf",
-               "Das aktuelle Gehirn: das Gehirn aus Runde 5 hat mit Verkehr bis 120 Autos pro Minute und "
+               "Das Hauptgehirn bis Runde 7: das Gehirn aus Runde 5 hat mit Verkehr bis 120 Autos pro Minute und "
                "häufiger Hindernissen weitertrainiert. Gewählt ist ein Zwischenstand (Schritt 750), der den "
-               "Hindernis-Test besteht. Vor einem stehenden Hindernis kommt es zu etwa {safe} % unfallfrei "
-               "vorbei, hält aber nur in rund {stop} % der Fälle davor an – meist fährt es herum."),
+               "Hindernis-Test besteht. Vor einem stehenden Hindernis fuhr es meist herum, statt anzuhalten."),
         "en": ("Round 6: very dense traffic + more obstacle scenarios, second run",
-               "The current brain: the round 5 brain trained on with traffic of up to 120 cars per minute and "
-               "obstacles more often. An intermediate step (step 750) is chosen, which passes the obstacle "
-               "test. In front of a standing obstacle it gets past without a crash in about {safe}% of cases, "
-               "but stops in front of it in only about {stop}% – mostly it drives around."),
+               "The main brain up to round 7: the round 5 brain trained on with traffic of up to 120 cars per "
+               "minute and obstacles more often. An intermediate step (step 750) is chosen, which passes the "
+               "obstacle test. In front of a standing obstacle it mostly drove around instead of stopping."),
+    },
+    "r7_DOB_s1": {
+        "short": "R7",
+        "de": ("Runde 7: sehr dichter Verkehr + Straßensperren",
+               "Das aktuelle Gehirn: das Gehirn aus Runde 6 hat weitertrainiert, zusätzlich mit Straßensperren – "
+               "drei Hindernisse nebeneinander über die ganze Straßenbreite, an denen nur Anhalten hilft. Gewählt "
+               "ist ein Zwischenstand (Schritt 1050). Vor einer Sperre hält es in {block} % der Fälle an. Vor "
+               "einem einzelnen Hindernis kommt es zu {safe} % unfallfrei vorbei, hält aber nur in rund {stop} % "
+               "davor an – meist fährt es herum."),
+        "en": ("Round 7: very dense traffic + road blockades",
+               "The current brain: the round 6 brain trained on, additionally with road blockades – three "
+               "obstacles side by side across the full width of the road, where only stopping helps. An "
+               "intermediate step (step 1050) is chosen. In front of a blockade it stops in {block}% of cases. "
+               "In front of a single obstacle it gets past without a crash in {safe}% of cases, but stops in "
+               "front of it in only about {stop}% – mostly it drives around."),
+    },
+    "r7_DOB_s2": {
+        "short": "R7'",
+        "de": ("Runde 7: Straßensperren, zweiter Lauf",
+               "Anderer Zufallsstart: hält ebenfalls vor jeder Sperre an. Bei sehr dichtem Verkehr bleibt der "
+               "Durchsatz niedriger und schwankt stärker als beim gewählten Lauf."),
+        "en": ("Round 7: road blockades, second run",
+               "Different random start: also stops in front of every blockade. In very dense traffic the "
+               "throughput stays lower and varies more than in the chosen run."),
+    },
+    "r7_DO_s1": {
+        "short": "R7k",
+        "de": ("Runde 7, Kontrolle: ohne Straßensperren",
+               "Gleich viele Lernschritte, aber ohne Sperren im Training: Das Anhalten vor Sperren geht "
+               "verloren, der Hindernis-Test fällt in mehreren Zwischenständen durch."),
+        "en": ("Round 7, control: without road blockades",
+               "The same number of learning steps, but without blockades in training: stopping in front of "
+               "blockades is lost, the obstacle test fails at several intermediate steps."),
     },
     "r5_K_s2": {
         "short": "R5'",
@@ -575,18 +606,28 @@ STEP_INFO = {
     "r6_DO_s2": {
         "de": ("Weitertrainiert mit Verkehr bis 120 Autos pro Minute und mehr Hindernis-Szenen, ein Zwischenstand "
                "→ bei sehr dichtem Verkehr deutlich mehr Autos durch, weniger Unfälle und viel weniger Stau; vor "
-               "einem stehenden Hindernis hält es aber nur in etwa {stop} % der Fälle an, sonst fährt es herum"),
+               "einem stehenden Hindernis fährt es aber meist herum, statt anzuhalten; das Hauptgehirn bis Runde 7"),
         "en": ("Trained on with traffic of up to 120 cars per minute and more obstacle scenarios, an "
                "intermediate step → far more cars through in very dense traffic, fewer crashes and much less "
-               "jamming; but in front of a standing obstacle it stops in only about {stop}% of cases, "
-               "otherwise it drives around"),
+               "jamming; but in front of a standing obstacle it mostly drives around instead of stopping; the "
+               "main brain up to round 7"),
+    },
+    "r7_DOB_s1": {
+        "de": ("Dazu Straßensperren im Training (drei Hindernisse über die ganze Breite, nur Anhalten hilft), "
+               "ein Zwischenstand → bei sehr dichtem Verkehr noch mehr Autos durch und weniger Unfälle; vor"
+               " einer Sperre hält es in {block} % der Fälle an, vor einem einzelnen Hindernis in "
+               "etwa {stop} %"),
+        "en": ("Plus road blockades in training (three obstacles across the full width, only stopping helps), "
+               "an intermediate step → even more cars through in very dense traffic and fewer crashes; in front"
+               " of a blockade it stops in {block}% of cases, in front of a single "
+               "obstacle in about {stop}%"),
     },
 }
 
 
 def run_info(run: str | None, fill=lambda s: s) -> dict:
     """Names / notes of a run for the pages: German in label / note / step, English in *_en (the pages pick one:
-    SCX.tl). Unmapped runs: label = the run id, no note. fill(text) fills the {safe} / {stop} placeholders."""
+    SCX.tl). Unmapped runs: label = the run id, no note. fill(text) fills the {safe} / {stop} / {block} placeholders."""
     if not run:
         return {"short": None, "label": None, "label_en": None, "note": None, "note_en": None, "step": None,
                 "step_en": None}
