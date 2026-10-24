@@ -92,6 +92,10 @@ Erledigt (2026-10-11): lokale Einrichtung, GPU-Training (Roadmap C), Runde 1 in 
    sobald die Autos ordentlich fahren. GPU macht viele Seeds erst praktikabel.
 
 ## Bekannte Stolpersteine
+- Website-Texte veralten bei jeder Änderung an Welt oder Gehirn (Lampe, Nachbarzahl, Einfahren,
+  Wracks, Fahrverhalten). Nach jeder solchen Änderung alle Seiten (DE+EN) gegen PLAN.md und die
+  Messdaten prüfen lassen. Stil: keine Effekt-Einstiege („Niemand …“, „Stell dir vor …“), keine
+  Füllwörter, Überschriften 1–3 Wörter mit grauer Unterzeile.
 - Das monatliche Ausgabenlimit kann Subagents mitten in der Arbeit abbrechen; Zwischenstände
   deshalb oft committen und abgebrochene Agents mit Kontext fortsetzen.
 - Windows: ein lokaler Webserver (`python -m http.server` in `site/public`, z. B. von einem
