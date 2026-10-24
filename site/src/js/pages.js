@@ -128,14 +128,16 @@
     };
   }
 
-  /** Small fundamental diagram of the main brain with a dot for the running simulation, same definitions as the
-   *  cloud behind the curve (results/fundamental_cloud.json): density = mean number of driving cars on the map
-   *  over the last 60 s, throughput = exits of the last 60 s (shorter windows right after the start). The dot is moved by a CSS
-   *  transform (transition) a few times per second; the chart itself is only redrawn on resize / theme change. */
+  /** Small fundamental diagram of the main brain with a dot for the running simulation, measured like the cloud
+   *  behind the curve (js/fdwindow.js = deadlock.py cloud_windows): density = mean number of driving cars on the map
+   *  over the last 60 s, throughput = exits of the last 60 s per minute, only once a full 60-s window after the 30-s
+   *  warm-up exists (no dot before). The dot is moved by a CSS transform (transition) a few times per second; the
+   *  chart itself is only redrawn on resize / theme change. */
   function fdLive(box, readout, cx) {
     if (!D.fundamental || !fdPoints("brain").length) { $("fd-live").hidden = true; return null; }
-    let dot = null, trail = null, scales = null, ema = null, lastT = 0, lastUpd = 0;
-    const carsHist = []; // [sim time, cars on the map] per update (4/s), the last 60 s
+    const FDW = SCX.fdWindow;
+    let dot = null, trail = null, scales = null, last = null, lastT = 0, lastUpd = 0;
+    const samples = []; // [sim time, cars on the map] per update (4/s), the last window
     const hist = []; // last positions (svg px), one per update (4/s): ~5 s of fading trail
     const NS = "http://www.w3.org/2000/svg";
     const place = (cars, thr) => {
@@ -166,20 +168,26 @@
       dot.style.opacity = "0";
       svg.appendChild(dot);
       hist.length = 0;
-      if (ema !== null) place(ema.cars, ema.thr);
+      if (last !== null) place(last.cars, last.thr);
     };
     const update = (now) => {
       if (now - lastUpd < 250 || !dot) return;
       lastUpd = now;
       const s = cx.statsSummary();
-      if (s.t < lastT) { ema = null; carsHist.length = 0; } // simulation restarted
+      if (s.t < lastT) samples.length = 0; // simulation restarted
+      if (s.t > lastT || !samples.length) samples.push([s.t, s.road]); // (paused: no new sample)
       lastT = s.t;
-      carsHist.push([s.t, s.road]);
-      while (carsHist.length > 1 && carsHist[0][0] < s.t - 60) carsHist.shift();
-      if (s.t - carsHist[0][0] < 5) { readout.textContent = tx("fd.wait"); return; } // at least 5 s of sim time
-      ema = { cars: carsHist.reduce((a, p) => a + p[1], 0) / carsHist.length, thr: s.throughput };
-      readout.innerHTML = tx("fd.now", { cars: num(ema.cars, 0), thr: num(ema.thr, 0) });
-      place(ema.cars, ema.thr);
+      while (samples.length && samples[0][0] < s.t - FDW.WINDOW_S - 1) samples.shift();
+      last = FDW.point(samples, cx.sim.stats.travel.map((r) => r[0]), s.t);
+      if (last === null) { // no full window after the warm-up yet
+        dot.style.opacity = "0";
+        hist.length = 0;
+        trail.innerHTML = "";
+        readout.textContent = tx("fd.wait", { s: Math.max(1, Math.ceil(FDW.firstAt() - s.t)) });
+        return;
+      }
+      readout.innerHTML = tx("fd.now", { cars: num(last.cars, 0), thr: num(last.thr, 0) });
+      place(last.cars, last.thr);
     };
     draw();
     window.addEventListener("resize", debounce(draw, 200));

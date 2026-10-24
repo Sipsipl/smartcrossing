@@ -78,9 +78,11 @@ def setup(sim: Sim, cs: list[dict]):
     sim._prev_dist = sim.dist_to_gate()
 
 
-def stop_gate(spec: str, cfg_d: dict | None = None, seconds: float = 12.0):
+def stop_gate(spec: str, cfg_d: dict | None = None, seconds: float = 12.0, driver=None):
     """Run every case with driver `spec` (cli.make_driver) in the world cfg_d (traffic settings are
-    replaced: no arrivals, no obstacle scenarios). Returns (summary dict, per-case rows)."""
+    replaced: no arrivals, no obstacle scenarios). ``driver``: optional factory sim -> driver used instead of
+    cli.make_driver (``spec`` is then only the name in the summary), e.g. a brain without a checkpoint file.
+    Returns (summary dict, per-case rows)."""
     from .cli import make_driver
 
     t0 = time.time()
@@ -88,7 +90,7 @@ def stop_gate(spec: str, cfg_d: dict | None = None, seconds: float = 12.0):
     world = {**(cfg_d or {}), "demand": 0.0, "demand_range": None, "obstacle_envs": 0.0, "wreck_time": 1000.0,
              "n_slots": 2 + N_DISTRACT}
     sim = Sim(SimConfig(**world), len(cs), seed=0)
-    drv = make_driver(spec, sim)  # (may apply the policy's interface / geometry to sim.cfg)
+    drv = driver(sim) if driver else make_driver(spec, sim)  # (may apply the policy's interface / geometry to sim.cfg)
     setup(sim, cs)
     B = len(cs)
     out = np.full(B, "", dtype=object)

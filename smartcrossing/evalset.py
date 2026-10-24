@@ -3,8 +3,8 @@
     poetry run python -m smartcrossing.cli evalset --driver policy:results/round4_best.npz \
         --driver reservation --out results/x_eval.jsonl [--workers 4]
 
-Per driver: the bench at DEMANDS x SEEDS (traffic seeds, the same for all drivers: paired) with ENVS envs
-x SECONDS each in the default world (``--cfg`` overrides it), plus the stop gate (gates.py). Appends one
+Per driver: the bench at protocol.EVAL_DEMANDS x SELECTION_SEEDS (traffic seeds, the same for all drivers:
+paired) with protocol.ENVS envs x SECONDS each in the default world (``--cfg`` overrides it), plus the stop gate (gates.py). Appends one
 JSON line per bench (``cli bench``'s line + ``seed`` + ``"kind": "bench"``) and one per gate
 (``"kind": "gate"``), the format of results/round2_eval.jsonl / round4_eval.jsonl.
 
@@ -17,9 +17,7 @@ import multiprocessing as mp
 import time
 from pathlib import Path
 
-DEMANDS = (0.05, 0.15, 0.3, 0.5)
-SEEDS = (1000, 2000, 3000)
-ENVS, SECONDS = 8, 120.0
+from .protocol import ENVS, EVAL_DEMANDS, SECONDS, SELECTION_SEEDS
 # metrics of a bench that the training evals (ppo.eval_job, + queued_end) and the site bench keep
 KEEP_KEYS = ("throughput_per_min", "demand_per_min", "exit_ok_rate", "crash_cars_per_1000", "crash_cars",
              "offroad_cars", "timeouts", "delay_mean_s")
@@ -70,7 +68,7 @@ def _job(job) -> dict:
             "kind": "bench"}
 
 
-def evalset(drivers, out=None, cfg_d: dict | None = None, demands=DEMANDS, seeds=SEEDS, envs: int = ENVS,
+def evalset(drivers, out=None, cfg_d: dict | None = None, demands=EVAL_DEMANDS, seeds=SELECTION_SEEDS, envs: int = ENVS,
             seconds: float = SECONDS, gate: bool = True, workers: int = 1, log=print) -> list[dict]:
     """Run the protocol for every driver spec; append the lines to ``out`` (if given) in a fixed order
     (per driver: demands x seeds, then the gate) and return them. workers > 1: a spawn process pool."""

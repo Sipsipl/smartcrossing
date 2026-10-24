@@ -8,7 +8,7 @@ läuft komplett im Browser der Besucher, es gibt keinen Server und keine Datenba
 | Ordner | Inhalt | ins Git? |
 |---|---|---|
 | `site/src/` | die handgeschriebenen Seiten (HTML/CSS/JS) | ja |
-| `site/build.py` | Build-Skript: kopiert `site/src/` (inkl. Simulation `js/sim.js`), schreibt `js/sim-config.js` (Zahlen aus `smartcrossing/sim.py`), wählt Gehirne aus dem Schnappschuss `results/site/` plus `runs/` (zusammengeführt), misst sie, schreibt die Daten | ja |
+| `site/build.py`, `site/sitebuild/` | Build (Einstiegspunkt + Paket): kopiert `site/src/` (inkl. Simulation `js/sim.js`), schreibt `js/sim-config.js` (Zahlen aus `smartcrossing/sim.py`), wählt Gehirne aus dem Schnappschuss `results/site/` plus `runs/` (zusammengeführt), misst sie, schreibt die Daten | ja |
 | `results/site/` | kompakter Schnappschuss von allem, was der Build aus `runs/` nimmt (benutzte Gehirne, Trainingskette, Lernkurven); schreibt der Build selbst | ja |
 | `site/obs_labels.py` | deutsche Beschriftungen der Sensorwerte | ja |
 | `site/data/bench_cache.json` | Zwischenspeicher der Messungen (damit ein Neubau schnell geht) | ja |
@@ -84,8 +84,8 @@ ca. 0,4 MB): Ampel, Verkehrsrechner und das beste Gehirn fahren je 90 s mit gena
 Verkehr (wenig / mittel / viel). Die Aufnahme läuft bei jedem Build neu (ca. 20 s), passt sich
 also automatisch an die aktuelle Simulation und das aktuell beste Gehirn an.
 
-Ohne Optionen ist das Hauptgehirn `DEFAULT_MAIN` in `site/build.py` (aktuell `r4_S_s1/ckpt_0205`,
-= `results/round4_best.npz`); `--previous` (Standard `r2_B_s1/ckpt_0639` = `results/round2_best.npz`) ist das Gehirn davor, das
+Ohne Optionen ist das Hauptgehirn `DEFAULT_MAIN` in `site/sitebuild/main.py` (aktuell `r5_K_s1/ckpt_0475`,
+= `results/round5_best.npz`); `--previous` (Standard `r4_S_s1/ckpt_0205` = `results/round4_best.npz`) ist das Gehirn davor, das
 auf „Vergleich“ daneben steht. Quelle (`--source auto`): Schnappschuss `results/site/` und
 Trainingsläufe aus `runs/` werden zusammengeführt (ein Lauf in `runs/` ersetzt den gleichnamigen im
 Schnappschuss); der Build schreibt den Schnappschuss danach neu. Die Zeitreise folgt der Kette der

@@ -118,3 +118,37 @@ def test_cloud_windows_and_json_shape():
     out = deadlock.cloud({"light": "light"}, demands=(0.1,), envs=2, seconds=110.0, per_demand=4, log=lambda *_: None)
     assert len(out["drivers"]["light"]["points"]) == 4  # thinned
     assert {"density", "throughput", "points", "protocol"} <= set(out["meta"])
+
+
+def test_cloud_window_formula():
+    """cloud_windows on synthetic counts: 4 cars all the time, one exit every 2 s -> density 4, throughput 30/min;
+    the first window ends at warm-up + window (90 s), then one every 10 s."""
+    dt, T = 0.1, 1200
+    cars = np.full((T, 2), 4.0)
+    cars[:300, 1] = 100.0  # the warm-up is never part of a window
+    exits = np.repeat((np.arange(T + 1) // 20)[:, None], 2, 1).astype(float)
+    win = deadlock.cloud_windows(cars, exits, dt)
+    assert [round(t, 6) for t, *_ in win] == [90.0, 100.0, 110.0, 120.0]
+    for _, dens, thr in win:
+        assert np.allclose(dens, 4.0) and np.allclose(thr, 30.0)
+    assert deadlock.cloud_windows(cars[:899], exits[:900], dt) == []  # no full window after the warm-up yet
+
+
+def test_cli_deadlock_summarize_names_and_meta(tmp_path, capsys):
+    out = tmp_path / "d.jsonl"
+    cli.main(["deadlock", "--driver", "light", "--demands", "0.3", "--seeds", "1,2", "--envs", "1", "--seconds", "35",
+              "--out", str(out)])
+    fund, rows = tmp_path / "f.json", tmp_path / "rows.json"
+    cli.main(["deadlock-summarize", str(out), "--name", "light=ampel", "--fundamental", str(fund), "--json", str(rows)])
+    assert "| light |" in capsys.readouterr().out
+    f = json.loads(fund.read_text(encoding="utf-8"))
+    assert list(f["drivers"]) == ["ampel"] and "per_seed" not in f["drivers"]["ampel"]
+    assert f["meta"]["protocol"].startswith("envs [1] x seconds [35.0], traffic seeds [1, 2]")
+    assert json.loads(rows.read_text(encoding="utf-8"))[0]["n_seeds"] == 2
+    with pytest.raises(SystemExit):
+        cli.main(["deadlock-summarize", str(out), "--name", "light"])  # not spec=key
+
+
+def test_cli_incentives(capsys):
+    cli.main(["incentives", "--driver", f"policy:{ROUND4}"])
+    assert json.loads(capsys.readouterr().out) == deadlock.incentives(json.loads(str(np.load(ROUND4)["cfg"])))
