@@ -43,7 +43,7 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
   Kinematic unicycle with curvature, steering-rate and grip limits, dt=0.1 s. Cars spawn at a
   random lateral offset on the right half of the road in driving direction (`spawn_right`, default
   for baselines and learners; own spot if clear, else uniform among the clear spots; up to 3 per arm
-  and step, side by side), must exit through target arm. Crashed cars stay 5 s as wrecks (hazard
+  and step, side by side), must exit through target arm. Crashed cars stay 10 s as wrecks (was 5 s until round 7) (hazard
   lights, driving into one = crash). Car-car collision via
   3 discs per car, off-road via rounded-corner distance. Removal on crash/offroad/exit/timeout.
   Observations are mirror-neutral: own state in a canonical frame (entry arm = south; position
@@ -217,10 +217,13 @@ crashes in the box; lamp unused so far.
   A = more exploration; B = A + obstacle scenarios (some envs start with a wreck/standing car on a
   path); C = B + crash cost by OWN impact speed (standing car pays only the base cost; still
   outcome-only physics). The owner decides on C after the numbers.
-- (F) Geometry variety (long term): roundabout-like and non-right-angled crossings, then a whole
-  village (road network; cars start/end at driveways or the map edge). Needs geometry-independent
-  inputs (C), a road-graph representation instead of the hard-coded 4-arm crossing, and route
-  information (next turn) as input instead of only the exit arm.
+- (F) Geometry variety (long term; owner 2026-10-24): after the two open core problems (stop skill,
+  deadlocks) are solved. Order: (1) a non-right-angled crossing (closest to today's setup), (2) a motorway
+  on-ramp / merge (Autobahnzufahrt: merging into a flowing stream, gap acceptance - owner's wish), (3) a
+  roundabout, (4) later a whole village (road network; cars start/end at driveways or the map edge). Needs
+  geometry-independent inputs (C), a road-graph representation instead of the hard-coded 4-arm crossing,
+  and route information (next turn / merge) as input instead of only the exit arm; likely retraining from
+  scratch per geometry family.
 - Run tracking (owner, 2026-10-11), with the next refactoring step: git commit hash (+ dirty flag)
   in every run's args.json, full state.npz of important runs kept under results/ (cloud runs were
   lost), a small script listing runs/ (name, commit, settings, key metrics). The owner needs no
@@ -237,7 +240,7 @@ crashes in the box; lamp unused so far.
   too; owner, 2026-10-11): fewer crashes / space problems at the map edge. This gives up the
   "does a driving side emerge on its own" question (earlier runs already showed the cars agree on a
   side); the other norm questions in (D) remain.
-- Wrecks: crashed cars stay for 5 s as standing obstacles (driving into one = own crash) with hazard
+- Wrecks: crashed cars stay for 10 s (owner change 2026-10-24; was 5 s until round 7) as standing obstacles (driving into one = own crash) with hazard
   lights that other cars can see (a physically visible signal, no rule information), then vanish.
   Mirror in sim.js / site rendering.
 - Higher fixed crash/off-road cost, see (E).

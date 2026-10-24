@@ -318,7 +318,8 @@ def parity(tmp_path_factory):
     obs = np.concatenate([c["expect"]["obs"] for c in cases[:12]])
     obs = np.concatenate([obs, np.random.default_rng(5).normal(size=(20, obs.shape[1]))])
     # driver with two groups, group 1 muted
-    dsim = Sim(dataclasses.replace(cfg, demand=0.6), 1, seed=3, group_probs=[0.5, 0.5])
+    # (short wrecks: with the long default wreck time the slots of this small world fill up with wrecks)
+    dsim = Sim(dataclasses.replace(cfg, demand=0.6, wreck_time=0.8), 1, seed=3, group_probs=[0.5, 0.5])
     for _ in range(120):
         dsim.step(np.tile([0.4, 0.0, 0.5, -0.5][: act_dim(cfg)], (cfg.n_slots, 1))[None])
     assert len(set(dsim.group[0][dsim.alive[0]])) == 2

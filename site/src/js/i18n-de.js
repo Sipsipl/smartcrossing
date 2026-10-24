@@ -251,9 +251,9 @@
  "fd.drop": " Die gelernten Autos fallen danach bei dichtestem Verkehr auf {x} Autos/min zurück ({p} weniger).",
  "fd.rise": " Beim Verkehrsrechner steigt die Kurve bis zum Ende der Messung weiter: Seine Kapazität liegt noch darüber.",
  "fd.mini.aria": "Wo die laufende Simulation gerade auf dem Fundamentaldiagramm der gelernten Autos steht",
- "fd.now": "Jetzt: <b>{cars}</b> Autos unterwegs · <b>{thr}</b> Autos/min",
- "fd.wait": "Der Punkt erscheint in {s} s Simulationszeit: Er misst wie die Wolke eine volle Minute nach der Anlaufphase.",
- "fd.me": "jetzt live",
+ "fd.now": "In der letzten Minute: im Schnitt <b>{cars}</b> Autos unterwegs, <b>{thr}</b> Autos/min durchgekommen",
+ "fd.wait": "Der Punkt erscheint in {s} s Simulationszeit: Er zeigt den Durchschnitt der letzten Minute und braucht dafür wie die Wolke eine volle Minute nach der Anlaufphase.",
+ "fd.me": "letzte Minute (live)",
  "fd.max": " · Ring = Maximum {n}/min",
  "start.demand-opt": "Startwert: so viele Autos, wie dieses Gehirn maximal schafft ({n}/min)."
 };

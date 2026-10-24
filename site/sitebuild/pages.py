@@ -59,6 +59,12 @@ def sim_config_js() -> str:
             "globalThis.SC_SIM_CONFIG = " + json.dumps(js_constants(), separators=(",", ":")) + ";\n")
 
 
+def wreck_seconds(lang: str) -> str:
+    """Wreck time of the sim config as text for the site ('10', German decimal comma)."""
+    s = f"{SimConfig().wreck_time:g}"
+    return s.replace(".", ",") if lang == "de" else s
+
+
 def copy_src(ctx: Context, version: str, built: str):
     """public/ = a fresh copy of src/ with js/sim-config.js, header / footer and the asset version filled in."""
     out = ctx.out
@@ -66,10 +72,13 @@ def copy_src(ctx: Context, version: str, built: str):
         shutil.rmtree(out)
     shutil.copytree(ctx.src, out)
     (out / "js" / "sim-config.js").write_text(sim_config_js(), encoding="utf-8", newline="\n")
+    for lang in ("de", "en"):  # texts name the wreck time of the sim config (no number duplicated)
+        f = out / "js" / f"i18n-{lang}.js"
+        f.write_text(f.read_text(encoding="utf-8").replace("{{WRECK_S}}", wreck_seconds(lang)), encoding="utf-8", newline="\n")
     for html in out.glob("*.html"):
         t = html.read_text(encoding="utf-8")
         t = t.replace("<!-- HEADER -->", header_html(html.name)).replace("<!-- FOOTER -->", FOOTER.format(built=built))
-        t = t.replace("{{VERSION}}", version)
+        t = t.replace("{{VERSION}}", version).replace("{{WRECK_S}}", wreck_seconds("de"))
         if re.search(r'\s(src|href)="(https?:)?//', t.replace(f'href="{REPO}"', "")):
             raise SystemExit(f"{html.name}: external request found; the site must be self-contained")
         html.write_text(t, encoding="utf-8", newline="\n")

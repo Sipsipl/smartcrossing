@@ -47,7 +47,8 @@ def _close(name, t, ref, mask=None, tol=TOL):
          spawn_right=False, wreck_time=0.0),
     # round 2: crash cost by own impact speed + obstacle scenarios (wrecks and parked cars) in half the envs
     dict(n_slots=24, r_time=0.02, demand_range=(0.2, 0.5), crash_cost_speed="own", obstacle_envs=0.5,
-         obstacle_rate=2.0, obstacle_time=3.0, obstacle_max=3),
+         obstacle_rate=2.0, obstacle_time=3.0, obstacle_max=3,
+         wreck_time=5.0),  # (long wrecks block the traffic so much that no obstacle gets hit in the short run)
     # more neighbour slots (set encoder interface); and more slots than cars (padding)
     dict(n_slots=24, demand=0.5, n_neighbours=10, L=30.0),  # short arms: exits within the short cuda run
     dict(n_slots=6, demand=0.5, n_neighbours=10, L=30.0),

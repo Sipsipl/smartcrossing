@@ -108,7 +108,7 @@ class SimConfig:
     # no reward, hazard lights on; their episode ends at the crash). A moving car that hits a wreck
     # crashes too (impact speed = its own speed) and becomes a wreck. 0 = crashed cars vanish at
     # once (the old behaviour). Off-road cars always vanish.
-    wreck_time: float = 5.0
+    wreck_time: float = 10.0
     n_slots: int = 32
     n_signal: int = 1  # dimensions of the free "light" signal (old checkpoints: 2)
     demand: float = 0.15  # arrivals per second per arm
