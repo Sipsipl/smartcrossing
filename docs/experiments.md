@@ -904,3 +904,10 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
 - Caveat: stop gate is only just passed (safe 0.955) and stop_rate fell to 0.44: the brain swerves around
   obstacles instead of stopping. Neither arm keeps the stop skill inside training; the LAST checkpoint passes
   in 2 of 4 runs (KO_s1, DO_s1), and only DO_s1 also meets the crash limit.
+
+## World change: wreck_time 5 -> 10 s (owner, 2026-10-24)
+- `SimConfig.wreck_time` default 5.0 -> 10.0 (sim.py, sim_torch.py, sim.js via sim-config.js). Reason: at very high
+  demand deadlocks dissolved unrealistically because crashes cleared after 5 s. wreck_time is a world setting,
+  not interface: all brains (also old checkpoints) now drive in the 10-s world.
+- All site numbers (bench, fundamental diagram, cloud) re-measured in the new world; earlier rounds (1-7) were
+  measured with 5 s wrecks, so their numbers are not comparable with the new ones.

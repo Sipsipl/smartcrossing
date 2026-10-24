@@ -21,34 +21,40 @@
     in dem es durchfahren darf. Bräuchte perfekte Technik – so gut ginge es höchstens.</p></div>
 </div>
 
-<h2 data-i18n="cmp.gleicher-verkehr-drei-fahrweisen">Gleicher Verkehr, drei Fahrweisen</h2>
+<h2 data-i18n="cmp.gleicher-verkehr-drei-fahrweisen">Gleicher Verkehr</h2>
+<p class="sub" data-i18n="cmp.verkehr-sub">Drei Fahrweisen im Vergleich</p>
 <p data-i18n="cmp.alle-drei-bekommen-genau">Alle drei bekommen genau dieselben Autos zur selben Zeit mit demselben Ziel. Alle Autos tauchen in der rechten Straßenhälfte auf.
-  Nach einem Zusammenstoß bleiben die Wracks 5 Sekunden mit Warnblinker stehen – auch für Ampel und Verkehrsrechner, die nur ihre Spur kennen.</p>
+  Nach einem Zusammenstoß bleiben die Wracks {{WRECK_S}} Sekunden mit Warnblinker stehen – auch für Ampel und Verkehrsrechner, die nur ihre Spur kennen.</p>
 <div id="side"></div>
 <p data-i18n="cmp.farbe-ziel-blau-rechts" class="muted small">Farbe = Ziel (<b>blau</b> rechts, <b>weiß</b> geradeaus, <b>orange</b> links), rote Rücklichter = Bremslicht, orange blinkend = Wrack. „+3“ am Rand: so viele Autos warten noch auf die Einfahrt.</p>
 
-<h2 data-i18n="cmp.durchsatz-wie-viele-kommen">Durchsatz: wie viele kommen pro Minute durch?</h2>
+<h2 id="fundamental" data-i18n="cmp.durchsatz-wie-viele-kommen">Durchsatz</h2>
+<p class="sub" data-i18n="cmp.durchsatz-sub">Wie viele Autos kommen pro Minute durch?</p>
+<div class="seg" id="thr-view" role="radiogroup" data-i18n-attr="aria-label=cmp.view-aria" aria-label="Ansicht des Diagramms"></div>
+<p class="small" id="thr-explain" data-i18n="cmp.view-explain" style="margin-top:10px">„Nach Zufluss“ zeigt den Durchsatz über die ankommenden Autos pro Minute, „nach Dichte“ über die Autos, die gleichzeitig auf der Straße sind (das Fundamentaldiagramm der Verkehrsforschung): Dort sieht man die Kapazität der Kreuzung und wie der Durchsatz darüber wieder sinkt, wenn sich die Autos behindern.</p>
 <div id="c-thr"></div>
-<p data-i18n="cmp.die-gestrichelte-linie-ist" class="muted small">Die gestrichelte Linie ist die Nachfrage: so viele Autos kommen pro Minute an. Wer darauf liegt, schafft alle. <span id="c-thr-note"></span></p>
-<div class="tablewrap card" style="padding:4px 6px"><table class="data" id="t-thr"></table></div>
+<div id="view-inflow">
+  <p data-i18n="cmp.die-gestrichelte-linie-ist" class="muted small">Die gestrichelte Linie ist die Nachfrage: so viele Autos kommen pro Minute an. Wer darauf liegt, schafft alle. <span id="c-thr-note"></span></p>
+  <div class="tablewrap card" style="padding:4px 6px"><table class="data" id="t-thr"></table></div>
+</div>
+<div id="view-density" hidden>
+  <p class="small" id="fd-caps"></p>
+  <p class="muted small" id="fd-note"></p>
+</div>
 
-<h2 id="fundamental" data-i18n="cmp.fd-h2">Fundamentaldiagramm: was schafft die Kreuzung?</h2>
-<p data-i18n="cmp.fd-intro">Die Verkehrsforschung kennt diese Kurve seit Jahrzehnten: Je mehr Autos gleichzeitig unterwegs sind, desto mehr kommen pro Minute durch – bis zur Kapazität. Wird es darüber noch voller, <b>sinkt der Durchsatz wieder</b>: Es staut sich, die Autos behindern sich gegenseitig, im schlimmsten Fall steht alles still (Gridlock). Der Verkehrsrechner zeigt, was die Kreuzung physikalisch schaffen könnte; Ampel und gelernte Autos bleiben darunter.</p>
-<div id="c-fd"></div>
-<p class="small" id="fd-caps"></p>
-<p data-i18n="cmp.fd-note" class="muted small">Jeder Punkt ist eine Nachfragestufe (12 bis 120 Autos/min kommen an), gemessen über 3 Minuten in 8 parallelen Simulationen nach 30 s Einlaufzeit, Mittel über 3 Verkehrsläufe. Der umrandete Punkt ist das Maximum jeder Kurve. Die blassen Punkte dahinter sind einzelne gemessene Minuten (gleitende 60-Sekunden-Fenster, alle 10 s, je Fahrer 420 Stück): Die Linie ist ihr Durchschnitt, einzelne Minuten schwanken weit darum.</p>
-
-<h2 data-i18n="cmp.wie-viele-kommen-heil">Wie viele kommen heil an?</h2>
+<h2 data-i18n="cmp.wie-viele-kommen-heil">Sicherheit</h2>
+<p class="sub" data-i18n="cmp.sicher-sub">Wie viele Autos kommen heil an?</p>
 <p data-i18n="cmp.je-feld-anteil-der">Je Feld: Anteil der Autos, die heil ans Ziel kommen · Unfälle pro 1000 Autos, die die Kreuzung verlassen haben.
   Als Unfall zählt hier (und oben) auch, wer von der Straße abkommt.</p>
 <div class="tablewrap card" style="padding:4px 6px"><table class="data" id="t-ok"></table></div>
 <p class="muted small" id="bench-setup"></p>
 
 <h2 data-i18n="cmp.ehrlich-gesagt">Grenzen</h2>
+<p class="sub" data-i18n="cmp.grenzen-sub">Was noch nicht klappt</p>
 <div class="note warn">
   <p data-i18n="cmp.beim-durchsatz-schlagen-die">Beim <b>Durchsatz</b> schlagen die gelernten Autos die Ampel ab mittlerem Verkehr: Bei viel Verkehr kommen pro Minute
     deutlich mehr durch. Bei mittlerem Verkehr verunglücken <b id="h-mid">wenige</b> von 1000 Autos,
-    bei wenig Verkehr <span id="h-low">weniger</span> (siehe Tabelle).<span id="h-prev"></span> Der Verkehrsrechner schafft das ohne einen einzigen Unfall, die Ampel fast ohne – und der Verkehrsrechner hält beim Durchsatz bis mittleren Verkehr mit; erst bei sehr dichtem Verkehr liegen die gelernten Autos vorn, dann aber mit Unfällen.</p>
+    bei wenig Verkehr <span id="h-low">weniger</span> (siehe Tabelle).<span id="h-prev"></span> Der Verkehrsrechner schafft das ohne einen einzigen Unfall, die Ampel fast ohne – und der Verkehrsrechner hält beim Durchsatz bis mittleren Verkehr mit; bei sehr dichtem Verkehr liegen die gelernten Autos in der Tabelle nur noch knapp vorn (in der Ansicht „nach Dichte“ hat der Verkehrsrechner die höhere Kapazität), dann aber mit Unfällen.</p>
   <p data-i18n="cmp.sehr-dichter-verkehr">Bei <b>sehr dichtem Verkehr</b> (<span id="h-ddem">120</span> Autos pro Minute) klappt es noch nicht: Autos verkeilen sich weiterhin mitten auf der Kreuzung
     (in unserer Messung sind dort rund <span id="h-djam">40 %</span> der Zeit Autos verkeilt), manche werden nach zu langem Warten entfernt, und es gibt noch rund <b id="h-dcrash">50</b> Unfälle pro 1000 Autos.
     Trotzdem kommen <span id="h-dthr">70</span> Autos pro Minute durch, <span id="h-dprev">gegen 51</span> beim vorherigen Gehirn. Um ein Wrack bildet sich bei so viel Verkehr weiterhin ein Stau.</p>
@@ -56,12 +62,13 @@
     Vor einem stehenden Hindernis (Wrack, parkendes Auto) kommt das Gehirn fast immer unfallfrei vorbei (<span id="g-safe">99 %</span>), hält aber nur in etwa <span id="g-stop">70 %</span> der Fälle davor an; sonst fährt es herum. Im weiteren Training ist das Umfahren an die Stelle des Anhaltens getreten.<span id="g-prev"></span></p>
 </div>
 
-<h2 data-i18n="cmp.was-ist-von-selbst">Was ist von selbst entstanden?</h2>
+<h2 data-i18n="cmp.was-ist-von-selbst">Von selbst entstanden</h2>
+<p class="sub" data-i18n="cmp.entstanden-sub">Was haben die Autos ohne Vorgabe entwickelt?</p>
 <ul>
-  <li data-i18n="cmp.rechtsverkehr-ja-niemand-hat"><b>Rechtsverkehr – ja.</b> Niemand hat den Autos eine Seite vorgegeben, und bis zum aktuellen Gehirn starteten sie an zufälliger Stelle der Straße.
-    Trotzdem fuhren auf der breiten Kreuzung fast alle (82–96 %) rechts – in beiden Trainingsläufen mit verschiedenem Zufallsstart.
-    (Auf der alten, schmalen Kreuzung fuhr ein Lauf links, der andere rechts. Mit nur zwei Läufen kann das noch Zufall sein.)
-    Seitdem tauchen alle Autos rechts auf, Rechtsverkehr ist jetzt also vorgegeben.</li>
+  <li data-i18n="cmp.rechtsverkehr-ja-niemand-hat"><b>Rechtsverkehr – inzwischen vorgegeben.</b> Seit dem aktuellen Aufbau tauchen alle Autos in der rechten Straßenhälfte auf; das ist eine bewusste Festlegung.
+    Schon vorher hatten sich die Autos selbst für eine Seite entschieden, obwohl sie an zufälliger Stelle der Straße starteten:
+    Auf der breiten Kreuzung fuhren fast alle (82–96 %) rechts – in beiden Trainingsläufen mit verschiedenem Zufallsstart.
+    (Auf der alten, schmalen Kreuzung fuhr ein Lauf links, der andere rechts. Mit nur zwei Läufen kann das noch Zufall sein.)</li>
   <li data-i18n="cmp.fahrspuren-nein-die-autos"><b>Fahrspuren – nein.</b> Die Autos nutzen die rechte Hälfte wie eine einzige breite Spur.</li>
   <li data-i18n="cmp.eine-lampensprache-nein-bisher"><b>Eine Lampensprache – nein (bisher).</b> Die Lampe eines Autos verrät zwar etwas darüber, wohin es abbiegt
     (gemessen auf der schmalen und der breiten Kreuzung). Aber die anderen Autos achten kaum darauf: Schaltet man alle Lampen ab, fahren sie genauso gut.

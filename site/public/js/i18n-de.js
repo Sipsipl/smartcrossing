@@ -69,7 +69,7 @@
  "obs.numbers": "{n} Zahlen",
  "obs.nbs": "Nachbarn 1–{n}",
  "obs.nbs.sub": "je {n} Zahlen, nach Abstand sortiert",
- "obs.lampcolour": "Lampenfarbe",
+ "obs.lampcolour": "Lampe",
  "obsrow.fwd": "vor mir (m)",
  "obsrow.left": "links von mir (m)",
  "obsrow.same": "gleiche Richtung",
@@ -251,9 +251,12 @@
  "fd.drop": " Die gelernten Autos fallen danach bei dichtestem Verkehr auf {x} Autos/min zurück ({p} weniger).",
  "fd.rise": " Beim Verkehrsrechner steigt die Kurve bis zum Ende der Messung weiter: Seine Kapazität liegt noch darüber.",
  "fd.mini.aria": "Wo die laufende Simulation gerade auf dem Fundamentaldiagramm der gelernten Autos steht",
- "fd.now": "Jetzt: <b>{cars}</b> Autos unterwegs · <b>{thr}</b> Autos/min",
- "fd.wait": "Der Punkt erscheint in {s} s Simulationszeit: Er misst wie die Wolke eine volle Minute nach der Anlaufphase.",
- "fd.me": "jetzt live",
+ "fd.now": "In der letzten Minute: im Schnitt <b>{cars}</b> Autos unterwegs, <b>{thr}</b> Autos/min durchgekommen",
+ "fd.wait": "Der Punkt erscheint in {s} s Simulationszeit: Er zeigt den Durchschnitt der letzten Minute und braucht dafür wie die Wolke eine volle Minute nach der Anlaufphase.",
+ "fd.me": "letzte Minute (live)",
  "fd.max": " · Ring = Maximum {n}/min",
- "start.demand-opt": "Startwert: so viele Autos, wie dieses Gehirn maximal schafft ({n}/min)."
+ "start.demand-opt": "Startwert: so viele Autos, wie dieses Gehirn maximal schafft ({n}/min).",
+ "cmp.view.inflow": "nach Zufluss",
+ "cmp.view.density": "nach Dichte",
+ "cmp.fd-note": "Jeder Punkt ist eine Nachfragestufe ({lo} bis {hi} Autos/min kommen an), gemessen über {min} Minuten in {envs} parallelen Simulationen nach {warm} s Einlaufzeit, Mittel über {seeds} Verkehrsläufe. Der umrandete Punkt ist das Maximum jeder Kurve. Die blassen Punkte dahinter sind einzelne gemessene Minuten (gleitende {win}-Sekunden-Fenster, alle {step} s, je Fahrer {n} Stück): Die Linie ist ihr Durchschnitt, einzelne Minuten schwanken weit darum."
 };
