@@ -1,5 +1,5 @@
 """PPO rollouts on the GPU (``ppo --rollout-device cuda``): ``TorchRollout`` is the torch counterpart
-of :class:`smartcrossing.ppo.Worker` for one big batch of envs (``TorchSim``).
+of :class:`smartcrossing.ppo_numpy.Worker` for one big batch of envs (``TorchSim``).
 
 Per step: observe, privileged critic features, actor forward + Gaussian noise + tanh squash,
 log-prob, critic forward, ``TorchSim.step``, per-car rewards / done flags, all written into

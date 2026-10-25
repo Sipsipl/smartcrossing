@@ -49,7 +49,7 @@ def _close(name, t, ref, mask=None, tol=TOL):
     dict(n_slots=24, r_time=0.02, demand_range=(0.2, 0.5), crash_cost_speed="own", obstacle_envs=0.5,
          obstacle_rate=2.0, obstacle_time=3.0, obstacle_max=3,
          wreck_time=5.0),  # (long wrecks block the traffic so much that no obstacle gets hit in the short run)
-    # round 8: blockades (full road width, several bodies at once) in half of the placements
+    # blockade scenarios (round 7): blockades (full road width, several bodies at once) in half of the placements
     dict(n_slots=32, r_time=0.02, demand_range=(0.2, 0.5), obstacle_envs=0.5, obstacle_rate=2.0, obstacle_time=3.0,
          obstacle_max=3, obstacle_block=0.5, wreck_time=5.0),
     # more neighbour slots (set encoder interface); and more slots than cars (padding)

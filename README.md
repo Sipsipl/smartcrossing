@@ -31,7 +31,7 @@ poetry install
 poetry run pytest -q                                                      # tests
 poetry run python -m smartcrossing.cli bench --driver reservation --demand 0.15   # key figures
 poetry run python -m smartcrossing.cli render --driver light --out runs/light     # images + GIF
-poetry run python -m smartcrossing.cli evalset --driver policy:results/round4_best.npz --out runs/eval.jsonl   # standard evaluation
+poetry run python -m smartcrossing.cli evalset --driver policy:results/round7_best.npz --out runs/eval.jsonl   # standard evaluation
 poetry run python site/build.py                                          # build the website
 cd site/public && python3 -m http.server 8000                            # view the website locally
 ```

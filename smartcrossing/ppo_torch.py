@@ -1,4 +1,4 @@
-"""PyTorch port of :func:`smartcrossing.ppo.ppo_update` (``ppo --update-device cpu|cuda``).
+"""PyTorch port of :func:`smartcrossing.ppo_numpy.ppo_update` (``ppo --update-device cpu|cuda``).
 
 Drop-in replacement: ``TorchPPO(device, dtype).update`` takes exactly the arguments of
 ``ppo_update`` (numpy ``MLP`` actor/critic, numpy ``Adam`` optimisers, log-std array, rollout
@@ -50,7 +50,7 @@ def mlp_forward(p, sizes, x):
 
 
 def mlp_backward(p, sizes, hs, gout):
-    """Gradient of sum(gout * output) wrt the flat params (same as ppo.MLP.backward)."""
+    """Gradient of sum(gout * output) wrt the flat params (same as ppo_numpy.MLP.backward)."""
     Ls = _layers(p, sizes)
     grads = []
     g = gout

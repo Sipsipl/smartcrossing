@@ -1,6 +1,6 @@
 """Standard evaluation protocol (one command for every new brain and every comparison):
 
-    poetry run python -m smartcrossing.cli evalset --driver policy:results/round4_best.npz \
+    poetry run python -m smartcrossing.cli evalset --driver policy:results/round7_best.npz \
         --driver reservation --out results/x_eval.jsonl [--workers 4]
 
 Per driver: the bench at protocol.EVAL_DEMANDS x SELECTION_SEEDS (traffic seeds, the same for all drivers:

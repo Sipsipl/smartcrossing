@@ -9,11 +9,11 @@ poetry install --with gpu   # optional: torch 2.6.0+cu118 (sim_torch, ppo --upda
 poetry run pytest -q               # cuda test cases are skipped unless SC_TEST_CUDA=1 (never while a training runs)
 poetry run python -m smartcrossing.cli bench --driver reservation --envs 8 --demand 0.15
 poetry run python -m smartcrossing.cli render --driver light --out runs/light   # sheet.png + episode.gif
-poetry run python -m smartcrossing.cli evalset --driver policy:results/round4_best.npz --driver reservation --out results/x_eval.jsonl --workers 4   # standard eval: 4 demands x 3 seeds + stop gate
+poetry run python -m smartcrossing.cli evalset --driver policy:results/round7_best.npz --driver reservation --out results/x_eval.jsonl --workers 4   # standard eval: 4 demands x 3 seeds + stop gate
 poetry run python -m smartcrossing.cli select --run runs/<name> --every 2 --workers 4 --out results/x_select.jsonl   # model selection: checkpoints with stop gate >= 0.95, best throughput at 0.5 under a crash limit
-poetry run python -m smartcrossing.cli deadlock --driver policy:results/round5_best.npz --driver light --driver reservation --seeds 4000,5000,6000 --seconds 180 --workers 4 --out runs/deadlock/x.jsonl   # demand sweep + deadlock detection
-poetry run python -m smartcrossing.cli deadlock-summarize runs/deadlock/x.jsonl --name round5_best=brain --fundamental results/deadlock_fundamental.json   # table + fundamental diagram of the site
-poetry run python -m smartcrossing.cli cloud --driver brain=policy:results/round5_best.npz --driver light --driver reservation --workers 4 --out results/fundamental_cloud.json   # scatter cloud of the site
+poetry run python -m smartcrossing.cli deadlock --driver policy:results/round7_best.npz --driver light --driver reservation --seeds 4000,5000,6000 --seconds 180 --workers 4 --out runs/deadlock/x.jsonl   # demand sweep + deadlock detection
+poetry run python -m smartcrossing.cli deadlock-summarize runs/deadlock/x.jsonl --name round7_best=brain --fundamental results/deadlock_fundamental.json   # table + fundamental diagram of the site
+poetry run python -m smartcrossing.cli cloud --driver brain=policy:results/round7_best.npz --driver light --driver reservation --workers 4 --out results/fundamental_cloud.json   # scatter cloud of the site
 poetry run python site/build.py    # website -> site/public/ (entry point; code in site/sitebuild/, see its docstring)
 ```
 
