@@ -215,6 +215,36 @@ RUN_INFO = {
         "en": ("Wide crossing: fine-tuning for longer",
                "Another hour of fine-tuning: only a little better – the main brain before round 1."),
     },
+    "wide_s0": {
+        "short": "B1'",
+        "de": ("Breite Kreuzung, zweiter Lauf",
+               "Gleiches Rezept, anderer Zufallsstart (noch ohne Rückwärtsgang)."),
+        "en": ("Wide crossing, second run",
+               "Same recipe, different random start (still without reverse gear)."),
+    },
+    "wide_s0r": {
+        "short": "B2'",
+        "de": ("Zweiter Lauf: mit Rückwärtsgang",
+               "Anderer Zufallsstart, mit Rückwärtsgang weitergelernt."),
+        "en": ("Second run: with reverse gear",
+               "Different random start, kept learning with reverse gear."),
+    },
+    "wide_s0ft": {
+        "short": "B3'",
+        "de": ("Zweiter Lauf: Feinschliff",
+               "Anderer Zufallsstart, genauso fein geschliffen: fährt auch rechts, ein paar Unfälle mehr."),
+        "en": ("Second run: fine-tuning",
+               "Different random start, fine-tuned the same way: also drives on the right, a few more crashes."),
+    },
+    "wide_noman_s0": {
+        "short": "B0",
+        "de": ("Ohne Abbiege-Wunsch",
+               "Die Autos erfahren nicht, ob sie links, rechts oder geradeaus wollen – nur, wo das Ziel liegt. "
+               "Lernt langsamer."),
+        "en": ("Without turn wish",
+               "The cars aren't told whether they want to go left, right or straight – only where the goal is. "
+               "Learns more slowly."),
+    },
     "r1_x3": {
         "short": "R1",
         "de": ("Runde 1: neue Regeln, altes Gehirn lernt weiter",
@@ -232,6 +262,20 @@ RUN_INFO = {
         "en": ("Round 1: learned for longer",
                "About 40% fewer crashes than the brain before, but still many in dense traffic – the main "
                "brain before round 2."),
+    },
+    "r1_x1": {
+        "short": "R1a",
+        "de": ("Runde 1, Test: Unfälle so teuer wie bisher",
+               "Kurzer Test: ähnlich gut wie mit dreifacher Strafe – der Unterschied ist Zufall."),
+        "en": ("Round 1, test: crashes as costly as before",
+               "Short test: about as good as with triple penalty – the difference is chance."),
+    },
+    "r1_x10": {
+        "short": "R1b",
+        "de": ("Runde 1, Test: Unfälle zehnmal so teuer",
+               "Kurzer Test: zu viel Strafe – weniger Autos kommen durch, und Unfälle gibt es nicht weniger."),
+        "en": ("Round 1, test: crashes ten times as costly",
+               "Short test: too much penalty – fewer cars get through, and crashes aren't any rarer."),
     },
     "r2_B_s1": {
         "short": "R2",
@@ -267,13 +311,6 @@ RUN_INFO = {
                "With obstacles and a speed-dependent penalty: slightly worse than without the penalty (not "
                "certain from one run)."),
     },
-    "r3_B_long": {
-        "short": "R3",
-        "de": ("Runde 3: Hindernis-Gehirn länger trainiert",
-               "Weitergelernt: kaum weniger Unfälle – mehr vom Gleichen half nicht."),
-        "en": ("Round 3: obstacle brain trained for longer",
-               "Kept learning: hardly any fewer crashes – more of the same didn't help."),
-    },
     "r2_B_s2": {
         "short": "R2'",
         "de": ("Runde 2: mit Hindernissen, zweiter Lauf",
@@ -287,6 +324,13 @@ RUN_INFO = {
                "Bestätigt: mit tempoabhängiger Strafe mehr Unfälle bei dichtem Verkehr."),
         "en": ("Round 2, test: speed-dependent penalty, second run",
                "Confirmed: with the speed-dependent penalty there are more crashes in dense traffic."),
+    },
+    "r3_B_long": {
+        "short": "R3",
+        "de": ("Runde 3: Hindernis-Gehirn länger trainiert",
+               "Weitergelernt: kaum weniger Unfälle – mehr vom Gleichen half nicht."),
+        "en": ("Round 3: obstacle brain trained for longer",
+               "Kept learning: hardly any fewer crashes – more of the same didn't help."),
     },
     "r4_S_s1": {
         "short": "R4",
@@ -348,6 +392,54 @@ RUN_INFO = {
                "The main brain up to round 6: the round 4 brain trained on, unchanged. An intermediate step "
                "(step 475) is chosen, with few crashes. In front of a standing obstacle it rarely stopped – "
                "stopping faded with further training."),
+    },
+    "r5_K_s2": {
+        "short": "R5'",
+        "de": ("Runde 5: weitergelernt, zweiter Lauf",
+               "Anderer Zufallsstart: bei dichtem Verkehr noch mehr Autos durch, dafür bleiben die Unfälle bei "
+               "sehr dichtem Verkehr hoch."),
+        "en": ("Round 5: trained on, second run",
+               "Different random start: even more cars get through in dense traffic, but crashes stay high in "
+               "very dense traffic."),
+    },
+    "r5_D_s1": {
+        "short": "R5d",
+        "de": ("Runde 5, Test: Training mit dichtem Verkehr",
+               "Mehr Verkehr im Training: weniger Unfälle, dafür mehr Autos, die lange festsitzen – und nicht "
+               "mehr Durchsatz als vorher."),
+        "en": ("Round 5, test: training with dense traffic",
+               "More traffic in training: fewer crashes, but more cars stuck for a long time – and no more "
+               "throughput than before."),
+    },
+    "r5_D_s2": {
+        "short": "R5d'",
+        "de": ("Runde 5, Test: dichter Verkehr, zweiter Lauf",
+               "Anderer Zufallsstart, ähnlich."),
+        "en": ("Round 5, test: dense traffic, second run",
+               "Different random start, similar."),
+    },
+    "r5_DW_s1": {
+        "short": "R5w",
+        "de": ("Runde 5, Test: dichter Verkehr + Warten kostet",
+               "Zusätzlich wird Warten bestraft: weniger Unfälle als vorher, aber weiter viel Stau und kaum "
+               "mehr Autos durch."),
+        "en": ("Round 5, test: dense traffic + waiting costs",
+               "Waiting is penalised on top: fewer crashes than before, but still a lot of jamming and hardly "
+               "more cars through."),
+    },
+    "r5_DW_s2": {
+        "short": "R5w'",
+        "de": ("Runde 5, Test: dichter Verkehr + Warten kostet, zweiter Lauf",
+               "Anderer Zufallsstart, ähnlich."),
+        "en": ("Round 5, test: dense traffic + waiting costs, second run",
+               "Different random start, similar."),
+    },
+    "r5_DWX_s1": {
+        "short": "R5x",
+        "de": ("Runde 5, Test: dichter Verkehr, Warten kostet, Unfälle sechsmal so teuer",
+               "Noch weniger Unfälle, dafür Stau statt Crash (nur ein kürzerer Lauf)."),
+        "en": ("Round 5, test: dense traffic, waiting costs, crashes six times as costly",
+               "Even fewer crashes, but jams instead of crashes (a single, shorter run)."),
     },
     "r6_KO_s1": {
         "short": "R6k",
@@ -419,98 +511,6 @@ RUN_INFO = {
         "en": ("Round 7, control: without road blockades",
                "The same number of learning steps, but without blockades in training: stopping in front of "
                "blockades is lost, the obstacle test fails at several intermediate steps."),
-    },
-    "r5_K_s2": {
-        "short": "R5'",
-        "de": ("Runde 5: weitergelernt, zweiter Lauf",
-               "Anderer Zufallsstart: bei dichtem Verkehr noch mehr Autos durch, dafür bleiben die Unfälle bei "
-               "sehr dichtem Verkehr hoch."),
-        "en": ("Round 5: trained on, second run",
-               "Different random start: even more cars get through in dense traffic, but crashes stay high in "
-               "very dense traffic."),
-    },
-    "r5_D_s1": {
-        "short": "R5d",
-        "de": ("Runde 5, Test: Training mit dichtem Verkehr",
-               "Mehr Verkehr im Training: weniger Unfälle, dafür mehr Autos, die lange festsitzen – und nicht "
-               "mehr Durchsatz als vorher."),
-        "en": ("Round 5, test: training with dense traffic",
-               "More traffic in training: fewer crashes, but more cars stuck for a long time – and no more "
-               "throughput than before."),
-    },
-    "r5_D_s2": {
-        "short": "R5d'",
-        "de": ("Runde 5, Test: dichter Verkehr, zweiter Lauf",
-               "Anderer Zufallsstart, ähnlich."),
-        "en": ("Round 5, test: dense traffic, second run",
-               "Different random start, similar."),
-    },
-    "r5_DW_s1": {
-        "short": "R5w",
-        "de": ("Runde 5, Test: dichter Verkehr + Warten kostet",
-               "Zusätzlich wird Warten bestraft: weniger Unfälle als vorher, aber weiter viel Stau und kaum "
-               "mehr Autos durch."),
-        "en": ("Round 5, test: dense traffic + waiting costs",
-               "Waiting is penalised on top: fewer crashes than before, but still a lot of jamming and hardly "
-               "more cars through."),
-    },
-    "r5_DW_s2": {
-        "short": "R5w'",
-        "de": ("Runde 5, Test: dichter Verkehr + Warten kostet, zweiter Lauf",
-               "Anderer Zufallsstart, ähnlich."),
-        "en": ("Round 5, test: dense traffic + waiting costs, second run",
-               "Different random start, similar."),
-    },
-    "r5_DWX_s1": {
-        "short": "R5x",
-        "de": ("Runde 5, Test: dichter Verkehr, Warten kostet, Unfälle sechsmal so teuer",
-               "Noch weniger Unfälle, dafür Stau statt Crash (nur ein kürzerer Lauf)."),
-        "en": ("Round 5, test: dense traffic, waiting costs, crashes six times as costly",
-               "Even fewer crashes, but jams instead of crashes (a single, shorter run)."),
-    },
-    "r1_x1": {
-        "short": "R1a",
-        "de": ("Runde 1, Test: Unfälle so teuer wie bisher",
-               "Kurzer Test: ähnlich gut wie mit dreifacher Strafe – der Unterschied ist Zufall."),
-        "en": ("Round 1, test: crashes as costly as before",
-               "Short test: about as good as with triple penalty – the difference is chance."),
-    },
-    "r1_x10": {
-        "short": "R1b",
-        "de": ("Runde 1, Test: Unfälle zehnmal so teuer",
-               "Kurzer Test: zu viel Strafe – weniger Autos kommen durch, und Unfälle gibt es nicht weniger."),
-        "en": ("Round 1, test: crashes ten times as costly",
-               "Short test: too much penalty – fewer cars get through, and crashes aren't any rarer."),
-    },
-    "wide_s0": {
-        "short": "B1'",
-        "de": ("Breite Kreuzung, zweiter Lauf",
-               "Gleiches Rezept, anderer Zufallsstart (noch ohne Rückwärtsgang)."),
-        "en": ("Wide crossing, second run",
-               "Same recipe, different random start (still without reverse gear)."),
-    },
-    "wide_s0r": {
-        "short": "B2'",
-        "de": ("Zweiter Lauf: mit Rückwärtsgang",
-               "Anderer Zufallsstart, mit Rückwärtsgang weitergelernt."),
-        "en": ("Second run: with reverse gear",
-               "Different random start, kept learning with reverse gear."),
-    },
-    "wide_s0ft": {
-        "short": "B3'",
-        "de": ("Zweiter Lauf: Feinschliff",
-               "Anderer Zufallsstart, genauso fein geschliffen: fährt auch rechts, ein paar Unfälle mehr."),
-        "en": ("Second run: fine-tuning",
-               "Different random start, fine-tuned the same way: also drives on the right, a few more crashes."),
-    },
-    "wide_noman_s0": {
-        "short": "B0",
-        "de": ("Ohne Abbiege-Wunsch",
-               "Die Autos erfahren nicht, ob sie links, rechts oder geradeaus wollen – nur, wo das Ziel liegt. "
-               "Lernt langsamer."),
-        "en": ("Without turn wish",
-               "The cars aren't told whether they want to go left, right or straight – only where the goal is. "
-               "Learns more slowly."),
     },
 }
 
