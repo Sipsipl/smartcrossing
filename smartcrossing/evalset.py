@@ -12,11 +12,9 @@ JSON line per bench (``cli bench``'s line + ``seed`` + ``"kind": "bench"``) and 
 ``KEEP_KEYS`` are the metrics the training evals and the site keep of it.
 """
 
-import json
-import multiprocessing as mp
 import time
-from pathlib import Path
 
+from .jobs import append_jsonl, pool_map
 from .protocol import ENVS, EVAL_DEMANDS, SECONDS, SELECTION_SEEDS
 # metrics of a bench that the training evals (ppo.eval_job, + queued_end) and the site bench keep
 KEEP_KEYS = ("throughput_per_min", "demand_per_min", "exit_ok_rate", "crash_cars_per_1000", "crash_cars",
@@ -79,16 +77,9 @@ def evalset(drivers, out=None, cfg_d: dict | None = None, demands=EVAL_DEMANDS, 
         if gate:
             jobs.append(("gate", spec, cfg_d or None, None, None, envs, seconds))
     t0 = time.time()
-    if workers > 1:
-        with mp.get_context("spawn").Pool(workers) as pool:
-            lines = pool.map(_job, jobs, chunksize=1)
-    else:
-        lines = [_job(j) for j in jobs]
+    lines = pool_map(_job, jobs, workers)
     if out:
-        Path(out).parent.mkdir(parents=True, exist_ok=True)
-        with open(out, "a", encoding="utf-8", newline="\n") as f:
-            for line in lines:
-                f.write(json.dumps(line) + "\n")
+        append_jsonl(out, lines)
     for line in lines:
         if line["kind"] == "gate":
             log(f"{line['driver']}: gate stop_rate_feasible {line['stop_rate_feasible']}, crash {line['crash']}, "

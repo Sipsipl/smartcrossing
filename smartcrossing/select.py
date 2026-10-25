@@ -11,7 +11,6 @@ checkpoint, or ``--ref``); the best checkpoint without any constraint is reporte
 Output JSONL: one ``"kind": "row"`` per checkpoint, one ``"kind": "selection"`` per run (+ overall).
 """
 
-import json
 import re
 import shutil
 import time
@@ -20,6 +19,7 @@ from pathlib import Path
 import numpy as np
 
 from . import evalset
+from .jobs import append_jsonl
 from .protocol import ENVS, SECONDS, SELECT_DEMANDS, SELECTION_SEEDS
 
 GATE_MIN, CRASH_TOL, CRASH_SLACK = 0.95, 1.1, 1.0  # slack: absolute crash+off/1000 (so a ref of 0 is not a hard 0)
@@ -117,9 +117,7 @@ def select(runs, every: int = 1, gate_min: float = GATE_MIN, crash_tol: float = 
         log("reference:\n" + table([rows[ref]]))
         out_lines.append({**rows[ref], "run": "reference"})
     if out:
-        Path(out).parent.mkdir(parents=True, exist_ok=True)
-        with open(out, "a", encoding="utf-8", newline="\n") as f:
-            f.writelines(json.dumps(x) + "\n" for x in out_lines)
+        append_jsonl(out, out_lines)
     if copy_to and overall:
         Path(copy_to).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(overall["ckpt"], copy_to)

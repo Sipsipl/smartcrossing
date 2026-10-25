@@ -27,12 +27,12 @@ T = 10 s are counted as a sensitivity check. End causes (``end_cause``): a stuck
 """
 
 import json
-import multiprocessing as mp
 import time
 from pathlib import Path
 
 import numpy as np
 
+from .jobs import append_jsonl, pool_map
 from .metrics import summarize
 from .protocol import ENVS, REPORT_SEEDS, SELECTION_SEEDS, SWEEP_DEMANDS, SWEEP_SECONDS
 from .sim import DONE_CRASH, DONE_OFFROAD, DONE_TIMEOUT, Sim, SimConfig
@@ -365,16 +365,9 @@ def sweep(drivers, demands=SWEEP_DEMANDS, seeds=SELECTION_SEEDS, envs=ENVS, seco
     """Every driver x demand x seed; appends one JSON line per run to ``out``."""
     jobs = [(d, cfg_d, dm, s, envs, seconds, noise, lamp) for d in drivers for dm in demands for s in seeds]
     t0 = time.time()
-    if workers > 1:
-        with mp.get_context("spawn").Pool(workers) as pool:
-            lines = pool.map(run_job, jobs, chunksize=1)
-    else:
-        lines = [run_job(j) for j in jobs]
+    lines = pool_map(run_job, jobs, workers)
     if out:
-        Path(out).parent.mkdir(parents=True, exist_ok=True)
-        with open(out, "a", encoding="utf-8", newline="\n") as f:
-            for line in lines:
-                f.write(json.dumps(line) + "\n")
+        append_jsonl(out, lines)
     for ln in lines:
         log(f"{label(ln['driver'])} noise={ln['noise']} lamp={ln['lamp']} d={ln['demand']} s={ln['seed']}: "
             f"thr {ln['throughput_per_min']}, crash/1000 {ln['crash_cars_per_1000']}, timeouts {ln['timeouts']}, "
@@ -599,11 +592,7 @@ def cloud(drivers: dict, demands=CLOUD_DEMANDS, envs=CLOUD_ENVS, seconds=CLOUD_S
     throughput, demand], ...]}}}; each cell thinned evenly to ``per_demand`` points."""
     jobs = [(spec, cfg_d, dm, seed + k, envs, seconds) for spec in drivers.values() for k, dm in enumerate(demands)]
     t0 = time.time()
-    if workers > 1:
-        with mp.get_context("spawn").Pool(workers) as pool:
-            cells = pool.map(cloud_job, jobs, chunksize=1)
-    else:
-        cells = [cloud_job(j) for j in jobs]
+    cells = pool_map(cloud_job, jobs, workers)
     out = {"meta": {
         "density": "mean number of driving cars on the map over the window (as the live dot on the start page)",
         "throughput": f"exits in the window per minute ({CLOUD_WINDOW_S:g}-s sliding window, one every "
