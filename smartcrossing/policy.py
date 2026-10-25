@@ -7,7 +7,8 @@ with tanh hidden layers and a tanh output.
 Architecture: the default is this MLP on the flat observation (``arch`` None / absent from the
 checkpoint). ``arch = {"type": "set", ...}`` is the neighbour set encoder of policy_set.py; its
 checkpoints store the arch dict next to the flat params (``save_npz(..., arch=...)``) and keep
-``sizes = [obs_dim, *trunk hidden, act_dim]`` so every size check stays valid.
+``sizes = [obs_dim, *trunk hidden, act_dim]`` so every size check stays valid. A set encoder may
+carry a GRU memory (``arch["mem"]``); PolicyDriver then keeps the per-car state.
 """
 
 import json
@@ -104,7 +105,8 @@ def forward(params: np.ndarray, obs: np.ndarray, sizes, in_scale=None, arch=None
 class PolicyDriver:
     """Drives every car of a Sim with one of several parameter vectors chosen by
     ``sim.group``. ``mute[g]`` forces the signal output of group g to zero. Deterministic (tanh of the mean)
-    unless ``set_noise`` made it stochastic."""
+    unless ``set_noise`` made it stochastic. Memory brains (policy_set ``mem``) keep a state per car that
+    ``act`` advances (call it once per sim step); ``reset_state`` forgets it."""
 
     def __init__(self, sim: Sim, params, sizes, mute=None, train_cfg: dict | None = None, in_scale=None, archs=None):
         self.sim = sim
@@ -122,6 +124,7 @@ class PolicyDriver:
         if self.sizes[0] != obs_dim(sim.cfg) or self.sizes[-1] != act_dim(sim.cfg):
             raise ValueError(f"policy sizes {self.sizes} do not match sim obs/act dims")
         self.noise_std, self.rng = None, None
+        self.reset_state()
 
     def set_noise(self, std, rng):
         """Stochastic actions from now on: tanh(mu + std * eps) for the driving cars, eps ~ N(0, 1) from ``rng``
@@ -129,12 +132,38 @@ class PolicyDriver:
         self.noise_std = None if std is None else np.asarray(std, dtype=float)
         self.rng = rng
 
-    def _policy(self, p, obs, arch) -> np.ndarray:
+    def reset_state(self):
+        """Forget the memory of every car (memory brains, policy_set ``mem``; no-op for stateless ones). The state
+        is kept per slot: h[j] (B, N, Hm) for parameter vector j (j = len(params): groups beyond the list) and the
+        uid the state belongs to; a slot whose uid changed (new car) or that holds no driving car starts at 0."""
+        self.h = [None] * (len(self.params) + 1)
+        self.uid_prev = None
+
+    def _policy(self, p, obs, arch, h=None):
+        """Actions of the rows obs (and, with a memory state h, the new state)."""
+        if h is None and self.noise_std is None:
+            return forward(p, obs, self.sizes, self.in_scale, arch), None
+        x = obs if self.in_scale is None else obs * self.in_scale
+        if h is None:
+            mu, h_new = linear_forward(p, self.sizes, x, arch), None
+        else:
+            mu, h_new = policy_set.forward_mem(p, arch, x, h)
         if self.noise_std is None:
-            return forward(p, obs, self.sizes, self.in_scale, arch)
-        h = obs if self.in_scale is None else obs * self.in_scale
-        mu = linear_forward(p, self.sizes, h, arch)
-        return np.tanh(mu + self.noise_std * self.rng.standard_normal(mu.shape))
+            return np.tanh(mu), h_new
+        return np.tanh(mu + self.noise_std * self.rng.standard_normal(mu.shape)), h_new
+
+    def _run(self, j, p, arch, m, obs, reset, alive):
+        """Actions of the slots m with parameter vector j; advances its memory state (if any)."""
+        Hm = policy_set.mem_size(arch) if is_set(arch) else 0
+        if not Hm:
+            return self._policy(p, obs[m], arch)[0]
+        if self.h[j] is None:
+            self.h[j] = np.zeros((*m.shape, Hm))
+        H = self.h[j]
+        h_in = np.where(reset[m][:, None], 0.0, H[m])
+        a, h_new = self._policy(p, obs[m], arch, h_in)
+        H[m] = np.where(alive[m][:, None], h_new, 0.0)
+        return a
 
     @classmethod
     def load(cls, path, sim: Sim, mute=None):
@@ -179,19 +208,27 @@ class PolicyDriver:
         grp = self.sim.group
         out = np.zeros((*obs.shape[:-1], self.sizes[-1]))
         # deterministic: every slot (empty ones are ignored by the sim); stochastic: the driving cars only
-        cars = np.ones(grp.shape, dtype=bool) if self.noise_std is None else self.sim.alive
+        alive = self.sim.alive
+        cars = np.ones(grp.shape, dtype=bool) if self.noise_std is None else alive
+        uid = self.sim.uid
+        # memory: a slot starts from 0 when it holds a new car (uid changed) or no driving car
+        reset = ~alive if self.uid_prev is None else ~alive | (uid != self.uid_prev)
         for g, p in enumerate(self.params):
             m = (grp == g if len(self.params) > 1 else np.ones(grp.shape, dtype=bool)) & cars
             if not m.any():
                 continue
-            a = self._policy(p, obs[m], self.archs[g])
+            a = self._run(g, p, self.archs[g], m, obs, reset, alive)
             if self.mute[g]:
                 a[:, 2:] = 0.0
             out[m] = a
         if len(self.params) > 1:  # groups beyond the given params use the last one
             m = (grp >= len(self.params)) & cars
             if m.any():
-                out[m] = self._policy(self.params[-1], obs[m], self.archs[-1])
+                out[m] = self._run(len(self.params), self.params[-1], self.archs[-1], m, obs, reset, alive)
+        for H in self.h:
+            if H is not None:
+                H[~alive] = 0.0
+        self.uid_prev = uid.copy()
         return out
 
 

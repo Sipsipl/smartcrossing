@@ -65,9 +65,8 @@ def mlp_backward(p, sizes, hs, gout):
     return torch.cat(flat)
 
 
-def set_forward(p, arch, x):
-    """Torch twin of policy_set.forward (linear output); graph-capturable (no host syncs)."""
-    P = policy_set.unpack(p, arch)
+def set_encode(P, arch, x):
+    """Trunk input z = [ego, extra, pooled] (torch twin of policy_set.encode; P = policy_set.unpack(p, arch))."""
     E, K, F = arch["n_ego"], arch["K"], arch["F"]
     lead = x.shape[:-1]
     ego = torch.cat([x[..., :E], x[..., E + K * F :]], -1)
@@ -93,13 +92,69 @@ def set_forward(p, arch, x):
     else:
         mx = torch.where(mask[..., None], h, -2.0).amax(-2)
         pooled = torch.where(mask.any(-1, keepdim=True), mx, 0.0)
-    z = torch.cat([ego, pooled], -1)
+    return torch.cat([ego, pooled], -1)
+
+
+def set_trunk(P, arch, z, g=None):
+    """Linear output of the trunk (torch twin of policy_set.trunk; g: the new memory state)."""
     n = len(arch["hidden"])
     for i in range(n + 1):
-        z = z @ P[f"trunk{i}.W"] + P[f"trunk{i}.b"]
+        if i == 0 and g is not None:
+            z = z @ P["trunk0.W"] + g @ P[policy_set.MEM_OUT] + P["trunk0.b"]
+        else:
+            z = z @ P[f"trunk{i}.W"] + P[f"trunk{i}.b"]
         if i < n:
             z = torch.tanh(z)
     return z
+
+
+def gru_cell(P, x, h):
+    """Torch twin of policy_set.gru_cell (gate order r, u, n)."""
+    Hm = h.shape[-1]
+    gx = x @ P["gru.Wx"] + P["gru.bx"]
+    gh = h @ P["gru.Wh"] + P["gru.bh"]
+    r = torch.sigmoid(gx[..., :Hm] + gh[..., :Hm])
+    u = torch.sigmoid(gx[..., Hm : 2 * Hm] + gh[..., Hm : 2 * Hm])
+    n = torch.tanh(gx[..., 2 * Hm :] + r * gh[..., 2 * Hm :])
+    return (1.0 - u) * n + u * h
+
+
+def set_forward(p, arch, x):
+    """Torch twin of policy_set.forward (linear output, stateless archs); graph-capturable (no host syncs)."""
+    if policy_set.mem_size(arch):
+        raise ValueError("this set encoder has a memory: use set_forward_mem")
+    P = policy_set.unpack(p, arch)
+    return set_trunk(P, arch, set_encode(P, arch, x))
+
+
+def set_forward_mem(p, arch, x, h):
+    """Torch twin of policy_set.forward_mem: (linear output, new state)."""
+    P = policy_set.unpack(p, arch)
+    z = set_encode(P, arch, x)
+    g = gru_cell(P, z, h)
+    return set_trunk(P, arch, z, g), g
+
+
+def seq_forward_mem(p, arch, x, seq, cols, row_t, row_c):
+    """Linear output of a memory actor on the rows x of the sequence columns ``cols`` (one minibatch of
+    the recurrent update): encoder on the rows, scattered into the dense (T, C_mb) grid, the GRU run over
+    the T steps of the rollout from the stored (detached) state h0 with the rollout's resets (state 0 at a
+    new car, 0 after a slot without a driving car), trunk on the rows. Truncated BPTT over the rollout.
+    seq: rollout_torch batch "seq" (first, valid (T, C), h0 (C, Hm)); row_t / row_c: step and column (index
+    into cols) of each row."""
+    P = policy_set.unpack(p, arch)
+    z = set_encode(P, arch, x)
+    first, valid, h = seq["first"][:, cols], seq["valid"][:, cols], seq["h0"][cols].to(z.dtype)
+    T = first.shape[0]
+    dense = torch.zeros(T, len(cols), z.shape[-1], dtype=z.dtype, device=z.device).index_put((row_t, row_c), z)
+    hs = []
+    for t in range(T):
+        h = torch.where(first[t, :, None], 0.0, h)
+        hn = gru_cell(P, dense[t], h)
+        hs.append(hn)
+        h = torch.where(valid[t, :, None], hn, 0.0)
+    g = torch.stack(hs)[row_t, row_c]
+    return set_trunk(P, arch, z, g)
 
 
 def linear_forward(p, sizes, x, arch=None):
@@ -114,6 +169,14 @@ def net_forward(p, sizes, x, arch=None):
     leaf = p.detach().requires_grad_(True)
     with torch.enable_grad():
         out = set_forward(leaf, arch, x)
+    return out.detach(), (leaf, out)
+
+
+def seq_net_forward(p, arch, x, seq, cols, row_t, row_c):
+    """(output, context for net_backward) of seq_forward_mem."""
+    leaf = p.detach().requires_grad_(True)
+    with torch.enable_grad():
+        out = seq_forward_mem(leaf, arch, x, seq, cols, row_t, row_c)
     return out.detach(), (leaf, out)
 
 
@@ -182,16 +245,36 @@ class TorchPPO:
         arch_a, arch_c = getattr(actor, "arch", None), getattr(critic, "arch", None)
         clip_hi, clip_lo = 1 + a.clip, 1 - a.clip
         stats = {"kl": [], "clipfrac": [], "vloss": [], "pg": []}
-        mb = int(np.ceil(n / a.minibatches))
+        mem = policy_set.mem_size(arch_a)
+        if mem:  # recurrent actor: minibatches of whole sequence columns (a slot over the rollout)
+            if "seq" not in data:
+                raise ValueError("a memory actor needs the sequence batch of rollout_torch (--rollout-device cpu|cuda)")
+            seq = {k: (v.to(self.dev) if k != "h0" else T(v)) for k, v in data["seq"].items()}
+            row_t, row_c = seq["row_t"], seq["row_c"]
+            n_units = seq["h0"].shape[0]
+            colpos = torch.full((n_units,), -1, dtype=torch.int64, device=self.dev)
+        else:
+            n_units = n
+        mb = int(np.ceil(n_units / a.minibatches))
         stop = False
         for ep in range(a.epochs):
-            perm = torch.as_tensor(rng.permutation(n), device=self.dev)
-            for s in range(0, n, mb):
-                idx = perm[s : s + mb]
+            perm = torch.as_tensor(rng.permutation(n_units), device=self.dev)
+            for s in range(0, n_units, mb):
+                if mem:
+                    cols = perm[s : s + mb]
+                    colpos.fill_(-1)
+                    colpos[cols] = torch.arange(len(cols), device=self.dev)
+                    cp = colpos[row_c]
+                    idx = (cp >= 0).nonzero().squeeze(1)  # the rows of these columns (host sync)
+                else:
+                    idx = perm[s : s + mb]
                 m = len(idx)
                 adv = adv_all[idx]
                 adv = (adv - adv.mean()) / (adv.std(correction=0) + 1e-8)
-                mu, hs = net_forward(pa, sa, obs[idx], arch_a)
+                if mem:
+                    mu, hs = seq_net_forward(pa, arch_a, obs[idx], seq, cols, row_t[idx], cp[idx])
+                else:
+                    mu, hs = net_forward(pa, sa, obs[idx], arch_a)
                 std = torch.exp(ls)
                 z = (u[idx] - mu) / std
                 lp = (-0.5 * z**2 - ls - 0.5 * LOG2PI) @ mask

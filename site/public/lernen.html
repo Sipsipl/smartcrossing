@@ -6,7 +6,7 @@
 <title data-i18n="learn.wie-lernen-die-autos">Wie lernen die Autos? – Smart Crossing</title>
 <meta data-i18n-attr="content=learn.meta-belohnung-strafe-wiederholung" name="description" content="Belohnung, Strafe, Wiederholung: wie selbstfahrende Autos durch Evolution und PPO lernen – mit Zeitreise durchs Training.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/site.css?v=b31580dc">
+<link rel="stylesheet" href="css/site.css?v=46c57a95">
 </head>
 <body data-page="lernen">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker></defs></svg>
@@ -65,6 +65,7 @@ und bekommen Punkte für das Ergebnis: Ankommen gibt Plus, Unfall und Warten kos
 <p class="sub" data-i18n="learn.gehirn-alle-sub">Viele Autos, eine Kopie desselben Netzes</p>
 <svg data-i18n-attr="aria-label=learn.aria-ein-netz" class="diagram" viewBox="0 0 300 170" role="img" aria-label="Ein Netz steuert mehrere Autos, jedes Auto bekommt seine eigenen Punkte"><rect class="box" x="90" y="8" width="120" height="36" rx="10"/><text data-i18n="learn.netz-box" x="150" y="31" text-anchor="middle" style="font-weight:700">Ein Netz</text><g class="arrow" style="stroke-width:2"><path d="M111.15 46 L39 92" marker-end="url(#ah)"/><path d="M137.4 46 L114 92" marker-end="url(#ah)"/><path d="M163.65 46 L189 92" marker-end="url(#ah)"/><path d="M189.9 46 L264 92" marker-end="url(#ah)"/></g><rect x="22" y="96" width="34" height="18" rx="4" fill="#4287f5"/><rect class="box" x="22" y="124" width="34" height="20" rx="10"/><text x="39" y="139" text-anchor="middle" style="font-size:13px;font-weight:700">+2</text><rect x="97" y="96" width="34" height="18" rx="4" fill="#f5a623"/><rect class="box" x="97" y="124" width="34" height="20" rx="10"/><text x="114" y="139" text-anchor="middle" style="font-size:13px;font-weight:700">−4</text><rect x="172" y="96" width="34" height="18" rx="4" fill="#f0f0f0" stroke="var(--line)"/><rect class="box" x="172" y="124" width="34" height="20" rx="10"/><text x="189" y="139" text-anchor="middle" style="font-size:13px;font-weight:700">+1</text><rect x="247" y="96" width="34" height="18" rx="4" fill="#4287f5"/><rect class="box" x="247" y="124" width="34" height="20" rx="10"/><text x="264" y="139" text-anchor="middle" style="font-size:13px;font-weight:700">+3</text><text data-i18n="learn.netz-punkte" class="sub" x="150" y="163" text-anchor="middle" style="font-size:11px">jedes Auto zählt seine eigenen Punkte</text></svg>
 <p data-i18n="learn.gehirn-alle-text">Im Training fährt jedes Auto mit einer Kopie desselben Netzes – also mit denselben Gewichten, aber mit seinen eigenen Beobachtungen. Lernt das Netz etwas dazu, gilt das sofort für alle Autos. Über die Dachlampe können die Autos einander Signale geben; was ein Signal bedeutet, legen sie selbst fest. Punkte bekommt jedes Auto für sein eigenes Ergebnis. Rücksicht lohnt sich trotzdem: Bei einem Zusammenstoß sitzt auf beiden Seiten dasselbe Netz, und es verliert doppelt. Damit das Training schneller geht, laufen 1.024 Kreuzungen gleichzeitig, jede für sich.</p>
+<p data-i18n="learn.gedaechtnis">Das aktuelle Netz hat außerdem ein <b>Gedächtnis</b>: Jedes Auto behält 16 Zahlen von Augenblick zu Augenblick, und wenn es auftaucht, ist das Gedächtnis leer. Was darin steht, gibt niemand vor – das Gehirn hat gelernt, es zu nutzen. Nimmt man es ihm weg, stehen die Autos bei 120 Autos pro Minute mehr als doppelt so lange verkeilt.</p>
 
 <h2 data-i18n="learn.lernkurve">Lernkurve</h2>
 <p class="sub" data-i18n="learn.kurve-sub">Wie sich das Training entwickelt hat</p>
@@ -99,14 +100,14 @@ und bekommen Punkte für das Ergebnis: Ankommen gibt Plus, Unfall und Warten kos
 <p><a data-i18n="learn.weiter-wie-gut-sind" href="vergleich.html">Weiter: Wie gut sind sie im Vergleich? →</a></p>
 <footer data-i18n="footer">Smart Crossing – ein Hobbyprojekt. Alles läuft direkt in deinem Browser, es werden keine Daten gesammelt. Stand: 2026-10-25. <a href="https://github.com/Sipsipl/smartcrossing">Code auf GitHub</a></footer>
 </div>
-<script src="data/site-data.js?v=b31580dc"></script>
-<script src="js/i18n-de.js?v=b31580dc"></script>
-<script src="js/i18n-en.js?v=b31580dc"></script>
-<script src="js/i18n.js?v=b31580dc"></script>
-<script src="js/sim-config.js?v=b31580dc"></script>
-<script src="js/sim.js?v=b31580dc"></script>
-<script src="js/crossing.js?v=b31580dc"></script>
-<script src="js/charts.js?v=b31580dc"></script>
-<script src="js/pages.js?v=b31580dc"></script>
+<script src="data/site-data.js?v=46c57a95"></script>
+<script src="js/i18n-de.js?v=46c57a95"></script>
+<script src="js/i18n-en.js?v=46c57a95"></script>
+<script src="js/i18n.js?v=46c57a95"></script>
+<script src="js/sim-config.js?v=46c57a95"></script>
+<script src="js/sim.js?v=46c57a95"></script>
+<script src="js/crossing.js?v=46c57a95"></script>
+<script src="js/charts.js?v=46c57a95"></script>
+<script src="js/pages.js?v=46c57a95"></script>
 </body>
 </html>

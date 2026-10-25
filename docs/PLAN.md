@@ -79,6 +79,14 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
   older files unchanged); `policy.linear_forward` / `ppo_torch.linear_forward` and `policy.param_count` are the
   one dispatch between the two architectures. Site: sim.js runs set brains; the site build handles both (its `Brain`
   helper: snapshot, bench payload, rounding).
+  GRU memory (Roadmap B / (G), `ppo --mem 16`, actor only): arch field `mem` = {"type": "gru", "size": Hm} (absent =
+  stateless, older files unchanged); a GRU cell on the trunk input [ego, pooled] (same observation, no new information)
+  whose new state is a residual input of the first trunk layer (`mem.out.W`). Its blocks come last in the flat vector,
+  so `policy_set.upgrade_params` turns a stateless brain into a memory brain that drives bit-identically (mem.out.W = 0;
+  `ppo --mem 16 --init-actor results/round7_best.npz [--init runs/r7_DOB_s1/state.npz]`). State per car, 0 for a new
+  uid in the slot: PolicyDriver, sim.js (state on the sim; `memIn` reads it for the site's selected car), TorchRollout
+  (static in-place tensors, CUDA graph). Recurrent PPO in torch only: sequence minibatches of whole slot columns,
+  truncated BPTT over each rollout from the stored state h0 (ppo_torch.seq_forward_mem); tests/test_policy_mem.py.
 - `smartcrossing/bc.py` (`ppo --init-bc TEACHER.npz`): behaviour cloning of an MLP brain into a new actor (set
   encoder or MLP of other sizes; the student may see more neighbours). Other `ppo.py` options worth knowing:
   `--max-minutes` (stop after the iteration past the limit; the final checkpoint is always written and
@@ -139,10 +147,11 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
 Done: simulator + baselines + metrics + tests; PPO training (numpy and GPU); emergence analysis
 tooling; website (site/, German + English) incl. sliders, agent mixing, side-by-side comparison, reward visual,
 set-brain view, fundamental diagram; wide crossing, grip limit, reverse gear, impact-speed crash cost, wrecks /
-brake light / hazard / one lamp / right-half spawning; rounds 1-7 (crash cost x3, obstacle scenarios,
-set/attention encoder, dense traffic, blockade scenarios); stop gate incl. block cases; deadlock study;
+brake light / hazard / one lamp / right-half spawning; rounds 1-8 (crash cost x3, obstacle scenarios,
+set/attention encoder, dense traffic, blockade scenarios, GRU memory); stop gate incl. block cases; deadlock study;
 multi-seed site bench on held-out report seeds; run tracking; refactoring steps (latest: refactor 4, 2026-10-25).
-Main brain: round-7 brain results/round7_best.npz (site main `r7_DOB_s1@1050`; previous r6_DO_s2@750).
+Main brain: round-8 brain results/round8_best.npz (site main `r8_M_s1@1398`, set encoder + GRU memory of 16; previous
+r7_DOB_s1@1050).
 Crash rule: equal cost for all involved (relative impact speed); own-speed variant C was worse (round 3).
 Open: deadlocks / near-gridlock in the box at high demand (cars removed after max_age 60 s); remaining
 crashes in the box; lamp unused so far.
@@ -185,11 +194,16 @@ crashes in the box; lamp unused so far.
    brain is stuck (deadlock) less than ~5 % of the time at the current ceiling (`cli deadlock`, report
    seeds), raise the ceiling in the next round (keep sampling low demands). Not before: above capacity
    (~96/min) more demand mostly means longer queues, more training crashes, slower runs and the n_slots
-   limit. Today (ceiling 0.5 /s/arm = 120/min) the brain is still stuck 12-23 % of the time there.
+   limit. Today (ceiling 0.5 /s/arm = 120/min) the round-8 brain is still stuck ~7-11 % of the time there
+   (round 7: 20-23 %).
    Practice obstacles stay part of the normal training world (no separate obstacle training): deadlocks
    do not replace them (slow roll-in inside the box, they get rarer as the brain improves; the round-7
    control with dense traffic but no blockades lost block stop 1.00 -> 0.75). Open check (optional):
    a run with no artificial obstacles at all, real 10-s wrecks only.
+4d. [2026-10-25] Round 8 done: GRU memory (`--mem 16`) -> main brain r8_M_s1@1398 (120/min: 103 vs 93 cars/min,
+   deadlock time 23 -> 11 % on report seeds; 7 % vs 20 % on fresh seeds). Open: a second control seed (the stateless
+   control got part of the gain), longer runs, the remaining deadlocks at 120/min (~7-11 %; rule 4c: raise the
+   ceiling once below ~5 %), then a shared reward component (owner decision).
 5. Then (D) norm experiments (lamp language, priority patterns) - (G) feeds directly into them.
 
 - (G) Deadlocks and decentralised negotiation (owner, 2026-10-14; the interesting part from a game-theory
@@ -212,7 +226,8 @@ crashes in the box; lamp unused so far.
   demand), solo-driving gate (a car alone never leaves the road), impact-speed crash/offroad
   cost, physically visible neighbour features (curvature, acceleration).  <- done
 - (B) Perception / network: set (attention) encoder over all neighbours instead of K nearest
-  <- done (round 4, clear win); optional recurrent memory (GRU) <- open, see (G).
+  <- done (round 4, clear win); optional recurrent memory (GRU) <- done (`--mem 16`, round 8, 2026-10-25: memory brains beat the stateless control,
+  ablation: zeroing the memory output undoes the gain), see (G).
 - (C) Geometry-independent inputs throughout + randomized geometries during training; GPU port
   (owner has an RTX 3070 Ti, local training later).
 - (D) Norm experiments: >= 20 seeds per configuration; lateral position (lanes; driving side is

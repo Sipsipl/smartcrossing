@@ -53,4 +53,23 @@ for (const p of input.policies || []) {
   out.policies.push({ out: rows, acted });
 }
 
+if (input.memtraj) {  // memory brain: one sim whose state is set every step, its memory (sim.mem) carries over
+  const m = input.memtraj, sim = new SC.Sim(m.cfg, 0), pol = SC.loadPolicy(m.policy);
+  const res = { act: [], h: [], peek_diff: 0 };
+  for (const st of m.states) {
+    sim.setState(st);
+    const obs = sim.observe(), D = SC.obsDim(sim.cfg), A = SC.actDim(sim.cfg);
+    const peek = [];
+    for (let n = 0; n < sim.N; n++) peek.push(sim.alive[n] ? SC.forward(pol, obs, n * D, SC.memIn(sim, n, pol)) : null);
+    const a = SC.act(sim, [pol], [false], obs), rows = [], hs = [];
+    for (let n = 0; n < sim.N; n++) {
+      rows.push(Array.from(a.subarray(n * A, (n + 1) * A)));
+      hs.push(sim.mem[n] ? Array.from(sim.mem[n].h) : new Array(pol.mem).fill(0));
+      if (peek[n]) for (let q = 0; q < A; q++) res.peek_diff = Math.max(res.peek_diff, Math.abs(peek[n][q] - a[n * A + q]));
+    }
+    res.act.push(rows); res.h.push(hs);
+  }
+  out.memtraj = res;
+}
+
 process.stdout.write(JSON.stringify(out));

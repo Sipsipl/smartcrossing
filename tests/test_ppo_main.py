@@ -223,3 +223,43 @@ def test_ppo_main_arch_set(tmp_path):
 
     g, _ = stop_gate(f"policy:{runs / 's' / 'current.npz'}", {})
     assert 0.0 <= g["safe_rate_feasible"] <= 1.0
+
+
+def test_ppo_main_mem_upgrade_resume(tmp_path):
+    """--mem 16 from the upgraded round-7 brain (--init-actor) on the torch cpu rollout: runs, saves the memory arch
+    (checkpoint, state.npz, args.json), resumes with --init and drives with PolicyDriver; arch mismatches are errors."""
+    pytest.importorskip("torch")
+    from smartcrossing import policy_set
+
+    rnd7 = ROOT / "results" / "round7_best.npz"
+    p7, _, cfg7 = load_npz(rnd7)
+    runs = tmp_path / "runs"
+    common = ["--horizon", "16", "--minibatches", "2", "--epochs", "1", "--eval-every", "0", "--arch", "set",
+              "--hidden", "64,64", "--set-phi", "32,32", "--set-heads", "4", "--set-dk", "8", "--rollout-envs", "2",
+              "--demand-start", "0.3", "--cfg", json.dumps({**cfg7, "n_slots": 12})]
+    with pytest.raises(SystemExit, match="torch rollout"):
+        ppo.main(["--name", "bad", "--iters", "1", "--runs-dir", str(runs), "--update-device", "cpu", "--mem", "16",
+                  *common])
+    st = ppo.build_state(ppo.parse_args(["--name", "x", "--mem", "16", "--init-actor", str(rnd7), *common]))
+    assert policy_set.mem_size(st.a_arch) == 16 and np.array_equal(st.actor.p[: len(p7)], p7)
+    ppo.main(["--name", "m", "--iters", "2", "--runs-dir", str(runs), "--rollout-device", "cpu", "--mem", "16",
+              "--init-actor", str(rnd7), *common])
+    run = runs / "m"
+    arch = load_arch(run / "current.npz")
+    assert arch["mem"] == {"type": "gru", "size": 16} and policy_set.base_arch(arch) == load_arch(rnd7)
+    with np.load(run / "state.npz") as z:
+        assert json.loads(str(z["actor_arch"])) == arch
+    assert json.loads((run / "args.json").read_text(encoding="utf-8"))["actor_arch"] == arch
+    ppo.main(["--name", "m", "--iters", "3", "--runs-dir", str(runs), "--rollout-device", "cpu", "--mem", "16",
+              "--init", str(run / "state.npz"), *common])
+    log = _log(run)
+    assert [r["iter"] for r in log] == [0, 1, 2] and all(np.isfinite(r["kl"]) for r in log)
+    sim = Sim(SimConfig(n_slots=12, demand=0.5), 2, seed=0)
+    drv = PolicyDriver.load(run / "current.npz", sim)
+    for _ in range(20):
+        sim.step(drv.act())
+    assert np.abs(drv.h[0]).max() > 0
+    with pytest.raises(ValueError, match="does not match"):  # stored arch mem 16, run asks for mem 8
+        ppo.build_state(ppo.parse_args(["--name", "x", "--mem", "8", "--init", str(run / "state.npz"), *common]))
+    with pytest.raises(ValueError, match="does not match"):  # a memory brain cannot start a stateless run
+        ppo.build_state(ppo.parse_args(["--name", "x", "--init-actor", str(run / "current.npz"), *common]))

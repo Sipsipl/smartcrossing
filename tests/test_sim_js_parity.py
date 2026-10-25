@@ -348,7 +348,27 @@ def parity(tmp_path_factory):
     expect_drv8 = drv8.act()[0]
     pols8 = [set_pols[0], export_json(tmp / "mlp8.npz")]
 
+    # a memory brain (policy_set mem) over a multi-step trajectory with slot reuse: Python's PolicyDriver drives,
+    # JS gets each step's state (setState) and keeps its own memory state on its sim
+    cfgm = dataclasses.replace(cfg8, demand=0.8, wreck_time=0.3)
+    arch_m = policy_set.make_arch(cfgm, hidden=(16, 12), phi=(10, 8), heads=2, dk=4, dv=3, mem=5)
+    pm = policy_set.init_params(arch_m, 21, out_scale=1.0)
+    Pm = policy_set.unpack(pm, arch_m)
+    for name in (policy_set.MEM_OUT, "gru.bx", "gru.bh"):
+        Pm[name][...] += np.random.default_rng(22).normal(0, 0.7, Pm[name].shape)
+    save_npz(tmp / "mem.npz", pm, sizes8, cfgm, in_scale=scale8, arch=arch_m)
+    msim = Sim(cfgm, 1, seed=6)
+    mdrv = PolicyDriver.load(tmp / "mem.npz", msim)
+    mem_states, mem_expect = [], {"act": [], "h": [], "alive": [], "uid": []}
+    for _ in range(100):
+        mem_states.append(export_state(msim))
+        a = mdrv.act()
+        for k, v in (("act", a[0]), ("h", mdrv.h[0][0]), ("alive", msim.alive[0]), ("uid", msim.uid[0])):
+            mem_expect[k].append(v.copy())
+        msim.step(a)
+
     payload = {
+        "memtraj": {"cfg": cfg_dict(msim.cfg), "policy": export_json(tmp / "mem.npz"), "states": mem_states},
         "cases": [{k: c[k] for k in ("name", "cfg", "state", "action")} for c in cases],
         "policies": [
             {"policy": pols[0], "obs": obs.tolist()},
@@ -377,7 +397,7 @@ def parity(tmp_path_factory):
     expect_pol = [forward(params[0], obs, sizes, scale), forward(params[1], obs[:5], sizes, scale)]
     expect_pol += [*expect_set[1:], expect_set[0]]
     return {"cases": cases, "js": js, "expect_pol": expect_pol, "expect_drv": expect_drv, "dsim": dsim,
-            "expect_drv8": expect_drv8, "dsim8": dsim8}
+            "expect_drv8": expect_drv8, "dsim8": dsim8, "mem": {k: np.array(v) for k, v in mem_expect.items()}}
 
 
 def test_defaults_match_simconfig(parity):
@@ -488,3 +508,17 @@ def test_set_policy_parity(parity):
     groups = parity["dsim8"].group[0][alive]
     assert alive.sum() >= 4 and len(set(groups)) == 2
     np.testing.assert_allclose(acted[alive], parity["expect_drv8"][alive], atol=TOL)
+
+
+def test_memory_policy_trajectory_parity(parity):
+    """Memory brain over 100 steps: JS actions and memory states equal PolicyDriver's for every driving car, incl.
+    slots that got a new car in the same step the old one left (state back to 0); JS's read-only memIn + forward
+    (the selected car's next action on the site) equals what act() then does."""
+    js, e = parity["js"]["memtraj"], parity["mem"]
+    al = e["alive"]
+    assert al.sum() > 200
+    reuse = (al[1:] & al[:-1] & (e["uid"][1:] != e["uid"][:-1])).sum()
+    assert reuse > 0
+    np.testing.assert_allclose(np.array(js["act"])[al], e["act"][al], atol=TOL)
+    np.testing.assert_allclose(np.array(js["h"])[al], e["h"][al], atol=TOL)
+    assert np.abs(e["h"][al]).max() > 0.05 and js["peek_diff"] < 1e-12

@@ -317,8 +317,9 @@
     const much = tx(a > 0 && b < 0.5 * a ? "note.much" : b < a ? "note.fewer" : "note.notfewer");
     const vm = crashVerdict("0.15"), vd = crashVerdict("0.3");
     // bench values are means over several traffic seeds (held-out reporting seeds), but still a rounded comparison
+    const Hm = isSetEntry(m) && m.policy.arch.mem ? m.policy.arch.mem.size : 0;
     return isSetEntry(m)
-      ? tx("note.set", {
+      ? tx(Hm ? "note.mem" : "note.set", { Hm,
         K: m.policy.arch.K, midw: tx(vm), mid,
         dense: dense && vd ? tx("note.dense", { dw: tx(vd), dense }) : "",
         thrw: tx("note.thr." + SCX.compare(thr, thrPrev, 2, SCX.THR_REL)), thr: num(thr, 0), thrprev: num(thrPrev, 0), dem: num(m.bench["0.5"].demand_per_min, 0),
@@ -434,7 +435,7 @@
     document.querySelectorAll("[data-nbk]").forEach((e) => { e.textContent = (SCX.layoutFor(cx.sim.cfg) || D.layout).k_neighbours; });
     function nextAction(c, n) {
       const t = c.typeOf(n);
-      const a = Array.from(SC.forward(t.policy, c.obs, n * SC.obsDim(c.sim.cfg)));
+      const a = Array.from(SC.forward(t.policy, c.obs, n * SC.obsDim(c.sim.cfg), SC.memIn(c.sim, n, t.policy)));
       if (t.mute) for (let q = 2; q < a.length; q++) a[q] = 0;
       return a.map((v) => Math.max(-1, Math.min(1, v)));
     }
@@ -525,13 +526,14 @@
         const n = c.selIndex();
         if (n < 0) { attn = null; return; }
         const ty = c.typeOf(n), D_ = SC.obsDim(c.sim.cfg), lay = SCX.layoutFor(c.sim.cfg) || SCX.localizeLayout(D.layout);
-        const ref = SC.forward(ty.policy, c.obs, n * D_);
+        const hMem = SC.memIn(c.sim, n, ty.policy);  // memory brains: the state the next step starts from (read only)
+        const ref = SC.forward(ty.policy, c.obs, n * D_, hMem);
         let out;
         if (ty.policy.kind === "set") {
           canvas.style.display = "none"; setHost.hidden = false;
           if (!setv) setv = new SCX.SetView(setHost, lay, ty.policy, { onHover, fmt: (it, v) => fmtObs(it, v), onFocus: () => c.draw() });
           else if (setv.pol !== ty.policy) setv.setPolicy(ty.policy, lay);
-          const tr = SC.setTrace(ty.policy, c.obs, n * D_);
+          const tr = SC.setTrace(ty.policy, c.obs, n * D_, hMem);
           setv.update(tr, c.obsRow(n), c.neighbourUids(n, ty.policy.arch.K));
           attn = true;
           out = tr.out;
@@ -559,10 +561,14 @@
       if (!p) return;
       const set = isSetEntry(p);
       document.querySelectorAll("[data-set-only]").forEach((e) => { e.hidden = !set; });
+      const Hm = set && p.policy.arch.mem ? p.policy.arch.mem.size : 0;  // GRU memory size (0 = stateless)
+      document.querySelectorAll("[data-mem-only]").forEach((e) => { e.hidden = !Hm; });
+      document.querySelectorAll("[data-hm]").forEach((e) => { e.textContent = Hm; });
       $("set-explain").hidden = !set;
       if (set) {
         const ar = p.policy.arch;
-        $("brain-lead").innerHTML = tx("brain.lead.set", { ego: ar.n_ego, K: ar.K, F: ar.F, hidden: ar.hidden.join(" → "), out: ar.n_out });
+        $("brain-lead").innerHTML = tx("brain.lead.set", { ego: ar.n_ego, K: ar.K, F: ar.F, hidden: ar.hidden.join(" → "), out: ar.n_out,
+          mem: Hm ? tx("brain.lead.mem", { Hm }) : "" });
         $("brain-params").textContent = SCX.group(p.policy.params.length);
         document.querySelectorAll("#set-explain [data-k]").forEach((e) => { e.textContent = ar.K; });
         document.querySelectorAll("#set-explain [data-heads]").forEach((e) => { e.textContent = ar.heads; });

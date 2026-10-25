@@ -1,5 +1,7 @@
 /* Smart Crossing: JS port of smartcrossing/sim.py (one environment, B = 1) and of
- * the MLP forward pass in smartcrossing/policy.py.
+ * the policy forward passes (MLP: smartcrossing/policy.py, set encoder incl. the optional GRU memory:
+ * smartcrossing/policy_set.py). Memory brains keep a state per car on the sim (sim.mem, advanced by act();
+ * memIn reads it without advancing, e.g. for showing the selected car's next action).
  *
  * Keep this file in lock-step with the Python code: tests/test_sim_js_parity.py
  * runs observe()/step() on states exported from Python and compares the results.
@@ -626,6 +628,29 @@
     const pooled = ar.pool === "attn" ? ar.heads * ar.dv : e;
     const ts = [ar.n_ego + ar.n_extra + pooled, ...ar.hidden, ar.n_out];
     for (let i = 0; i + 1 < ts.length; i++) out.push([`trunk${i}.W`, [ts[i], ts[i + 1]]], [`trunk${i}.b`, [ts[i + 1]]]);
+    const Hm = memSize(ar);
+    if (Hm) out.push(["gru.Wx", [ts[0], 3 * Hm]], ["gru.Wh", [Hm, 3 * Hm]], ["gru.bx", [3 * Hm]], ["gru.bh", [3 * Hm]],
+      ["mem.out.W", [Hm, ts[1]]]);
+    return out;
+  }
+
+  /** GRU memory size of a set-encoder arch (policy_set.mem_size); 0 = stateless. */
+  function memSize(ar) {
+    if (!ar || !ar.mem) return 0;
+    if (ar.mem.type !== "gru") throw new Error(`unknown memory type ${ar.mem.type}`);
+    return ar.mem.size;
+  }
+
+  /** New GRU state (policy_set.gru_cell; gate order r, u, n) for input z and state h (null = zeros). */
+  function gruCell(P, z, h, Hm) {
+    const gx = affine(z, P["gru.Wx"], P["gru.bx"], z.length, 3 * Hm);
+    const gh = h ? affine(h, P["gru.Wh"], P["gru.bh"], Hm, 3 * Hm) : Float64Array.from(P["gru.bh"]);
+    const out = new Float64Array(Hm), sig = (v) => 1 / (1 + Math.exp(-v));
+    for (let j = 0; j < Hm; j++) {
+      const r = sig(gx[j] + gh[j]), u = sig(gx[Hm + j] + gh[Hm + j]);
+      const n = Math.tanh(gx[2 * Hm + j] + r * gh[2 * Hm + j]);
+      out[j] = (1 - u) * n + u * (h ? h[j] : 0);
+    }
     return out;
   }
 
@@ -642,7 +667,8 @@
     const nin = ar.n_ego + ar.K * ar.F + ar.n_extra;
     const inScale = d.in_scale ? Float64Array.from(d.in_scale) : null;
     if (inScale && inScale.length !== nin) throw new Error("in_scale length mismatch");
-    return { kind: "set", arch: ar, P, nin, sizes: d.sizes || [nin, ...ar.hidden, ar.n_out], inScale, cfg: d.cfg || {} };
+    return { kind: "set", arch: ar, P, nin, mem: memSize(ar), sizes: d.sizes || [nin, ...ar.hidden, ar.n_out], inScale,
+      cfg: d.cfg || {} };
   }
 
   /** y = x W + b for a row-major W (nin x nout); x is a plain array / typed array of length nin. */
@@ -659,8 +685,9 @@
   /** Set-encoder forward on one (scaled) input row x: linear output (policy_set.forward).
    *  tr (optional object) receives the intermediate values for the brain view: ego, present[K],
    *  phi[K][layer] (per-neighbour net activations), attn[H][K] (attention weights, 0 for absent neighbours),
-   *  pooled, trunk (hidden activations) and the linear output. */
-  function setForwardRow(pol, x, tr) {
+   *  pooled, trunk (hidden activations) and the linear output; memory brains also memIn (the state before,
+   *  null = zeros) and mem (the new state). mem (memory brains): { in: state or null } receives out = the new state. */
+  function setForwardRow(pol, x, tr, mem) {
     const ar = pol.arch, P = pol.P, E = ar.n_ego, K = ar.K, F = ar.F;
     const ego = new Float64Array(E + ar.n_extra);
     for (let i = 0; i < E; i++) ego[i] = x[i];
@@ -724,8 +751,19 @@
     z.set(pooled, ego.length);
     const ts = [z.length, ...ar.hidden, ar.n_out];
     if (tr) Object.assign(tr, { ego, present, phi: phiLayers, pooled, trunk: [] });
+    let g = null;
+    if (pol.mem) {
+      const hIn = mem && mem.in ? mem.in : null;
+      g = gruCell(P, z, hIn, pol.mem);
+      if (mem) mem.out = g;
+      if (tr) { tr.memIn = hIn; tr.mem = g; }
+    }
     for (let l = 0; l + 1 < ts.length; l++) {
-      z = affine(z, P[`trunk${l}.W`], P[`trunk${l}.b`], ts[l], ts[l + 1]);
+      if (l === 0 && g) {  // the new memory state is a residual input of the first trunk layer
+        const y = affine(z, P["trunk0.W"], null, ts[0], ts[1]), m = affine(g, P["mem.out.W"], null, pol.mem, ts[1]);
+        for (let o = 0; o < ts[1]; o++) y[o] = y[o] + m[o] + P["trunk0.b"][o];
+        z = y;
+      } else z = affine(z, P[`trunk${l}.W`], P[`trunk${l}.b`], ts[l], ts[l + 1]);
       if (l + 2 < ts.length) z = z.map(Math.tanh);
       if (tr && l + 2 < ts.length) tr.trunk.push(z);
     }
@@ -734,13 +772,25 @@
   }
 
   /** Set-encoder forward of one observation row with all intermediate values (see setForwardRow);
-   *  trace.out equals forward(pol, obs, off). */
-  function setTrace(pol, obs, off = 0) {
+   *  trace.out equals forward(pol, obs, off, mem). mem: memory state (memIn), null = zeros. */
+  function setTrace(pol, obs, off = 0, mem = null) {
+    const x = scaledRow(pol, obs, off);
+    const tr = { x };
+    tr.out = setForwardRow(pol, x, tr, { in: mem }).map(Math.tanh);
+    return tr;
+  }
+
+  function scaledRow(pol, obs, off) {
     const x = new Float64Array(pol.nin);
     for (let i = 0; i < pol.nin; i++) x[i] = pol.inScale ? obs[off + i] * pol.inScale[i] : obs[off + i];
-    const tr = { x };
-    tr.out = setForwardRow(pol, x, tr).map(Math.tanh);
-    return tr;
+    return x;
+  }
+
+  /** The memory state the next act() starts slot n's car from with policy pol (null = zeros: a new car, no driving
+   *  car, a stateless brain or another brain than in the last step). Reading it does not advance anything. */
+  function memIn(sim, n, pol) {
+    const s = sim.mem ? sim.mem[n] : null;
+    return s && pol && pol.mem && s.pol === pol && s.uid === sim.uid[n] && sim.alive[n] ? s.h : null;
   }
 
   /** Normalises a policy JSON (policy.export_json format) for fast evaluation. */
@@ -765,13 +815,10 @@
     return { sizes, layers, inScale, cfg: d.cfg || {} };
   }
 
-  /** Policy (tanh MLP, or set encoder + tanh) on one observation row (obs[off .. off + nin)). */
-  function forward(pol, obs, off = 0) {
-    if (pol.kind === "set") {
-      const x = new Float64Array(pol.nin);
-      for (let i = 0; i < pol.nin; i++) x[i] = pol.inScale ? obs[off + i] * pol.inScale[i] : obs[off + i];
-      return setForwardRow(pol, x).map(Math.tanh);
-    }
+  /** Policy (tanh MLP, or set encoder + tanh) on one observation row (obs[off .. off + nin)). mem: the memory state
+   *  of a memory brain (memIn; null = zeros); the new state is not kept (act() advances it). */
+  function forward(pol, obs, off = 0, mem = null) {
+    if (pol.kind === "set") return setForwardRow(pol, scaledRow(pol, obs, off), null, { in: mem }).map(Math.tanh);
     const l0 = pol.layers[0];
     let h = new Float64Array(l0.nin);
     for (let i = 0; i < l0.nin; i++) h[i] = pol.inScale ? obs[off + i] * pol.inScale[i] : obs[off + i];
@@ -788,18 +835,26 @@
   }
 
   /** Actions for every car: group g uses policies[g] (the last one for g beyond the list);
-   *  mute[g] forces that group's signal outputs to zero. Mirrors policy.PolicyDriver.act. */
+   *  mute[g] forces that group's signal outputs to zero. Mirrors policy.PolicyDriver.act, incl. the memory:
+   *  memory brains start from memIn and their new states are kept in sim.mem (one entry per slot). */
   function act(sim, policies, mute, obs) {
     obs = obs || sim.observe();
     const D = obsDim(sim.cfg), A = actDim(sim.cfg);
     const out = new Float64Array(sim.N * A);
+    const mem = new Array(sim.N).fill(null);
     for (let n = 0; n < sim.N; n++) {
       if (!sim.alive[n]) continue;
-      const g = Math.min(sim.group[n], policies.length - 1);
-      const a = forward(policies[g], obs, n * D);
+      const g = Math.min(sim.group[n], policies.length - 1), pol = policies[g];
+      let a;
+      if (pol.mem) {
+        const m = { in: memIn(sim, n, pol) };
+        a = setForwardRow(pol, scaledRow(pol, obs, n * D), null, m).map(Math.tanh);
+        mem[n] = { uid: sim.uid[n], pol, h: m.out };
+      } else a = forward(pol, obs, n * D);
       for (let q = 0; q < A; q++) out[n * A + q] = a[q];
       if (mute && mute[g]) for (let q = 2; q < A; q++) out[n * A + q] = 0.0;
     }
+    sim.mem = mem;
     return out;
   }
 
@@ -808,6 +863,6 @@
     POS_SCALE, GOAL_SCALE, RAY_RANGE, CAR_LENGTH, CAR_WIDTH, HAZARD_PERIOD,
     DONE, defaultConfig, obsDim, actDim, nbFeatures, nNeighbours, wreckSteps, rot, cornerDist, rayEdgeDist, routeDist, freeFlowTime,
     gripKappa, laneOffsets, makeRng,
-    Sim, loadPolicy, forward, act, setTrace,
+    Sim, loadPolicy, forward, act, setTrace, memIn, memSize,
   };
 });

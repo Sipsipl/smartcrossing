@@ -87,7 +87,13 @@ def fit(arch, p0, x, y, steps=3000, batch=4096, lr=1e-3, device="cpu", seed=0, l
 def bc_actor(teacher: str, cfg: SimConfig, arch, in_scale, p0, steps=3000, seconds=120.0, device="cpu", seed=0,
              log=print):
     """Actor params (set encoder: ``arch`` dict; MLP: ``arch`` = layer sizes) cloned from the MLP checkpoint
-    ``teacher`` (see module doc)."""
+    ``teacher`` (see module doc). Memory students (policy_set ``mem``) are not supported: clone the stateless
+    brain, then upgrade it (``ppo --mem --init-actor``)."""
+    from .policy_set import mem_size
+
+    if isinstance(arch, dict) and mem_size(arch):
+        raise ValueError("behaviour cloning into a memory actor is not supported: clone a stateless set brain, then "
+                         "start the memory run from it (ppo --mem N --init-actor CLONE.npz)")
     x, y = collect(teacher, cfg, seconds=seconds, seed=seed)
     log(f"bc: {len(x)} car-steps from {teacher}; teacher mu var {np.var(y, 0).round(3).tolist()}")
     p, mse = fit(arch, p0, x * in_scale, y, steps=steps, device=device, seed=seed, log=log)

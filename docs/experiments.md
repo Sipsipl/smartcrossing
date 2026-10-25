@@ -1010,3 +1010,52 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
   the two round-7 candidates): thr/min / crash+off per 1000 / timeouts at 0.3, 0.4, 0.5 -
   round6_best 66.4/9/0.5, 86.0/12/2.5, 92.1/40/5.2; round7_best (DOB_s1@1050) 67.2/1/0, 89.6/3/0, 99.4/20/3.8;
   DOB_s2@1099 67.2/3/0, 85.5/9/5.2, 94.5/25/11.2 (results/round7_confirm_fresh.jsonl). round7_best confirmed.
+
+## Round 8: GRU memory (2026-10-25, branch coordinator/gru)
+- Arms: continued runs/r7_DOB_s1/state.npz (iter 1099; actor = round7_best = r7_DOB_s1@1050, upgraded with a zero-effect
+  GRU `--mem 16`: mem.out.W = 0 drives bit-identically) for 300 iterations, horizon 64, 1024 envs, torch update on cuda,
+  round-7 DOB recipe (obstacle_envs 0.75, obstacle_block 0.5, dense curriculum ceiling 0.5 / lo 0.1, crash cost x3,
+  critic warm-up 10). Runs: r8_M_s1 (memory, seed 1; killed at iter 1203 by a Windows bluescreen, resumed from its
+  state.npz, args_part1.json kept), r8_M_s2 (memory, seed 2), r8_C_s1 (control: stateless, same settings, seed 1). GPU
+  background mode duty 0.5, later 0.8 (owner watching videos).
+- Selection (results/round8_select.jsonl, selection seeds, ref round7_best): overall r8_M_s1@1398 (= its last checkpoint;
+  gate safe 1.00 / stop 0.57 / block 1.00, thr@0.5 102.2, crash+off@0.5 22.2); C_s1 selected @1398 (101.6 / 16.7); M_s2 @1250.
+- FRESH confirmation seeds 11000-14000 (never used for any choice; results/round8_confirm_fresh.jsonl = evalset,
+  results/round8_deadlock_fresh.jsonl + results/round8_ablation.jsonl = deadlock module). Demand 0.5 (120/min):
+  thr/min / crash+off per 1000 / time in deadlock:
+
+  | brain | thr | crash+off | DL time |
+  |---|---|---|---|
+  | round7_best | 96.6 | 32 | 19.8 % |
+  | C_s1@1398 (no memory) | 102.1 | 20 | 13.3 % |
+  | M_s1@1398 | 107.8 | 18 | 7.0 % |
+  | M_s2@1250 | 102.3 | 20 | 13.5 % |
+  | M_s2@1398 | 104.2 | 8 | 10.7 % |
+  | M_s1@1398, memory output zeroed (abl_nomem_1398) | 99.4 | 34 | 19.5 % |
+  | M_s2@1398, memory output zeroed | 91.9 | 14 | 22.4 % |
+
+  Ablation: zeroing mem.out.W puts both memory brains back to (or below) round-7 level -> they rely on the memory.
+  Normal traffic unchanged (0.3: ~66-67/min, crash ~2 per 1000 for all). Gate stop_rate_feasible M_s1 0.57 vs
+  round7 0.39, block 1.00, safe 1.00. Caveat: one control seed only; the control alone already gains part of the effect
+  (300 more iterations of the round-7 recipe), the memory adds the rest.
+- REPORTING seeds 4000/5000/6000 (results/round8_heldout.jsonl = evalset 8 envs x 120 s; runs/deadlock/r8_sweep.jsonl =
+  site sweep 8 envs x 180 s -> results/deadlock_fundamental.json; round7_best sweep: runs/deadlock/r7_brain.jsonl).
+  Sweep (180 s), thr/min / crash+off per 1000 / time in deadlock:
+
+  | | 0.3 | 0.4 | 0.5 |
+  |---|---|---|---|
+  | round8_best (M_s1@1398) | 67.1 / 5 / 2.2 % | 87.5 / 12 / 4.5 % | 103.1 / 23 / 11.3 % |
+  | round7_best | 67.7 / 3 / 1.2 % | 86.2 / 11 / 4.6 % | 92.7 / 39 / 23.2 % |
+  | reservation | 67.1 / 0 / 0 | 83.9 / 0 / 0 | 90.5 / 0 / 0 |
+  | light | 29.6 / 1 / 0 | 30.8 / 0 / 0 | 30.5 / 0 / 0 |
+
+  Evalset (120 s): 0.15 33.4/0.6 vs 33.3/1.9; 0.3 66.3/3.9 vs 66.2/3.7; 0.4 86.3/8.6 vs 83.5/12.1; 0.5 100.3/20.9 vs
+  97.6/18.3 (round8 vs round7; at 0.5 per seed crash 7/32/24 vs 11/23/21: no crash gain in these 120-s runs, the 180-s
+  sweep and the fresh seeds show one). Gate: round8 safe 1.00 / stop 0.57 / block 1.00, round7 0.98 / 0.39 / 1.00.
+  At 0.5 the brain is now above the reservation's throughput (103 vs 90.5/min), with crashes and 11 % deadlock time.
+- Checks for the site texts (report seeds): solo driving (analyze.outcome_counts solo, 3 x 16 envs x 120 s): 720 of 720
+  cars arrive. Lamps zeroed (runs/deadlock/r8_lampzero.jsonl, 120 s): crash+off 0.3: ~4 -> 32 per 1000, 0.5: ~21 -> 120,
+  thr at 0.5 100 -> 87/min: the brain relies strongly on the lamp (the old site sentence "switch all lamps off and they
+  drive just as well" was wrong since round 6 / 7 and is replaced).
+- Decision: r8_M_s1@1398 -> results/round8_best.npz, new site main brain (previous r7_DOB_s1@1050). Open: a second control
+  seed, longer runs, deadlocks at 120/min still ~7-11 % of the time (curriculum rule 4c: raise the ceiling below ~5 %).
