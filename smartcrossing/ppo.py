@@ -19,6 +19,10 @@ checkpoints' extra carry the commit; scripts/runs_index.py lists the runs.
   encoder of policy_set.py (shared per-neighbour MLP, attention / mean / max pooling, MLP trunk);
   needs the torch update (`--update-device cpu|cuda`, autograd); numpy rollout workers and
   checkpoints (arch field, policy.save_npz) handle both architectures.
+- `--mem N` (with --arch set): the actor gets a GRU memory of N units per car (policy_set.py ``mem``; the critic
+  stays stateless); needs the torch rollout + update (sequence minibatches, truncated BPTT over each rollout).
+  `--init` / `--init-actor` with a stateless set brain upgrade it (memory added with zero effect). state.npz
+  records the actor arch.
 - critic: separate tanh MLP on the scaled obs plus a few privileged features (car age,
   queue length, cars on the road, demand of the env); not exported.
 - rollouts: persistent worker processes, each with its own vectorised Sim; GAE per car
@@ -121,6 +125,10 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--set-pool", choices=policy_set.POOLS, default="attn", help="set encoder: pooling")
     p.add_argument("--set-heads", type=int, default=4, help="set encoder (attn): heads")
     p.add_argument("--set-dk", type=int, default=8, help="set encoder (attn): key / value dims per head")
+    p.add_argument("--mem", type=int, default=0,
+                   help="actor memory: GRU state of this size per car (policy_set mem; --arch set and the torch "
+                        "rollout --rollout-device cpu|cuda); 0 = stateless. A stateless --init / --init-actor brain "
+                        "is upgraded (memory added with zero effect: same actions at the start)")
     p.add_argument("--gamma", type=float, default=0.99)
     p.add_argument("--lam", type=float, default=0.95)
     p.add_argument("--lr", type=float, default=3e-4)
@@ -145,6 +153,9 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--no-signal", dest="signal", action="store_false")
     p.add_argument("--cfg", default="", help="JSON SimConfig overrides")
     p.add_argument("--init", default="", help="resume from a full checkpoint (state.npz)")
+    p.add_argument("--init-actor", default="", help="actor from this policy .npz (same arch, or its stateless "
+                   "version with --mem: upgraded); applied after --init (critic, log-std, ceiling, iteration stay "
+                   "those of --init)")
     p.add_argument("--init-policy", default="", help="warm-start the actor from a policy .npz of an older interface "
                    "(policy_compat.transplant_actor); critic fresh")
     p.add_argument("--init-bc", default="", help="start the actor by behaviour cloning this MLP "
@@ -226,11 +237,14 @@ def build_state(a) -> TrainState:
     if arch == "set" or c_arch == "set":
         kw = dict(hidden=hidden, phi=tuple(int(h) for h in a.set_phi.split(",")), pool=a.set_pool, heads=a.set_heads,
                   dk=a.set_dk, dv=a.set_dk)
-        a_arch = policy_set.make_arch(cfg, **kw) if arch == "set" else None
+        a_arch = policy_set.make_arch(cfg, mem=a.mem, **kw) if arch == "set" else None
         c_arch_d = policy_set.make_arch(cfg, n_extra=N_PRIV, n_out=1, **kw) if c_arch == "set" else None
+    if a.mem and not a_arch:
+        raise ValueError("--mem needs the set-encoder actor (--arch set)")
     actor = SetNet(a_arch, a_sizes, rng, out_scale=0.01) if a_arch else MLP(a_sizes, rng, out_scale=0.01)
     critic = SetNet(c_arch_d, c_sizes, rng, out_scale=1.0) if c_arch_d else MLP(c_sizes, rng, out_scale=1.0)
-    actor.p[-A] = np.arctanh(a.acc_init)  # output bias: initial mean acceleration action (last block in both layouts)
+    # output bias: initial mean acceleration action (the last block of the stateless layouts)
+    actor.p[policy_set.out_bias_index(a_arch) if a_arch else len(actor.p) - A] = np.arctanh(a.acc_init)
     st = TrainState(cfg, in_scale, act_mask, a_sizes, c_sizes, rng, actor, critic, np.full(A, a.logstd_init),
                     Adam(len(actor.p), a.lr), Adam(len(critic.p), a.lr_critic), a.demand_start, a_arch=a_arch,
                     c_arch=c_arch_d)
@@ -250,7 +264,9 @@ def build_state(a) -> TrainState:
         actor.p = transplant_actor(a.init_policy, cfg, in_scale, a_sizes)
     if a.init:
         z = np.load(a.init)
-        actor.p, critic.p, st.logstd = z["actor"].copy(), z["critic"].copy(), z["logstd"].copy()
+        stored = json.loads(str(z["actor_arch"])) if "actor_arch" in z.files else "unknown"
+        actor.p = actor_params(z["actor"], stored, a_arch, a_sizes, f"--init {a.init}", rng)
+        critic.p, st.logstd = z["critic"].copy(), z["logstd"].copy()
         st.ceiling = float(z["ceiling"]) if "ceiling" in z.files else st.ceiling
         st.it0 = int(z["iter"]) + 1 if "iter" in z.files else 0
         st.total_steps = int(z["total_steps"]) if "total_steps" in z.files else 0
@@ -258,7 +274,30 @@ def build_state(a) -> TrainState:
             st.logstd = np.full(A, a.logstd_init)
         if a.set_ceiling:
             st.ceiling = a.set_ceiling
+    if a.init_actor:
+        from .policy import load_arch, load_npz
+
+        actor.p = actor_params(load_npz(a.init_actor)[0], load_arch(a.init_actor), a_arch, a_sizes,
+                               f"--init-actor {a.init_actor}", rng)
     return st
+
+
+def actor_params(p, arch_from, arch, sizes, what: str, rng) -> np.ndarray:
+    """Actor params p (stored with ``arch_from``: an arch dict, None = MLP, "unknown" = older state.npz without
+    the field) for the run's actor (``arch`` / ``sizes``): taken as they are, or a stateless set brain upgraded to
+    the run's memory arch (policy_set.upgrade_params: drives the same). Anything else is an error."""
+    p = np.asarray(p, dtype=float).copy()
+    n = param_count(sizes, arch)
+    if arch_from == "unknown":  # infer from the size: the run's arch, or (memory run) its stateless version
+        if len(p) == n:
+            return p
+        arch_from = policy_set.base_arch(arch) if arch and policy_set.mem_size(arch) else arch
+    if arch_from == arch and len(p) == n:
+        return p
+    if arch and policy_set.mem_size(arch) and arch_from == policy_set.base_arch(arch):
+        print(f"{what}: stateless actor upgraded to the memory arch (memory -> trunk weights 0)", flush=True)
+        return policy_set.upgrade_params(p, arch_from, arch, rng)
+    raise ValueError(f"{what}: actor arch {arch_from} ({len(p)} params) does not match the run's {arch} ({n} params)")
 
 
 def write_args(out: Path, a, st: TrainState, git: dict) -> Path:
@@ -321,7 +360,7 @@ class TorchRollouts:
         """-> ([result], batch {BATCH_KEYS: device tensors})."""
         self.ro.set_params(actor_p, logstd, critic_p)
         r = self.ro.rollout(d_lo, d_hi)
-        return [r], {k: r[k] for k in BATCH_KEYS}
+        return [r], {k: r[k] for k in (*BATCH_KEYS, "seq") if k in r}
 
     def close(self):
         pass
@@ -391,7 +430,7 @@ def checkpoint_and_eval(a, st: TrainState, out: Path, it: int, final: bool, git:
     extra = dict(iter=it, ceiling=st.ceiling, logstd=logstd.tolist(), algo="ppo", **git)
     save_npz(out / "current.npz", actor.p, st.a_sizes, cfg_d, st.in_scale, arch=st.a_arch, **extra)
     np.savez(out / "state.npz", actor=actor.p, critic=critic.p, logstd=logstd, ceiling=st.ceiling, iter=it,
-             total_steps=st.total_steps)
+             total_steps=st.total_steps, actor_arch=np.array(json.dumps(st.a_arch)))
     if final or (a.eval_every and it % a.eval_every == 0):
         ck = out / f"ckpt_{it:04d}.npz"
         save_npz(ck, actor.p, st.a_sizes, cfg_d, st.in_scale, arch=st.a_arch, **extra)
@@ -472,6 +511,8 @@ def main(argv=None):
         a.update_device = a.rollout_device  # the batch stays on the rollout device
     if (st.a_arch or st.c_arch) and a.update_device == "numpy":
         raise SystemExit("--arch set needs the torch update: --update-device cpu|cuda (or --rollout-device cpu|cuda)")
+    if policy_set.mem_size(st.a_arch) and a.rollout_device == "numpy":
+        raise SystemExit("--mem needs the torch rollout: --rollout-device cpu|cuda")
     if a.update_device != "numpy":
         from .ppo_torch import TorchPPO
 

@@ -110,6 +110,8 @@ def privileged(sim: Sim) -> np.ndarray:
 class Worker:
     def __init__(self, cfg_d, n_envs, seed, horizon, episode_steps, gamma, lam, in_scale, act_mask, actor_arch=None,
                  critic_arch=None):
+        if policy_set.mem_size(actor_arch):
+            raise ValueError("a memory actor (--mem) needs the torch rollout (--rollout-device cpu|cuda)")
         self.cfg_d = cfg_d
         self.a_arch, self.c_arch = actor_arch, critic_arch
         self.B = n_envs
@@ -224,6 +226,8 @@ def _worker_main(conn, kw):
 
 # ---------------------------------------------------------------- PPO update
 def ppo_update(actor, logstd, critic, opt_a, opt_c, data, a, act_mask, in_scale, rng):
+    if policy_set.mem_size(getattr(actor, "arch", None)):
+        raise ValueError("a memory actor (--mem) needs the torch update (--update-device cpu|cuda)")
     n = len(data["adv"])
     obs = data["obs"].astype(np.float64) * in_scale
     cin = np.concatenate([obs, data["priv"]], 1)

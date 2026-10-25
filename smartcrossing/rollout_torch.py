@@ -15,6 +15,12 @@ generator (``noise="numpy"``): then the batch equals Worker's up to float roundi
 (tests/test_ppo_gpu_rollout.py). Differences in the fast mode: different random streams
 (same distributions); episode resets copy a fresh sim (incl. its generator state) into the
 existing tensors; the CUDA-graph capture runs ``warmup`` real steps once.
+
+Memory actors (policy_set ``mem``): static state tensors h (B, N, Hm) and prev_uid (B, N) advance inside the
+(graph-capturable, in-place) step: a slot starts from h = 0 when it holds a new car (uid changed) or no driving
+car, and keeps the new state of a driving car. The batch then also carries ``seq`` (the recurrent update's
+sequence layout, see ``rollout``): per row its step and sequence column, per column (a slot with at least
+one valid step) the flags first / valid (T, C) and the state h0 (C, Hm) at the rollout start.
 """
 
 import numpy as np
@@ -22,7 +28,8 @@ import torch
 
 from .ppo_common import LOG2PI, N_DONE, N_PRIV, PRIV_DEMAND_SCALE, PRIV_QUEUE_SCALE
 from .policy import param_count
-from .ppo_torch import linear_forward
+from . import policy_set
+from .ppo_torch import linear_forward, set_forward_mem
 from .sim import SimConfig, act_dim, obs_dim
 from .sim_torch import TorchSim
 
@@ -83,6 +90,12 @@ class TorchRollout:
         self.kinds = torch.zeros(N_DONE, dtype=torch.int64, **kw)
         self.own_rew = torch.zeros((), dtype=f, **kw)
         self.tidx = torch.zeros(1, dtype=torch.int64, **kw)
+        self.Hm = Hm = policy_set.mem_size(actor_arch)
+        if Hm:  # memory actor: per-slot state (in place, graph-capturable) + the sequence flags
+            self.h = torch.zeros(B, N, Hm, dtype=f, **kw)
+            self.h0 = torch.zeros(B, N, Hm, dtype=f, **kw)
+            self.prev_uid = torch.full((B, N), -1, dtype=torch.int64, **kw)
+            self.first_buf = torch.zeros(T, B, N, dtype=torch.bool, **kw)
         self.noise_gen = None
         if noise == "torch" and rng != "torch":
             self.noise_gen = torch.Generator(device=self.dev)
@@ -105,6 +118,9 @@ class TorchRollout:
             self._replay = None
         self.n_resets += 1
         self.steps_in_ep = 0
+        if self.Hm:  # new episode: every car is new (uids restart in a reset sim)
+            self.h.zero_()
+            self.prev_uid.fill_(-1)
 
     def _actor(self, o):
         return linear_forward(self.pa, self.a_sizes, o, self.a_arch)
@@ -129,14 +145,22 @@ class TorchRollout:
         al = sim.alive.clone()
         pr = privileged_t(sim)
         o = obs * self.in_scale
-        mu = self._actor(o)
+        t = self.tidx
+        if self.Hm:
+            uid = sim.uid
+            first = al & (uid != self.prev_uid)
+            mu, h_new = set_forward_mem(self.pa, self.a_arch, o, torch.where((first | ~al)[..., None], 0.0, self.h))
+            self.h.copy_(torch.where(al[..., None], h_new, 0.0))
+            self.prev_uid.copy_(uid)
+            self.first_buf.index_copy_(0, t, first[None])
+        else:
+            mu = self._actor(o)
         std = torch.exp(self.ls)
         u = mu + std * self._noise(al)
         lp = (-0.5 * ((u - mu) / std) ** 2 - self.ls - 0.5 * LOG2PI) @ self.mask
         v = self._critic(torch.cat([o, pr], -1))
         v = torch.where(al, v[..., 0], 0.0)
         act = torch.where(al[..., None], torch.tanh(u), 0.0)
-        t = self.tidx
         f32 = torch.float32
         self.obs_buf.index_copy_(0, t, obs.to(f32)[None])
         self.priv_buf.index_copy_(0, t, torch.where(al[..., None], pr, 0.0).to(f32)[None])
@@ -159,6 +183,17 @@ class TorchRollout:
             self._step()
         self.steps_in_ep += n
 
+    def _seq(self, idx) -> dict:
+        """Sequence layout of a memory rollout: columns = the slots (b, n) with at least one valid step (in slot
+        order); row_t / row_c: step and column of every batch row (rows stay in (t, b, n) order)."""
+        T, BN = self.T, self.B * self.N
+        cols = self.valid.reshape(T, BN).any(0).nonzero().squeeze(1)  # (host sync)
+        col_id = torch.full((BN,), -1, dtype=torch.int64, device=self.dev)
+        col_id[cols] = torch.arange(len(cols), device=self.dev)
+        return {"row_t": idx // BN, "row_c": col_id[idx % BN],
+                "first": self.first_buf.reshape(T, BN)[:, cols], "valid": self.valid.reshape(T, BN)[:, cols],
+                "h0": self.h0.reshape(BN, self.Hm)[cols]}
+
     # ---------------------------------------------------------------- rollout
     def rollout(self, d_lo, d_hi):
         if self.sim is None or self.steps_in_ep >= self.ep_steps:
@@ -169,6 +204,8 @@ class TorchRollout:
             self._replay = sim.cuda_graph(self._step, warmup=self.warmup)
             self.steps_in_ep += self.warmup  # the warm-up steps were real steps
         T = self.T
+        if self.Hm:
+            self.h0.copy_(self.h)  # the state each slot enters the rollout with (after a capture's warm-up steps)
         self.tidx.zero_()
         self.kinds.zero_()
         self.own_rew.zero_()
@@ -206,7 +243,9 @@ class TorchRollout:
                              sim.stats.obstacle_hits.sum().to(torch.float64)]).tolist()
         if stats[3]:
             print("warning: TorchSim arrival FIFO overflow (graph mode, capacity 256 per arm)", flush=True)
+        extra = {"seq": self._seq(idx)} if self.Hm else {}
         return {
+            **extra,
             "obs": take(self.obs_buf),
             "priv": take(self.priv_buf),
             "u": take(self.u_buf),
