@@ -130,7 +130,7 @@
   }
 
   /** Small fundamental diagram of the main brain with a dot for the running simulation, measured like the cloud
-   *  behind the curve (js/fdwindow.js = deadlock.py cloud_windows): density = mean number of driving cars on the map
+   *  behind the curve (js/fdwindow.js = fundamental_cloud.py cloud_windows): density = mean number of driving cars on the map
    *  over the last 60 s, throughput = exits of the last 60 s per minute, only once a full 60-s window after the 30-s
    *  warm-up exists (no dot before). The dot is moved by a CSS transform (transition) a few times per second; the
    *  chart itself is only redrawn on resize / theme change. */
