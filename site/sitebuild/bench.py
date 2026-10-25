@@ -33,11 +33,12 @@ def policy_driver(sim, payload):
 
 
 def make_driver(sim, kind: str, payload):
-    """Driver of a bench / replay job: a rule-based LaneDriver (kind "baseline", payload = its name) or a policy."""
+    """Driver of a bench / replay job: a rule-based baseline (kind "baseline", payload = its name: the shared
+    smartcrossing.drivers.make_driver) or a policy from its weights (policy_driver)."""
     if kind == "baseline":
-        from smartcrossing.baselines import LaneDriver
+        from smartcrossing.drivers import make_driver as by_spec
 
-        return LaneDriver(sim, payload)
+        return by_spec(payload, sim)
     return policy_driver(sim, payload)
 
 

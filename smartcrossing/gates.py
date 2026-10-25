@@ -116,12 +116,12 @@ def obstacle_y(c: dict) -> float:
 
 
 def stop_gate(spec: str, cfg_d: dict | None = None, seconds: float = 12.0, driver=None):
-    """Run every case with driver `spec` (cli.make_driver) in the world cfg_d (traffic settings are
+    """Run every case with driver `spec` (drivers.make_driver) in the world cfg_d (traffic settings are
     replaced: no arrivals, no obstacle scenarios). ``driver``: optional factory sim -> driver used instead of
-    cli.make_driver (``spec`` is then only the name in the summary), e.g. a brain without a checkpoint file.
+    drivers.make_driver (``spec`` is then only the name in the summary), e.g. a brain without a checkpoint file.
     The block cases run in the same batch (their own envs; cars are alone per env, so the other cases are
     unchanged). Returns (summary dict, per-case rows: the cases() rows, then the block_cases() rows)."""
-    from .cli import make_driver
+    from .drivers import make_driver
 
     t0 = time.time()
     cs = cases() + block_cases()

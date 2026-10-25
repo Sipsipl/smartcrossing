@@ -23,21 +23,12 @@ from pathlib import Path
 
 import numpy as np
 
-from .baselines import LaneDriver
+from .drivers import make_driver
 from .metrics import summarize
 from .render import SpaceTime, contact_sheet, draw_frame, save_gif
 from .sim import Sim, SimConfig
 
 COMMANDS = ("bench", "render", "gate", "evalset", "select", "deadlock", "deadlock-summarize", "cloud", "incentives")
-
-
-def make_driver(spec: str, sim: Sim):
-    """light / reservation / none -> rule-based LaneDriver; policy:<file> or a plain .npz path -> PolicyDriver."""
-    if spec in ("light", "reservation", "none"):
-        return LaneDriver(sim, spec)
-    from .policy import PolicyDriver
-
-    return PolicyDriver.load(spec.removeprefix("policy:"), sim)
 
 
 def run(spec, cfg, n_envs, seconds, seed, frame_every=None, b_render=0, view=None, spacetime=None):

@@ -32,6 +32,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .drivers import make_driver
 from .jobs import append_jsonl, pool_map
 from .metrics import summarize
 from .protocol import ENVS, REPORT_SEEDS, SELECTION_SEEDS, SWEEP_DEMANDS, SWEEP_SECONDS
@@ -49,42 +50,6 @@ BLOCK_CONE = np.radians(45.0)
 INNER_PAD = 2.0  # a car is "inner" (in the conflict area proper) when max(|x|, |y|) <= W + INNER_PAD
 LEAD_S, LAST_S = 5.0, 3.0  # lamp windows: before the deadlock began / before it ended
 MAN_NAMES = {1: "right", 2: "straight", 3: "left"}
-
-
-# ------------------------------------------------------------------ drivers
-def policy_logstd(path) -> np.ndarray:
-    """The trained Gaussian log-std of a PPO checkpoint (``extra.logstd``)."""
-    with np.load(str(path).removeprefix("policy:")) as z:
-        return np.asarray(json.loads(str(z["extra"]))["logstd"], dtype=float)
-
-
-def make_driver(spec: str, sim: Sim, noise=None, seed: int = 0):
-    """cli.make_driver, or for ``noise`` (a policy spec only) a stochastic driver: action = tanh(mu + sigma * eps),
-    sigma = the checkpoint's trained std (noise "policy") or a fixed std (a number) on every action dim."""
-    from .cli import make_driver as base
-
-    drv = base(spec, sim)
-    if noise in (None, "", "none", 0, 0.0, "0"):
-        return drv
-    from .policy import PolicyDriver, linear_forward
-
-    if not isinstance(drv, PolicyDriver):
-        raise ValueError("action noise needs a policy driver")
-    sigma = np.exp(policy_logstd(spec)) if noise == "policy" else np.full(drv.sizes[-1], float(noise))
-    rng = np.random.default_rng([seed, 99])
-
-    def act():
-        obs = sim.observe()
-        out = np.zeros((*obs.shape[:-1], drv.sizes[-1]))
-        m = sim.alive
-        if m.any():
-            h = obs[m] if drv.in_scale is None else obs[m] * drv.in_scale
-            mu = linear_forward(drv.params[0], drv.sizes, h, drv.archs[0])
-            out[m] = np.tanh(mu + sigma * rng.standard_normal(mu.shape))
-        return out
-
-    drv.act = act
-    return drv
 
 
 # ------------------------------------------------------------------ recording

@@ -103,7 +103,8 @@ def forward(params: np.ndarray, obs: np.ndarray, sizes, in_scale=None, arch=None
 
 class PolicyDriver:
     """Drives every car of a Sim with one of several parameter vectors chosen by
-    ``sim.group``. ``mute[g]`` forces the signal output of group g to zero."""
+    ``sim.group``. ``mute[g]`` forces the signal output of group g to zero. Deterministic (tanh of the mean)
+    unless ``set_noise`` made it stochastic."""
 
     def __init__(self, sim: Sim, params, sizes, mute=None, train_cfg: dict | None = None, in_scale=None, archs=None):
         self.sim = sim
@@ -120,6 +121,20 @@ class PolicyDriver:
                 raise ValueError(f"set-encoder policy {ar} does not match the sim's observation / its params")
         if self.sizes[0] != obs_dim(sim.cfg) or self.sizes[-1] != act_dim(sim.cfg):
             raise ValueError(f"policy sizes {self.sizes} do not match sim obs/act dims")
+        self.noise_std, self.rng = None, None
+
+    def set_noise(self, std, rng):
+        """Stochastic actions from now on: tanh(mu + std * eps) for the driving cars, eps ~ N(0, 1) from ``rng``
+        (one draw per driving car and action dim, group by group); std None = deterministic again."""
+        self.noise_std = None if std is None else np.asarray(std, dtype=float)
+        self.rng = rng
+
+    def _policy(self, p, obs, arch) -> np.ndarray:
+        if self.noise_std is None:
+            return forward(p, obs, self.sizes, self.in_scale, arch)
+        h = obs if self.in_scale is None else obs * self.in_scale
+        mu = linear_forward(p, self.sizes, h, arch)
+        return np.tanh(mu + self.noise_std * self.rng.standard_normal(mu.shape))
 
     @classmethod
     def load(cls, path, sim: Sim, mute=None):
@@ -163,18 +178,20 @@ class PolicyDriver:
         obs = self.sim.observe()
         grp = self.sim.group
         out = np.zeros((*obs.shape[:-1], self.sizes[-1]))
+        # deterministic: every slot (empty ones are ignored by the sim); stochastic: the driving cars only
+        cars = np.ones(grp.shape, dtype=bool) if self.noise_std is None else self.sim.alive
         for g, p in enumerate(self.params):
-            m = grp == g if len(self.params) > 1 else np.ones(grp.shape, dtype=bool)
+            m = (grp == g if len(self.params) > 1 else np.ones(grp.shape, dtype=bool)) & cars
             if not m.any():
                 continue
-            a = forward(p, obs[m], self.sizes, self.in_scale, self.archs[g])
+            a = self._policy(p, obs[m], self.archs[g])
             if self.mute[g]:
                 a[:, 2:] = 0.0
             out[m] = a
         if len(self.params) > 1:  # groups beyond the given params use the last one
-            m = grp >= len(self.params)
+            m = (grp >= len(self.params)) & cars
             if m.any():
-                out[m] = forward(self.params[-1], obs[m], self.sizes, self.in_scale, self.archs[-1])
+                out[m] = self._policy(self.params[-1], obs[m], self.archs[-1])
         return out
 
 

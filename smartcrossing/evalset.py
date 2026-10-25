@@ -24,7 +24,7 @@ KEEP_KEYS = ("throughput_per_min", "demand_per_min", "exit_ok_rate", "crash_cars
 def bench_one(spec, cfg, seed: int, envs: int = ENVS, seconds: float = SECONDS) -> dict:
     """metrics.summarize of one bench run: driver ``spec`` (a cli driver spec such as ``reservation`` /
     ``policy:<file>``, or a callable sim -> driver) in a fresh Sim(cfg, envs, seed) for ``seconds``."""
-    from .cli import make_driver
+    from .drivers import make_driver
     from .metrics import summarize
     from .sim import Sim
 

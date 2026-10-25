@@ -25,9 +25,9 @@ class Brake:
 
 
 def test_stop_gate_with_a_braking_driver(monkeypatch):
-    from smartcrossing import cli
+    from smartcrossing import cli, drivers
 
-    monkeypatch.setattr(cli, "make_driver", lambda spec, sim: Brake(sim))
+    monkeypatch.setattr(drivers, "make_driver", lambda spec, sim: Brake(sim))
     summary, rows = gates.stop_gate("brake")
     assert summary["cases"] == len(gates.cases()) == 108
     assert len(rows) == 108 + len(gates.block_cases()) and summary["block_cases"] == len(gates.block_cases()) == 36
@@ -61,10 +61,10 @@ class Swerve:
 
 
 def test_block_cases_cannot_be_passed(monkeypatch):
-    from smartcrossing import cli
+    from smartcrossing import cli, drivers
 
     for drv in (Straight, Swerve):
-        monkeypatch.setattr(cli, "make_driver", lambda spec, sim, drv=drv: drv(sim))
+        monkeypatch.setattr(drivers, "make_driver", lambda spec, sim, drv=drv: drv(sim))
         summary, rows = gates.stop_gate(drv.__name__)
         block = [r for r in rows if r["pos"] == "block"]
         assert block and all(r["outcome"] in ("crash", "offroad") for r in block), drv
@@ -78,9 +78,9 @@ def test_stop_gate_policy_runs_fast():
 
 def test_cli_gate_writes_cases_json(tmp_path, monkeypatch, capsys):
     """cli gate prints the summary and writes the per-case rows to --out (any path)."""
-    from smartcrossing import cli
+    from smartcrossing import cli, drivers
 
-    monkeypatch.setattr(cli, "make_driver", lambda spec, sim: Brake(sim))
+    monkeypatch.setattr(drivers, "make_driver", lambda spec, sim: Brake(sim))
     out = tmp_path / "cases.json"
     cli.main(["gate", "--driver", "brake", "--out", str(out)])
     summary = json.loads(capsys.readouterr().out.strip().splitlines()[-1])

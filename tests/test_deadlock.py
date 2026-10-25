@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from smartcrossing import cli, deadlock
+from smartcrossing import cli, deadlock, drivers
 from smartcrossing.sim import DONE_TIMEOUT, Sim, SimConfig
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,8 +65,8 @@ def test_no_deadlock_when_moving_or_outside_the_conflict_area():
 def test_noisy_driver_matches_the_deterministic_policy_at_zero_noise():
     sims = [Sim(SimConfig(demand=0.3), 2, seed=5) for _ in range(3)]
     det = cli.make_driver(f"policy:{ROUND4}", sims[0])
-    zero = deadlock.make_driver(f"policy:{ROUND4}", sims[1], noise=1e-12)
-    noisy = deadlock.make_driver(f"policy:{ROUND4}", sims[2], noise="policy", seed=1)
+    zero = drivers.make_driver(f"policy:{ROUND4}", sims[1], noise=1e-12)
+    noisy = drivers.make_driver(f"policy:{ROUND4}", sims[2], noise="policy", seed=1)
     for _ in range(30):
         m = sims[0].alive.copy()
         acts = [det.act(), zero.act(), noisy.act()]
@@ -74,9 +74,9 @@ def test_noisy_driver_matches_the_deterministic_policy_at_zero_noise():
             s.step(a)
     assert np.allclose(acts[0][m], acts[1][m], atol=1e-9)
     assert not np.allclose(acts[0][m], acts[2][m])
-    assert np.allclose(np.exp(deadlock.policy_logstd(ROUND4)), np.exp([-0.763, -0.774, -0.717]), atol=1e-3)
+    assert np.allclose(np.exp(drivers.policy_logstd(ROUND4)), np.exp([-0.763, -0.774, -0.717]), atol=1e-3)
     with pytest.raises(ValueError):
-        deadlock.make_driver("light", Sim(SimConfig(), 1), noise=0.1)
+        drivers.make_driver("light", Sim(SimConfig(), 1), noise=0.1)
 
 
 def test_cli_deadlock_line_aggregate_and_fundamental(tmp_path):
