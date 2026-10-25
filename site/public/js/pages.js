@@ -434,7 +434,7 @@
     document.querySelectorAll("[data-nbk]").forEach((e) => { e.textContent = (SCX.layoutFor(cx.sim.cfg) || D.layout).k_neighbours; });
     function nextAction(c, n) {
       const t = c.typeOf(n);
-      const a = Array.from(SC.forward(t.policy, c.obs, n * SC.obsDim(c.sim.cfg)));
+      const a = Array.from(SC.forward(t.policy, c.obs, n * SC.obsDim(c.sim.cfg), SC.memIn(c.sim, n, t.policy)));
       if (t.mute) for (let q = 2; q < a.length; q++) a[q] = 0;
       return a.map((v) => Math.max(-1, Math.min(1, v)));
     }
@@ -525,13 +525,14 @@
         const n = c.selIndex();
         if (n < 0) { attn = null; return; }
         const ty = c.typeOf(n), D_ = SC.obsDim(c.sim.cfg), lay = SCX.layoutFor(c.sim.cfg) || SCX.localizeLayout(D.layout);
-        const ref = SC.forward(ty.policy, c.obs, n * D_);
+        const hMem = SC.memIn(c.sim, n, ty.policy);  // memory brains: the state the next step starts from (read only)
+        const ref = SC.forward(ty.policy, c.obs, n * D_, hMem);
         let out;
         if (ty.policy.kind === "set") {
           canvas.style.display = "none"; setHost.hidden = false;
           if (!setv) setv = new SCX.SetView(setHost, lay, ty.policy, { onHover, fmt: (it, v) => fmtObs(it, v), onFocus: () => c.draw() });
           else if (setv.pol !== ty.policy) setv.setPolicy(ty.policy, lay);
-          const tr = SC.setTrace(ty.policy, c.obs, n * D_);
+          const tr = SC.setTrace(ty.policy, c.obs, n * D_, hMem);
           setv.update(tr, c.obsRow(n), c.neighbourUids(n, ty.policy.arch.K));
           attn = true;
           out = tr.out;

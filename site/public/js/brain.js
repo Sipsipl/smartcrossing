@@ -243,8 +243,9 @@
   /* The set / attention brain (smartcrossing/policy_set.py) drawn as its real structure, top to
    * bottom: own values (ego) | up to K neighbour cards -> ONE shared mini-network (drawn once,
    * stacked like cards) -> attention per neighbour ("who matters now?", live bars + line widths)
-   * -> mix (weighted sum) + own values -> two layers -> outputs. Values come from the simulator's
-   * own forward pass (SmartCrossing.setTrace), so the picture is exactly what drives the car. */
+   * -> mix (weighted sum) + own values (+ memory: the GRU state of a memory brain, a residual input of the first
+   * layer) -> two layers -> outputs. Values come from the simulator's own forward pass (SmartCrossing.setTrace), so
+   * the picture is exactly what drives the car. */
   const SVGNS = "http://www.w3.org/2000/svg";
   function svgEl(tag, attrs, parent) {
     const e = document.createElementNS(SVGNS, tag);
@@ -309,7 +310,11 @@
       const nbScale = pol.inScale ? pol.inScale.subarray(E, E + F) : null;
       const dims = [F, ...ar.phi], ts = [E + ar.n_extra + (ar.pool === "attn" ? ar.heads * ar.dv : ar.phi[ar.phi.length - 1]), ...ar.hidden, ar.n_out];
       this.phiEdges = ar.phi.map((_, l) => topEdges(P[`phi${l}.W`], dims[l], dims[l + 1], 2, l === 0 ? nbScale : null));
-      this.trunkEdges = ts.slice(1).map((n, l) => topEdges(P[`trunk${l}.W`], ts[l], n, l === ts.length - 2 ? 6 : 2, null));
+      // memory brains: the first layer reads [own values, mix, memory]; its weights = trunk0.W stacked on mem.out.W
+      const Hm = (this.Hm = pol.mem || 0);
+      let W0 = P["trunk0.W"];
+      if (Hm) { W0 = new Float64Array((ts[0] + Hm) * ts[1]); W0.set(P["trunk0.W"], 0); W0.set(P["mem.out.W"], ts[0] * ts[1]); }
+      this.trunkEdges = ts.slice(1).map((n, l) => topEdges(l === 0 ? W0 : P[`trunk${l}.W`], l === 0 ? ts[0] + Hm : ts[l], n, l === ts.length - 2 ? 6 : 2, null));
       this.nParams = pol.P ? Object.values(P).reduce((a, v) => a + v.length, 0) : 0;
       this.build();
     }
@@ -413,7 +418,7 @@
       const svg = svgEl("svg", { width: shown, class: "setnet", role: "img", "aria-label": SCX.t("brain.set.aria") }, host);
       const gE = svgEl("g", {}, svg), gL = svgEl("g", {}, svg), gN = svgEl("g", {}, svg), gT = svgEl("g", {}, svg);
       const els = (this.els = {});
-      const live = (this.live = { ego: [], nb: [], cards: [], phi: [], bars: [], pct: [], down: [], up: [], mix: [], ego2: [], trunk: [], out: [], outTxt: [] });
+      const live = (this.live = { ego: [], nb: [], cards: [], phi: [], bars: [], pct: [], down: [], up: [], mix: [], mem: [], ego2: [], trunk: [], out: [], outTxt: [] });
       const text = (x, y, s, o = {}) => {
         const t = svgEl("text", { x, y, "font-size": o.size || fs, "text-anchor": o.anchor || "start", class: o.halo ? "halo" : "" }, gT);
         t.style.fill = o.fill || "var(--muted)";
@@ -514,12 +519,13 @@
       const q = svgEl("path", { d: `M${busX} ${aTop + aH / 2} L${X0 + colW / 2 - bw / 2 - 3} ${aTop + aH / 2}`, fill: "none" }, gE);
       q.style.stroke = "var(--muted)"; q.style.strokeDasharray = "2 3";
       svgEl("path", { d: `M${busX} 29 L${X0 - 2} 29`, fill: "none" }, gE).style.stroke = "var(--muted)";
-      // 5) combined: own values + mix -> trunk -> outputs
-      const nMix = this.ar.pool === "attn" ? ar.heads * ar.dv : ar.phi[ar.phi.length - 1];
-      const nIn = E + ar.n_extra + nMix, uIn = (X1 - X0) / (nIn + 2);
-      const egoX1 = X0 + uIn * E, mixX0 = egoX1 + uIn * 2;
-      const egoPos = row(E, X0, egoX1, mixY), mixPos = row(nMix, mixX0, X1, mixY);
-      const mixMid = (mixX0 + X1) / 2;
+      // 5) combined: own values + mix (+ memory) -> trunk -> outputs
+      const nMix = this.ar.pool === "attn" ? ar.heads * ar.dv : ar.phi[ar.phi.length - 1], Hm = this.Hm;
+      const nIn = E + ar.n_extra + nMix, uIn = (X1 - X0) / (nIn + 2 + (Hm ? Hm + 2 : 0));
+      const egoX1 = X0 + uIn * E, mixX0 = egoX1 + uIn * 2, mixX1 = Hm ? mixX0 + uIn * nMix : X1;
+      const egoPos = row(E, X0, egoX1, mixY), mixPos = row(nMix, mixX0, mixX1, mixY);
+      const memX0 = mixX1 + uIn * 2, memPos = Hm ? row(Hm, memX0, X1, mixY) : [];
+      const mixMid = (mixX0 + mixX1) / 2;
       for (let k = 0; k < K; k++) {
         const l = svgEl("line", { x1: colX(k), y1: aBase + 18, x2: mixMid + (colX(k) - mixMid) * 0.3, y2: mixY - 6 }, gL);
         l.style.stroke = "var(--c4)"; live.down.push(l);
@@ -527,9 +533,11 @@
       const rIn = Math.min(3.6, uIn * 0.4);
       egoPos.forEach(([x, y], j) => live.ego2.push(dot(x, y, rIn, `ego:${j}`)));
       mixPos.forEach(([x, y], j) => live.mix.push(dot(x, y, rIn, `mix:${j}`)));
+      memPos.forEach(([x, y], j) => live.mem.push(dot(x, y, rIn, `mem:${j}`)));
       text((X0 + egoX1) / 2, mixY + 16, SCX.t(narrow ? "brain.set.me.short" : "brain.set.me"), { anchor: "middle", size: narrow ? 10 : 11 });
-      text(mixMid, mixY + 16, SCX.t(narrow ? "brain.set.mix.short" : "brain.set.mix"), { anchor: "middle", size: narrow ? 10 : 11 });
-      const trunkPos = [[...egoPos, ...mixPos]];
+      text(mixMid, mixY + 16, SCX.t(narrow || Hm ? "brain.set.mix.short" : "brain.set.mix"), { anchor: "middle", size: narrow ? 10 : 11 });
+      if (Hm) text((memX0 + X1) / 2, mixY + 16, SCX.t(narrow ? "brain.set.mem.short" : "brain.set.mem"), { anchor: "middle", size: narrow ? 10 : 11 });
+      const trunkPos = [[...egoPos, ...mixPos, ...memPos]];
       let ty = mixY + 44;
       ar.hidden.forEach((n) => { trunkPos.push(row(n, X0, X1, ty)); ty += 34; });
       const outY = ty + 12, outPos = row(ar.n_out, X0, X1, outY);
@@ -587,6 +595,7 @@
         for (let l = 1; l < L.phi.length; l++) L.phi[l].forEach((d, j) => fill(d, on ? tr.phi[fsl][l - 1][j] : 0));
         this.focusTxt.textContent = on ? SCX.t(this.W < 460 ? "brain.focus.short" : "brain.focus", { n: foc + 1 }) : SCX.t(this.W < 460 ? "brain.nofocus.short" : "brain.nofocus");
         L.mix.forEach((d, j) => fill(d, Math.tanh(tr.pooled[j])));
+        L.mem.forEach((d, j) => fill(d, tr.mem ? tr.mem[j] : 0));
         L.trunk.forEach((ds, l) => ds.forEach((d, j) => fill(d, tr.trunk[l][j])));
         L.out.forEach((d, j) => fill(d, tr.out[j]));
         const word = [(v) => SCX.t(v >= 0 ? "brain.w.acc" : "brain.w.brake"), (v) => SCX.t(Math.abs(v) < 0.02 ? "man.straight" : v > 0 ? "man.left" : "man.right"), (v) => SCX.t(v >= 0 ? "brain.w.bright" : "brain.w.dark")];
@@ -641,6 +650,7 @@
         return SCX.t("brain.d.phi", { what, v: v !== null ? SCX.t("brain.d.phi.v", { v: sgn(v), n: f + 1 }) : "" });
       }
       if (kind === "mix") return SCX.t("brain.d.mix", { n: +a + 1, val: tr ? ` = ${sgn(tr.pooled[+a])}` : "" });
+      if (kind === "mem") return SCX.t("brain.d.mem", { n: +a + 1, val: tr && tr.mem ? ` = ${sgn(tr.mem[+a])}` : "" });
       if (kind === "tr") return SCX.t("brain.d.layerneuron", { layer: +a + 1, n: +b + 1 }) + (tr ? ` = ${sgn(tr.trunk[+a][+b])}` : "");
       if (kind === "out") return SCX.t("brain.d.output", { name: this.layout.actions[+a], val: tr ? ` = ${sgn(tr.out[+a])}` : "" });
       return "";

@@ -79,6 +79,14 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
   older files unchanged); `policy.linear_forward` / `ppo_torch.linear_forward` and `policy.param_count` are the
   one dispatch between the two architectures. Site: sim.js runs set brains; the site build handles both (its `Brain`
   helper: snapshot, bench payload, rounding).
+  GRU memory (Roadmap B / (G), `ppo --mem 16`, actor only): arch field `mem` = {"type": "gru", "size": Hm} (absent =
+  stateless, older files unchanged); a GRU cell on the trunk input [ego, pooled] (same observation, no new information)
+  whose new state is a residual input of the first trunk layer (`mem.out.W`). Its blocks come last in the flat vector,
+  so `policy_set.upgrade_params` turns a stateless brain into a memory brain that drives bit-identically (mem.out.W = 0;
+  `ppo --mem 16 --init-actor results/round7_best.npz [--init runs/r7_DOB_s1/state.npz]`). State per car, 0 for a new
+  uid in the slot: PolicyDriver, sim.js (state on the sim; `memIn` reads it for the site's selected car), TorchRollout
+  (static in-place tensors, CUDA graph). Recurrent PPO in torch only: sequence minibatches of whole slot columns,
+  truncated BPTT over each rollout from the stored state h0 (ppo_torch.seq_forward_mem); tests/test_policy_mem.py.
 - `smartcrossing/bc.py` (`ppo --init-bc TEACHER.npz`): behaviour cloning of an MLP brain into a new actor (set
   encoder or MLP of other sizes; the student may see more neighbours). Other `ppo.py` options worth knowing:
   `--max-minutes` (stop after the iteration past the limit; the final checkpoint is always written and
@@ -212,7 +220,7 @@ crashes in the box; lamp unused so far.
   demand), solo-driving gate (a car alone never leaves the road), impact-speed crash/offroad
   cost, physically visible neighbour features (curvature, acceleration).  <- done
 - (B) Perception / network: set (attention) encoder over all neighbours instead of K nearest
-  <- done (round 4, clear win); optional recurrent memory (GRU) <- open, see (G).
+  <- done (round 4, clear win); optional recurrent memory (GRU) <- implemented (`--mem`, 2026-10-25), not trained yet, see (G).
 - (C) Geometry-independent inputs throughout + randomized geometries during training; GPU port
   (owner has an RTX 3070 Ti, local training later).
 - (D) Norm experiments: >= 20 seeds per configuration; lateral position (lanes; driving side is
