@@ -20,7 +20,7 @@ import json
 
 import numpy as np
 
-from .cli import make_driver
+from .drivers import make_driver
 from .metrics import summarize
 from .sim import ARM_U, DONE_NAMES, OBS_DIM, Sim, SimConfig, nb_features
 

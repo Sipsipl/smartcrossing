@@ -1,5 +1,5 @@
 /* Measurement window of the live dot on the start page's fundamental diagram. It uses the definition of the scatter
- * cloud behind the curve (smartcrossing/deadlock.py cloud_windows, results/fundamental_cloud.json), so the dot and
+ * cloud behind the curve (smartcrossing/fundamental_cloud.py cloud_windows, results/fundamental_cloud.json), so the dot and
  * the cloud are comparable: a WINDOW_S-second window lying entirely after WARMUP_S seconds from the empty start;
  * density = mean number of driving cars on the map over the window, throughput = exits in the window per minute.
  * Checked against the Python definition by tests/test_site_js.py (node). Browser: window.SCX.fdWindow. */

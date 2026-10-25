@@ -1,4 +1,5 @@
-"""Deadlock study (deadlock.py): detector on synthetic recordings, noisy driver, cli line format, fundamental."""
+"""Deadlock study (deadlock.py): detector on synthetic recordings, noisy driver, cli line format, fundamental;
+the scatter cloud (fundamental_cloud.py) and the reward accounting (incentives.py)."""
 
 import json
 from pathlib import Path
@@ -6,7 +7,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from smartcrossing import cli, deadlock
+from smartcrossing import cli, deadlock, drivers, fundamental_cloud
+from smartcrossing.incentives import incentives
 from smartcrossing.sim import DONE_TIMEOUT, Sim, SimConfig
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,8 +67,8 @@ def test_no_deadlock_when_moving_or_outside_the_conflict_area():
 def test_noisy_driver_matches_the_deterministic_policy_at_zero_noise():
     sims = [Sim(SimConfig(demand=0.3), 2, seed=5) for _ in range(3)]
     det = cli.make_driver(f"policy:{ROUND4}", sims[0])
-    zero = deadlock.make_driver(f"policy:{ROUND4}", sims[1], noise=1e-12)
-    noisy = deadlock.make_driver(f"policy:{ROUND4}", sims[2], noise="policy", seed=1)
+    zero = drivers.make_driver(f"policy:{ROUND4}", sims[1], noise=1e-12)
+    noisy = drivers.make_driver(f"policy:{ROUND4}", sims[2], noise="policy", seed=1)
     for _ in range(30):
         m = sims[0].alive.copy()
         acts = [det.act(), zero.act(), noisy.act()]
@@ -74,9 +76,9 @@ def test_noisy_driver_matches_the_deterministic_policy_at_zero_noise():
             s.step(a)
     assert np.allclose(acts[0][m], acts[1][m], atol=1e-9)
     assert not np.allclose(acts[0][m], acts[2][m])
-    assert np.allclose(np.exp(deadlock.policy_logstd(ROUND4)), np.exp([-0.763, -0.774, -0.717]), atol=1e-3)
+    assert np.allclose(np.exp(drivers.policy_logstd(ROUND4)), np.exp([-0.763, -0.774, -0.717]), atol=1e-3)
     with pytest.raises(ValueError):
-        deadlock.make_driver("light", Sim(SimConfig(), 1), noise=0.1)
+        drivers.make_driver("light", Sim(SimConfig(), 1), noise=0.1)
 
 
 def test_cli_deadlock_line_aggregate_and_fundamental(tmp_path):
@@ -101,7 +103,7 @@ def test_cli_deadlock_line_aggregate_and_fundamental(tmp_path):
 
 def test_incentives_order():
     cfg = json.loads(str(np.load(ROUND4)["cfg"]))
-    inc = deadlock.incentives(cfg)
+    inc = incentives(cfg)
     o = inc["options"]
     # waiting to the max_age removal costs less than any crash; discounting makes waiting almost free
     assert o["wait_to_timeout_age40"] > o["go_crash_2mps"] > o["go_crash_10mps"]
@@ -112,10 +114,10 @@ def test_incentives_order():
 
 def test_cloud_windows_and_json_shape():
     """Cloud cell: 60-s sliding windows every 10 s per env, only after the 30 s warm-up; [density, throughput, demand]."""
-    pts = deadlock.cloud_job(("light", None, 0.1, 7, 2, 110.0))
+    pts = fundamental_cloud.cloud_job(("light", None, 0.1, 7, 2, 110.0))
     assert len(pts) == 2 * 3  # windows ending at 90, 100, 110 s, 2 envs
     assert all(len(p) == 3 and p[2] == 0.1 and p[0] > 0 and p[1] >= 0 for p in pts)
-    out = deadlock.cloud({"light": "light"}, demands=(0.1,), envs=2, seconds=110.0, per_demand=4, log=lambda *_: None)
+    out = fundamental_cloud.cloud({"light": "light"}, demands=(0.1,), envs=2, seconds=110.0, per_demand=4, log=lambda *_: None)
     assert len(out["drivers"]["light"]["points"]) == 4  # thinned
     assert {"density", "throughput", "points", "protocol"} <= set(out["meta"])
 
@@ -127,11 +129,11 @@ def test_cloud_window_formula():
     cars = np.full((T, 2), 4.0)
     cars[:300, 1] = 100.0  # the warm-up is never part of a window
     exits = np.repeat((np.arange(T + 1) // 20)[:, None], 2, 1).astype(float)
-    win = deadlock.cloud_windows(cars, exits, dt)
+    win = fundamental_cloud.cloud_windows(cars, exits, dt)
     assert [round(t, 6) for t, *_ in win] == [90.0, 100.0, 110.0, 120.0]
     for _, dens, thr in win:
         assert np.allclose(dens, 4.0) and np.allclose(thr, 30.0)
-    assert deadlock.cloud_windows(cars[:899], exits[:900], dt) == []  # no full window after the warm-up yet
+    assert fundamental_cloud.cloud_windows(cars[:899], exits[:900], dt) == []  # no full window after the warm-up yet
 
 
 def test_cli_deadlock_summarize_names_and_meta(tmp_path, capsys):
@@ -151,4 +153,4 @@ def test_cli_deadlock_summarize_names_and_meta(tmp_path, capsys):
 
 def test_cli_incentives(capsys):
     cli.main(["incentives", "--driver", f"policy:{ROUND4}"])
-    assert json.loads(capsys.readouterr().out) == deadlock.incentives(json.loads(str(np.load(ROUND4)["cfg"])))
+    assert json.loads(capsys.readouterr().out) == incentives(json.loads(str(np.load(ROUND4)["cfg"])))

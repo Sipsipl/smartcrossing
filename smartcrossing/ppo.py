@@ -1,7 +1,7 @@
 """PPO with parameter sharing: every car of B parallel environments is a sample of one
 shared driving policy, trained on its own (per-car) reward.
 
-Rollouts and the default update are pure numpy (hand-written tanh-MLP backward pass).
+Rollouts and the default update are pure numpy (hand-written tanh-MLP backward pass; ppo_numpy.py).
 `--update-device cpu|cuda` runs the update in torch instead (ppo_torch.py, optional `gpu`
 poetry group; same parameters, ~19x faster on the GPU for dense-traffic batches).
 `--rollout-device cuda` also runs the rollouts on the GPU (rollout_torch.py: one
@@ -33,7 +33,7 @@ checkpoints' extra carry the commit; scripts/runs_index.py lists the runs.
   so the busy fraction is ~F (sleep = t_iter * (1/F - 1)); `runs/<name>/duty.txt` (a float, read every
   iteration) overrides it while the run goes on. `--low-priority`: BELOW_NORMAL process priority
   on Windows (also the spawned workers / eval; no-op elsewhere). `--eval-workers 0`: no background evals
-  while training (only the final checkpoint is evaluated).
+  while training (only the final checkpoint is evaluated). Helpers: background.py.
 
   poetry run python -m smartcrossing.ppo --name ppo1 --iters 400 [--no-signal]
 """
@@ -54,323 +54,23 @@ from pathlib import Path
 import numpy as np
 
 from . import policy_set
-from .policy import default_in_scale, layer_sizes, linear_forward, param_count, save_npz
-from .ppo_common import LOG2PI, N_DONE, N_PRIV, PRIV_DEMAND_SCALE, PRIV_QUEUE_SCALE, git_info
-from .sim import DONE_CRASH, DONE_EXIT, DONE_OFFROAD, DONE_TIMEOUT, DONE_WRONG, Sim, SimConfig, act_dim, obs_dim
+from .background import LOW_PRIORITY_ENV, duty_sleep, maybe_low_priority, read_duty, set_low_priority
+from .gates import GATE_KEYS
+from .jobs import append_jsonl
+from .policy import default_in_scale, layer_sizes, param_count, save_npz
+from .ppo_common import N_PRIV, git_info
+from .ppo_numpy import BATCH_KEYS, MLP, Adam, SetNet, Worker, _worker_main, ppo_update, privileged
+from .protocol import ENVS, SECONDS, SELECTION_SEEDS
+from .sim import DONE_CRASH, DONE_EXIT, DONE_OFFROAD, DONE_TIMEOUT, DONE_WRONG, SimConfig, act_dim, obs_dim
 
-LOW_PRIORITY_ENV = "SC_LOW_PRIORITY"  # set by --low-priority; spawned workers / eval lower themselves too
-BELOW_NORMAL_PRIORITY_CLASS = 0x4000
-
-
-def set_low_priority() -> bool:
-    """BELOW_NORMAL priority class for this process on Windows (ctypes, no dependency); elsewhere a no-op.
-    Returns whether it was applied."""
-    if sys.platform != "win32":
-        return False
-    import ctypes
-    from ctypes import wintypes
-
-    k32 = ctypes.windll.kernel32
-    k32.GetCurrentProcess.restype = wintypes.HANDLE  # (pseudo handle -1: must not be truncated to a 32-bit int)
-    k32.SetPriorityClass.argtypes = (wintypes.HANDLE, wintypes.DWORD)
-    k32.SetPriorityClass.restype = wintypes.BOOL
-    return bool(k32.SetPriorityClass(k32.GetCurrentProcess(), BELOW_NORMAL_PRIORITY_CLASS))
-
-
-def _maybe_low_priority():
-    if os.environ.get(LOW_PRIORITY_ENV) == "1":
-        set_low_priority()
-
-
-def read_duty(path: Path, default: float) -> float:
-    """GPU duty for the next pause: the float in `path` (duty.txt) if present and valid (clamped to
-    [0.02, 1]), else default."""
-    try:
-        return min(max(float(path.read_text(encoding="utf-8").strip()), 0.02), 1.0)
-    except (OSError, ValueError):
-        return default
-
-
-def duty_sleep(t_busy: float, duty: float) -> float:
-    """Pause after an iteration of t_busy seconds so that busy / (busy + pause) = duty."""
-    return t_busy * (1.0 / duty - 1.0) if 0 < duty < 1 else 0.0
-
-
-BATCH_KEYS = ("obs", "priv", "u", "logp", "adv", "ret", "val")  # per car-step arrays of a rollout
-
-
-# ---------------------------------------------------------------- tanh MLP with backprop
-class MLP:
-    """tanh hidden layers, linear output. Params kept as a flat float64 vector in the
-    policy.py layout (per layer W (in, out) row-major, then b)."""
-
-    def __init__(self, sizes, rng=None, out_scale=1.0):
-        self.sizes = list(sizes)
-        rng = np.random.default_rng(rng)
-        parts = []
-        for i, (a, b) in enumerate(zip(sizes[:-1], sizes[1:])):
-            s = 1.0 / np.sqrt(a) * (out_scale if i == len(sizes) - 2 else 1.0)
-            parts += [rng.normal(0, s, a * b), np.zeros(b)]
-        self.p = np.concatenate(parts)
-
-    def layers(self, p=None):
-        p = self.p if p is None else p
-        out, i = [], 0
-        for a, b in zip(self.sizes[:-1], self.sizes[1:]):
-            out.append((p[i : i + a * b].reshape(a, b), p[i + a * b : i + a * b + b]))
-            i += a * b + b
-        return out
-
-    def forward(self, x, keep=False):
-        hs = [x]
-        Ls = self.layers()
-        h = x
-        for k, (W, b) in enumerate(Ls):
-            z = h @ W + b
-            h = z if k == len(Ls) - 1 else np.tanh(z)
-            hs.append(h)
-        return (h, hs) if keep else h
-
-    def backward(self, hs, gout):
-        """Gradient of sum(gout * output) wrt the flat params."""
-        Ls = self.layers()
-        grads = []
-        g = gout
-        for k in range(len(Ls) - 1, -1, -1):
-            W, _ = Ls[k]
-            h_in = hs[k]
-            grads.append((h_in.T @ g, g.sum(0)))
-            if k > 0:
-                g = (g @ W.T) * (1.0 - hs[k] ** 2)
-        flat = []
-        for gW, gb in reversed(grads):
-            flat += [gW.ravel(), gb]
-        return np.concatenate(flat)
-
-
-class Adam:
-    def __init__(self, dim, lr, b1=0.9, b2=0.999, eps=1e-8):
-        self.m, self.v, self.t = np.zeros(dim), np.zeros(dim), 0
-        self.lr, self.b1, self.b2, self.eps = lr, b1, b2, eps
-
-    def step(self, g):
-        """Returns the update to *subtract* (descent)."""
-        self.t += 1
-        self.m = self.b1 * self.m + (1 - self.b1) * g
-        self.v = self.b2 * self.v + (1 - self.b2) * g * g
-        mh = self.m / (1 - self.b1**self.t)
-        vh = self.v / (1 - self.b2**self.t)
-        return self.lr * mh / (np.sqrt(vh) + self.eps)
-
-
-class SetNet:
-    """Set-encoder network (policy_set.py) with the MLP's interface for the training loop: flat
-    params ``p``, ``sizes`` (checkpoint sizes [in, *hidden, out]) and ``arch``. No numpy backward:
-    ppo_torch differentiates it with autograd."""
-
-    def __init__(self, arch, sizes, rng=None, out_scale=1.0):
-        self.arch, self.sizes = arch, list(sizes)
-        self.p = policy_set.init_params(arch, rng, out_scale)
-
-    def forward(self, x):
-        return policy_set.forward(self.p, self.arch, x)
-
-
-# ---------------------------------------------------------------- rollout worker
-def privileged(sim: Sim) -> np.ndarray:
-    """(B, N, N_PRIV) extra critic inputs (not visible to the policy; ppo_common.PRIV_FEATURES)."""
-    cfg = sim.cfg
-    B, N = sim.alive.shape
-    dem = np.full(B, cfg.demand) if sim.demand is None else sim.demand
-    f = np.empty((B, N, N_PRIV))
-    f[..., 0] = sim.age / cfg.max_age
-    f[..., 1] = (sim.queue.sum(1) / PRIV_QUEUE_SCALE)[:, None]
-    f[..., 2] = (sim.alive.sum(1) / N)[:, None]
-    f[..., 3] = (dem * PRIV_DEMAND_SCALE)[:, None]
-    return f
-
-
-class Worker:
-    def __init__(self, cfg_d, n_envs, seed, horizon, episode_steps, gamma, lam, in_scale, act_mask, actor_arch=None,
-                 critic_arch=None):
-        self.cfg_d = cfg_d
-        self.a_arch, self.c_arch = actor_arch, critic_arch
-        self.B = n_envs
-        self.seed = seed
-        self.T = horizon
-        self.ep_steps = episode_steps
-        self.gamma, self.lam = gamma, lam
-        self.in_scale = in_scale
-        self.act_mask = act_mask
-        self.rng = np.random.default_rng(seed + 12345)
-        self.sim = None
-        self.n_resets = 0
-        self.steps_in_ep = 0
-
-    def _reset(self, d_lo, d_hi):
-        cfg = SimConfig(**{**self.cfg_d, "demand_range": (d_lo, d_hi)})
-        self.sim = Sim(cfg, self.B, seed=self.seed * 100003 + self.n_resets)
-        self.n_resets += 1
-        self.steps_in_ep = 0
-
-    def rollout(self, actor_p, actor_sizes, logstd, critic_p, critic_sizes, d_lo, d_hi):
-        if self.sim is None or self.steps_in_ep >= self.ep_steps:
-            self._reset(d_lo, d_hi)
-        sim = self.sim
-        T, B, N = self.T, self.B, sim.cfg.n_slots
-        D, A = obs_dim(sim.cfg), act_dim(sim.cfg)
-        std = np.exp(logstd)
-        obs_buf = np.zeros((T, B, N, D), np.float32)
-        priv_buf = np.zeros((T, B, N, N_PRIV), np.float32)
-        u_buf = np.zeros((T, B, N, A), np.float32)
-        logp_buf = np.zeros((T, B, N), np.float32)
-        val = np.zeros((T + 1, B, N))
-        rew = np.zeros((T, B, N))
-        done = np.zeros((T, B, N), bool)
-        valid = np.zeros((T, B, N), bool)
-        kinds = np.zeros(N_DONE, np.int64)
-        own_rew_sum = 0.0
-        for t in range(T):
-            obs = sim.observe()
-            al = sim.alive.copy()
-            valid[t] = al
-            bi, ni = np.nonzero(al)
-            pr = privileged(sim)
-            if len(bi):
-                o = obs[bi, ni] * self.in_scale
-                mu = linear_forward(actor_p, actor_sizes, o, self.a_arch)
-                u = mu + std * self.rng.standard_normal(mu.shape)
-                lp = (-0.5 * ((u - mu) / std) ** 2 - logstd - 0.5 * LOG2PI) @ self.act_mask
-                v = linear_forward(critic_p, critic_sizes, np.concatenate([o, pr[bi, ni]], 1), self.c_arch)[:, 0]
-                obs_buf[t, bi, ni] = obs[bi, ni]
-                priv_buf[t, bi, ni] = pr[bi, ni]
-                u_buf[t, bi, ni] = u
-                logp_buf[t, bi, ni] = lp
-                val[t, bi, ni] = v
-                act = np.zeros((B, N, A))
-                act[bi, ni] = np.tanh(u)
-            else:
-                act = np.zeros((B, N, A))
-            sim.step(act)
-            r = np.where(al, sim.car_reward, 0.0)
-            own_rew_sum += r.sum()
-            rew[t] = r
-            done[t] = al & (sim.done_kind > 0)
-            kinds += np.bincount(sim.done_kind[al].ravel(), minlength=N_DONE)
-            self.steps_in_ep += 1
-        # bootstrap values for cars still on the road
-        obs = sim.observe()
-        bi, ni = np.nonzero(sim.alive)
-        if len(bi):
-            o = obs[bi, ni] * self.in_scale
-            val[T, bi, ni] = linear_forward(critic_p, critic_sizes, np.concatenate([o, privileged(sim)[bi, ni]], 1),
-                                         self.c_arch)[:, 0]
-        # GAE per slot chain (chain cut at removals)
-        adv = np.zeros((T, B, N))
-        last = np.zeros((B, N))
-        g, gl = self.gamma, self.gamma * self.lam
-        for t in range(T - 1, -1, -1):
-            nd = ~done[t]
-            delta = rew[t] + g * val[t + 1] * nd - val[t]
-            last = np.where(valid[t], delta + gl * nd * last, 0.0)
-            adv[t] = last
-        ret = adv + val[:T]
-        m = valid
-        return {
-            "obs": obs_buf[m],
-            "priv": priv_buf[m],
-            "u": u_buf[m],
-            "logp": logp_buf[m],
-            "adv": adv[m].astype(np.float32),
-            "ret": ret[m].astype(np.float32),
-            "val": val[:T][m].astype(np.float32),
-            "kinds": kinds,
-            "car_steps": int(m.sum()),
-            "own_rew": own_rew_sum,
-            "queued": float(sim.queue.sum()) / B,
-            "demand_mean": float(np.mean(sim.demand)),
-            "obstacles": float(sim.obstacle.sum()) / max(int(sim.obst_env.sum()), 1),  # standing, per obstacle env
-            "obstacle_hits": float(sim.stats.obstacle_hits.sum()),  # in the current episode
-        }
-
-
-def _worker_main(conn, kw):
-    os.environ["OMP_NUM_THREADS"] = "1"
-    _maybe_low_priority()
-    w = Worker(**kw)
-    while True:
-        cmd, args = conn.recv()
-        if cmd == "close":
-            break
-        conn.send(w.rollout(*args))
-
-
-# ---------------------------------------------------------------- PPO update
-def ppo_update(actor, logstd, critic, opt_a, opt_c, data, a, act_mask, in_scale, rng):
-    n = len(data["adv"])
-    obs = data["obs"].astype(np.float64) * in_scale
-    cin = np.concatenate([obs, data["priv"]], 1)
-    u = data["u"].astype(np.float64)
-    old_lp = data["logp"].astype(np.float64)
-    adv_all = data["adv"].astype(np.float64)
-    ret = data["ret"].astype(np.float64)
-    nA = len(logstd)
-    stats = {"kl": [], "clipfrac": [], "vloss": [], "pg": []}
-    mb = int(np.ceil(n / a.minibatches))
-    stop = False
-    for ep in range(a.epochs):
-        perm = rng.permutation(n)
-        for s in range(0, n, mb):
-            idx = perm[s : s + mb]
-            m = len(idx)
-            adv = adv_all[idx]
-            adv = (adv - adv.mean()) / (adv.std() + 1e-8)
-            mu, hs = actor.forward(obs[idx], keep=True)
-            std = np.exp(logstd)
-            z = (u[idx] - mu) / std
-            lp = (-0.5 * z**2 - logstd - 0.5 * LOG2PI) @ act_mask
-            ratio = np.exp(lp - old_lp[idx])
-            clip_hi, clip_lo = 1 + a.clip, 1 - a.clip
-            active = ~(((adv > 0) & (ratio > clip_hi)) | ((adv < 0) & (ratio < clip_lo)))
-            # loss = -mean(min(ratio A, clip(ratio) A)) - ent * sum(logstd)
-            g_lp = -(adv * ratio * active) / m  # dLoss / dlogp
-            g_mu = g_lp[:, None] * (z / std) * act_mask
-            g_logstd = (g_lp[:, None] * (z**2 - 1.0) * act_mask).sum(0) - a.ent * act_mask
-            ga = actor.backward(hs, g_mu)
-            gnorm = np.linalg.norm(ga)
-            if gnorm > a.max_grad:
-                ga *= a.max_grad / gnorm
-            actor.p -= opt_a.step(ga)
-            logstd -= a.lr_std * np.clip(g_logstd, -1, 1)
-            np.clip(logstd, a.logstd_min, 0.5, out=logstd)
-            # critic
-            v, hc = critic.forward(cin[idx], keep=True)
-            err = v[:, 0] - ret[idx]
-            gc = critic.backward(hc, (err / m)[:, None])
-            gn = np.linalg.norm(gc)
-            if gn > a.max_grad:
-                gc *= a.max_grad / gn
-            critic.p -= opt_c.step(gc)
-            kl = float(np.mean((ratio - 1) - np.log(ratio)))
-            stats["kl"].append(kl)
-            stats["clipfrac"].append(float(np.mean(np.abs(ratio - 1) > a.clip)))
-            stats["vloss"].append(float(np.mean(err**2)))
-            stats["pg"].append(float(np.mean(adv * ratio * active)))
-            if a.target_kl and kl > 1.5 * a.target_kl:
-                stop = True
-                break
-        if stop:
-            break
-    out = {k: round(float(np.mean(v)), 5) for k, v in stats.items()}
-    out["epochs_done"] = ep + 1
-    return out
-
-
+# re-exported for the tests / scripts that import them from here
+__all__ = ["MLP", "Adam", "SetNet", "Worker", "privileged", "ppo_update", "set_low_priority", "read_duty",
+           "duty_sleep", "parse_args", "build_state", "write_args", "eval_job", "train_loop", "main"]
 
 
 # ---------------------------------------------------------------- eval (subprocess)
-EVAL_DEMANDS = (0.05, 0.15)
-EVAL_ENVS, EVAL_SECONDS, EVAL_SEED = 8, 120.0, 1000  # cli bench settings
+TRAIN_EVAL_DEMANDS = (0.05, 0.15)  # the training evals' demands (quick; not protocol.EVAL_DEMANDS)
+EVAL_ENVS, EVAL_SECONDS, EVAL_SEED = ENVS, SECONDS, SELECTION_SEEDS[0]  # cli bench settings
 RENDER_DEMAND, RENDER_SECONDS = 0.15, 60.0
 
 
@@ -382,7 +82,7 @@ def eval_job(ckpt: str, out_path: str, it: int, demands, envs: int, seconds: flo
     from . import evalset
     from .gates import stop_gate
 
-    _maybe_low_priority()
+    maybe_low_priority()
 
     world = {**(cfg_d or {}), "demand_range": None}
     rec = {"iter": it, "ckpt": ckpt}
@@ -390,15 +90,14 @@ def eval_job(ckpt: str, out_path: str, it: int, demands, envs: int, seconds: flo
         s = evalset.bench_one(f"policy:{ckpt}", SimConfig(**{**world, "demand": d}), EVAL_SEED, envs, seconds)
         rec[f"d{d:g}"] = evalset.keep(s, (*evalset.KEEP_KEYS, "queued_end"))
     g, _ = stop_gate(f"policy:{ckpt}", world)
-    rec["gate"] = {k: g[k] for k in ("stop_rate_feasible", "safe_rate_feasible", "stop_rate", "crash", "offroad",
-                                      "block_stop_rate_feasible")}
-    with open(out_path, "a", encoding="utf-8", newline="\n") as f:
-        f.write(json.dumps(rec) + "\n")
+    rec["gate"] = {k: g[k] for k in GATE_KEYS}
+    append_jsonl(out_path, [rec])
     if render_dir:
         render_cfg = json.dumps({**world, "demand": RENDER_DEMAND})
         subprocess.run([sys.executable, "-m", "smartcrossing.cli", "render", "--driver", f"policy:{ckpt}", "--demand",
                         str(RENDER_DEMAND), "--cfg", render_cfg, "--seconds", str(RENDER_SECONDS), "--out", render_dir],
                        capture_output=True)
+
 
 
 # ---------------------------------------------------------------- arguments and state
@@ -639,11 +338,76 @@ def explained_var(data) -> float:
     return round(float(1 - ev / (var_ret + 1e-8)), 3)
 
 
+
 # ---------------------------------------------------------------- training loop
+def train_rates(kinds) -> dict:
+    """Shares of the finished cars per done kind in a rollout (kinds: bincount of Sim.done_kind)."""
+    fin = max(kinds[1:].sum(), 1)
+    return {
+        "exit_ok": kinds[DONE_EXIT] / fin,
+        "crash": kinds[DONE_CRASH] / fin,
+        "offroad": kinds[DONE_OFFROAD] / fin,
+        "timeout": kinds[DONE_TIMEOUT] / fin,
+        "wrong": kinds[DONE_WRONG] / fin,
+        "finished": int(kinds[1:].sum()),
+    }
+
+
+def curriculum_step(a, st: TrainState, tr: dict) -> bool:
+    """Raise the demand ceiling when the training crash+offroad rate is low; returns whether it was raised."""
+    if tr["crash"] + tr["offroad"] < a.safe_bad and tr["exit_ok"] > a.safe_exit and st.ceiling < a.demand:
+        st.ceiling = min(a.demand, st.ceiling * a.demand_step)
+        return True
+    return False
+
+
+def iteration_record(it: int, st: TrainState, res: list, data: dict, upd: dict, tr: dict, raised: bool,
+                     car_steps: int, t0: float, t1: float) -> dict:
+    """The log.jsonl line of one iteration (rollout started at t0, update at t1)."""
+    return {
+        "iter": it,
+        "ceiling": round(st.ceiling, 4),
+        "raised": raised,
+        "car_steps": car_steps,
+        "total_steps": st.total_steps,
+        "rew_per_car_step": round(sum(r["own_rew"] for r in res) / max(car_steps, 1), 5),
+        "train": {k: round(v, 4) if isinstance(v, float) else v for k, v in tr.items()},
+        "queued_per_env": round(float(np.mean([r["queued"] for r in res])), 2),
+        **({"obstacles_per_env": round(float(np.mean([r["obstacles"] for r in res])), 2),
+            "obstacle_hits_ep": int(sum(r["obstacle_hits"] for r in res))} if st.cfg.obstacle_envs > 0 else {}),
+        "expl_var": explained_var(data),
+        "logstd": [round(float(x), 3) for x in st.logstd],
+        **upd,
+        "t_roll": round(t1 - t0, 2),
+        "t_upd": round(time.time() - t1, 2),
+    }
+
+
+def checkpoint_and_eval(a, st: TrainState, out: Path, it: int, final: bool, git: dict, ctx, eval_proc):
+    """current.npz + state.npz every iteration; ckpt_XXXX.npz every --eval-every iterations and at the end (the
+    final checkpoint is always written), each with a background eval process (eval_job) unless one is still
+    running (the final one waits for it). Returns the eval process now running (or the previous one / None)."""
+    actor, critic, logstd, cfg_d = st.actor, st.critic, st.logstd, st.cfg_d
+    extra = dict(iter=it, ceiling=st.ceiling, logstd=logstd.tolist(), algo="ppo", **git)
+    save_npz(out / "current.npz", actor.p, st.a_sizes, cfg_d, st.in_scale, arch=st.a_arch, **extra)
+    np.savez(out / "state.npz", actor=actor.p, critic=critic.p, logstd=logstd, ceiling=st.ceiling, iter=it,
+             total_steps=st.total_steps)
+    if final or (a.eval_every and it % a.eval_every == 0):
+        ck = out / f"ckpt_{it:04d}.npz"
+        save_npz(ck, actor.p, st.a_sizes, cfg_d, st.in_scale, arch=st.a_arch, **extra)
+        if final and eval_proc is not None:
+            eval_proc.join()  # always evaluate the final policy
+        if a.eval_every and (a.eval_workers or final) and (eval_proc is None or not eval_proc.is_alive()):
+            rdir = str(out / f"render_{it:04d}") if a.render_every and it % a.render_every == 0 else None
+            job = (str(ck), str(out / "eval.jsonl"), it, TRAIN_EVAL_DEMANDS, EVAL_ENVS, EVAL_SECONDS, rdir, cfg_d)
+            eval_proc = ctx.Process(target=eval_job, args=job)
+            eval_proc.start()
+    return eval_proc
+
+
 def train_loop(a, st: TrainState, out: Path, source, update, ctx, git: dict):
     """PPO iterations it0 .. iters-1: rollout, update, curriculum, log line, checkpoints, evals."""
     actor, critic, logstd, opt_a = st.actor, st.critic, st.logstd, st.opt_a
-    cfg_d = st.cfg_d
     eval_proc = None
     t_start = time.time()
     duty_file = out / "duty.txt"
@@ -665,36 +429,9 @@ def train_loop(a, st: TrainState, out: Path, source, update, ctx, git: dict):
                 if warm:
                     actor.p[...], logstd[...], opt_a.m, opt_a.v, opt_a.t = keep
                     upd["critic_warmup"] = True
-                fin = max(kinds[1:].sum(), 1)
-                tr = {
-                    "exit_ok": kinds[DONE_EXIT] / fin,
-                    "crash": kinds[DONE_CRASH] / fin,
-                    "offroad": kinds[DONE_OFFROAD] / fin,
-                    "timeout": kinds[DONE_TIMEOUT] / fin,
-                    "wrong": kinds[DONE_WRONG] / fin,
-                    "finished": int(kinds[1:].sum()),
-                }
-                raised = False
-                if tr["crash"] + tr["offroad"] < a.safe_bad and tr["exit_ok"] > a.safe_exit and st.ceiling < a.demand:
-                    st.ceiling = min(a.demand, st.ceiling * a.demand_step)
-                    raised = True
-                rec = {
-                    "iter": it,
-                    "ceiling": round(st.ceiling, 4),
-                    "raised": raised,
-                    "car_steps": car_steps,
-                    "total_steps": st.total_steps,
-                    "rew_per_car_step": round(sum(r["own_rew"] for r in res) / max(car_steps, 1), 5),
-                    "train": {k: round(v, 4) if isinstance(v, float) else v for k, v in tr.items()},
-                    "queued_per_env": round(float(np.mean([r["queued"] for r in res])), 2),
-                    **({"obstacles_per_env": round(float(np.mean([r["obstacles"] for r in res])), 2),
-                        "obstacle_hits_ep": int(sum(r["obstacle_hits"] for r in res))} if st.cfg.obstacle_envs > 0 else {}),
-                    "expl_var": explained_var(data),
-                    "logstd": [round(float(x), 3) for x in logstd],
-                    **upd,
-                    "t_roll": round(t1 - t0, 2),
-                    "t_upd": round(time.time() - t1, 2),
-                }
+                tr = train_rates(kinds)
+                raised = curriculum_step(a, st, tr)
+                rec = iteration_record(it, st, res, data, upd, tr, raised, car_steps, t0, t1)
                 duty = read_duty(duty_file, a.gpu_duty)
                 pause = duty_sleep(time.time() - t0, duty)
                 if duty < 1 or a.gpu_duty < 1 or duty_file.exists():
@@ -704,21 +441,8 @@ def train_loop(a, st: TrainState, out: Path, source, update, ctx, git: dict):
                 print(json.dumps(rec), flush=True)
                 if a.max_minutes and time.time() - t_start >= 60 * a.max_minutes:
                     a.iters = it + 1  # this iteration is the last one: final checkpoint + eval below
-                extra = dict(iter=it, ceiling=st.ceiling, logstd=logstd.tolist(), algo="ppo", **git)
-                save_npz(out / "current.npz", actor.p, st.a_sizes, cfg_d, st.in_scale, arch=st.a_arch, **extra)
-                np.savez(out / "state.npz", actor=actor.p, critic=critic.p, logstd=logstd, ceiling=st.ceiling, iter=it,
-                         total_steps=st.total_steps)
                 final = it == a.iters - 1
-                if final or (a.eval_every and it % a.eval_every == 0):  # the final checkpoint is always written
-                    ck = out / f"ckpt_{it:04d}.npz"
-                    save_npz(ck, actor.p, st.a_sizes, cfg_d, st.in_scale, arch=st.a_arch, **extra)
-                    if final and eval_proc is not None:
-                        eval_proc.join()  # always evaluate the final policy
-                    if a.eval_every and (a.eval_workers or final) and (eval_proc is None or not eval_proc.is_alive()):
-                        rdir = str(out / f"render_{it:04d}") if a.render_every and it % a.render_every == 0 else None
-                        job = (str(ck), str(out / "eval.jsonl"), it, EVAL_DEMANDS, EVAL_ENVS, EVAL_SECONDS, rdir, cfg_d)
-                        eval_proc = ctx.Process(target=eval_job, args=job)
-                        eval_proc.start()
+                eval_proc = checkpoint_and_eval(a, st, out, it, final, git, ctx, eval_proc)
                 if final:
                     break  # --max-minutes reached (range() above was built with the original --iters)
                 if pause > 0:
@@ -727,7 +451,6 @@ def train_loop(a, st: TrainState, out: Path, source, update, ctx, git: dict):
             source.close()
             if eval_proc is not None:
                 eval_proc.join(timeout=600)
-
 
 # ---------------------------------------------------------------- main
 def main(argv=None):

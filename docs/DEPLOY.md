@@ -84,13 +84,14 @@ ca. 0,4 MB): Ampel, Verkehrsrechner und das beste Gehirn fahren je 90 s mit gena
 Verkehr (wenig / mittel / viel). Die Aufnahme läuft bei jedem Build neu (ca. 20 s), passt sich
 also automatisch an die aktuelle Simulation und das aktuell beste Gehirn an.
 
-Ohne Optionen ist das Hauptgehirn `DEFAULT_MAIN` in `site/sitebuild/main.py` (aktuell `r5_K_s1/ckpt_0475`,
-= `results/round5_best.npz`); `--previous` (Standard `r4_S_s1/ckpt_0205` = `results/round4_best.npz`) ist das Gehirn davor, das
+Ohne Optionen ist das Hauptgehirn `DEFAULT_MAIN` in `site/sitebuild/main.py` (aktuell `r7_DOB_s1/ckpt_1050`,
+= `results/round7_best.npz`); `--previous` (Standard `r6_DO_s2/ckpt_0750` = `results/round6_best.npz`) ist das Gehirn davor, das
 auf „Vergleich“ daneben steht. Quelle (`--source auto`): Schnappschuss `results/site/` und
 Trainingsläufe aus `runs/` werden zusammengeführt (ein Lauf in `runs/` ersetzt den gleichnamigen im
 Schnappschuss); der Build schreibt den Schnappschuss danach neu. Die Zeitreise folgt der Kette der
 Trainingsläufe, die aufeinander aufbauen (`"init"` in `args.json`). Ändert sich die
-Simulation (`smartcrossing/sim.py`), wird automatisch neu gemessen.
+Simulation (`smartcrossing/sim.py`) oder eine Vergleichsfahrweise (`smartcrossing/baselines.py`), wird
+automatisch neu gemessen: der Schlüssel des Bench-Caches enthält einen Hash beider Dateien.
 
 Lokal ansehen, bevor du pushst:
 

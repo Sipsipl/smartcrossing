@@ -24,7 +24,7 @@ def test_cli_evalset_tiny_matches_the_committed_format(tmp_path):
         ("reservation", "bench"), ("reservation", "gate"), ("round4_best.npz", "bench"), ("round4_best.npz", "gate")]
     assert lines[0]["seed"] == 1000 and lines[0]["demand"] == 0.3
     ref = _format_of(ROOT / "results" / "round4_eval.jsonl")
-    # same keys in the same order; the gate lines also carry the block cases (block_*, added in round 8)
+    # same keys in the same order; the gate lines also carry the block cases (block_*, added with the blockade scenarios of round 7)
     assert all(any(k.startswith("block_") for k in d) for d in lines if d["kind"] == "gate")
     assert {(d["kind"], tuple(k for k in d if not k.startswith("block_"))) for d in lines} == ref
     # appends

@@ -155,7 +155,7 @@ def test_round2_cfg_roundtrip():
     assert cfg.crash_cost_speed == "own" and cfg.obstacle_envs == 0.25
 
 
-# ---------------------------------------------------------------- blockades (cfg.obstacle_block, round 8)
+# ---------------------------------------------------------------- blockades (cfg.obstacle_block, blockade scenarios of round 7)
 def _block_u(k, r_frac, face):
     u = np.zeros(8)
     u[3], u[5], u[6] = (k + 0.5) / 4, r_frac, face

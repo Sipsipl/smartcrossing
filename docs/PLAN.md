@@ -58,9 +58,11 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
   Common random numbers: env b uses traffic stream b % n_scenarios.
 - `smartcrossing/baselines.py`: rule-based references with lanes (light / reservation(AIM) / none),
   1 lane per direction on the 7 m road, 2 on the 14 m road (right-hand traffic).
-- `smartcrossing/render.py`, `metrics.py`, `cli.py` (bench / render).
+- `smartcrossing/render.py`, `metrics.py`, `cli.py` (all commands; one driver factory: `drivers.py`), `jobs.py`
+  (spawn pool + JSONL appends of the measurement commands).
 - `smartcrossing/ppo.py`: numpy PPO with parameter sharing (main training method since ppo6;
-  see experiments.md). `smartcrossing/analyze.py`: signal zero/shuffle interventions,
+  see experiments.md; training loop + arguments; networks, rollout worker and numpy update in `ppo_numpy.py`,
+  background mode in `background.py`). `smartcrossing/analyze.py`: signal zero/shuffle interventions,
   MI(lamp; manoeuvre/braking/region), driving side per arm / manoeuvre, lateral-offset
   histograms (lanes?), wobble metrics, failure breakdown (solo / per demand / per manoeuvre).
   GPU path (optional `poetry install --with gpu`, torch): `sim_torch.py` (TorchSim, parity-tested
@@ -95,12 +97,13 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
 - `smartcrossing/deadlock.py` (PLAN (G), measurement): `cli deadlock` = demand sweep with per-step recording and an
   operational deadlock detector (stuck cars in the box, constellation, end cause, lamps; action-noise / lamp
   interventions); `cli deadlock-summarize` = table + the fundamental-diagram JSON (results/deadlock_fundamental.json,
-  `--name round5_best=brain` names the site's curves); `cli cloud` = scatter cloud of single 60-s windows after the
-  30-s warm-up (results/fundamental_cloud.json, seeds 4000 + k; `cloud_windows` is the definition, the start page's
-  live dot uses the same one: site/src/js/fdwindow.js, node-tested); `cli incentives` = reward accounting of a stuck car.
+  `--name round7_best=brain` names the site's curves); `cli cloud` (`smartcrossing/fundamental_cloud.py`) = scatter
+  cloud of single 60-s windows after the 30-s warm-up (results/fundamental_cloud.json, seeds 4000 + k; `cloud_windows`
+  is the definition, the start page's live dot uses the same one: site/src/js/fdwindow.js, node-tested);
+  `cli incentives` (`smartcrossing/incentives.py`) = reward accounting of a stuck car.
 - Obstacle scenarios (training option, round 2): SimConfig `obstacle_envs` (fraction of envs; 0 = off and
   bit-identical), `obstacle_rate`, `obstacle_time`, `obstacle_max`, `obstacle_parked`, `obstacle_box`: wrecks /
-  parked cars appear on a path (never closer than a car could stop). `obstacle_block` (round 8; 0 = off, bit-identical):
+  parked cars appear on a path (never closer than a car could stop). `obstacle_block` (blockade scenarios, round 7; 0 = off, bit-identical):
   that share of the placements is a blockade of 3 bodies crosswise across the full road width of an arm (both
   directions), so only stopping avoids the crash; the stop gate reports its block cases as `block_*`.
 - `smartcrossing/policy.py` (shared MLP, numpy, `PolicyDriver`). The old ES trainer was removed
@@ -132,13 +135,14 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
 - Subagents look at images themselves and report numbers; orchestrator keeps context small.
 - Emergence claims require ablations: signal zeroed/shuffled, no-comm training, MI(signal; intent).
 
-## Status (2026-10-14)
+## Status (2026-10-25)
 Done: simulator + baselines + metrics + tests; PPO training (numpy and GPU); emergence analysis
-tooling; website (site/) incl. sliders, agent mixing, side-by-side comparison, reward visual, set-brain
-view; wide crossing, grip limit, reverse gear, impact-speed crash cost, wrecks / brake light / hazard /
-one lamp / right-half spawning; rounds 1-4 (crash cost x3, obstacle scenarios, set/attention encoder);
-stop gate; multi-seed site bench; run tracking.
-Main brain: round-4 set/attention brain results/round4_best.npz (site main `r4_S_s1`; previous r2_B_s1).
+tooling; website (site/, German + English) incl. sliders, agent mixing, side-by-side comparison, reward visual,
+set-brain view, fundamental diagram; wide crossing, grip limit, reverse gear, impact-speed crash cost, wrecks /
+brake light / hazard / one lamp / right-half spawning; rounds 1-7 (crash cost x3, obstacle scenarios,
+set/attention encoder, dense traffic, blockade scenarios); stop gate incl. block cases; deadlock study;
+multi-seed site bench on held-out report seeds; run tracking; refactoring steps (latest: refactor 4, 2026-10-25).
+Main brain: round-7 brain results/round7_best.npz (site main `r7_DOB_s1@1050`; previous r6_DO_s2@750).
 Crash rule: equal cost for all involved (relative impact speed); own-speed variant C was worse (round 3).
 Open: deadlocks / near-gridlock in the box at high demand (cars removed after max_age 60 s); remaining
 crashes in the box; lamp unused so far.
@@ -147,7 +151,7 @@ crashes in the box; lamp unused so far.
 1. Site: make the brain view on /gehirn larger (zoom / full-width / fullscreen toggle; owner: too small).
    Same step: keep the start page's "Flackern (Störung)" slider (lamp noise, never used in training;
    an intervention tool: do cars rely on the lamp?) but explain it in one plain sentence (owner: option a).
-2. Refactoring step (due after rounds 2-4: set encoder + site build grew).
+2. [done: refactor 4, 2026-10-25] Refactoring step (due after rounds 2-4: set encoder + site build grew).
 2b. [done 2026-10-21] English (owner, 2026-10-21): the whole website in German AND English with a language toggle top
    right (DE/EN; remembers the choice, default by browser language, German stays the primary text);
    all page texts incl. the data-driven sentences in pages.js, labels from obs_labels, run notes,

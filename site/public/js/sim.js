@@ -6,6 +6,9 @@
  * Randomness (arrivals, signal noise) uses a seeded JS PRNG; it is not meant to
  * reproduce numpy's streams.
  *
+ * Not ported (training / measurement options of sim.py, off in the default world): obstacle scenarios
+ * (cfg.obstacle_envs, blockades), crash_cost_speed = "own".
+ *
  * All numbers (SimConfig defaults, geometry and observation constants) come from
  * js/sim-config.js (globalThis.SC_SIM_CONFIG), which site/build.py generates from
  * sim.py (sim.js_constants); load it first.
