@@ -1,5 +1,5 @@
 """Small pure helpers of the website's JavaScript, run with node: the live dot's measurement window
-(js/fdwindow.js) against the Python definition of the cloud (deadlock.cloud_windows), and the percent format
+(js/fdwindow.js) against the Python definition of the cloud (fundamental_cloud.cloud_windows), and the percent format
 SCX.pct (js/i18n.js) at its edges."""
 
 import json
@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from smartcrossing import deadlock
+from smartcrossing import deadlock, fundamental_cloud
 
 ROOT = Path(__file__).resolve().parents[1]
 JS = ROOT / "site" / "src" / "js"
@@ -37,7 +37,7 @@ def test_live_dot_window_equals_the_cloud_windows(tmp_path):
     rng = np.random.default_rng(3)
     cars = rng.integers(0, 40, size=(T, 1)).astype(float)
     exits = np.concatenate([[0], np.cumsum(rng.random(T) < 0.03)])[:, None].astype(float)  # (T + 1, 1)
-    py = deadlock.cloud_windows(cars, exits, dt)
+    py = fundamental_cloud.cloud_windows(cars, exits, dt)
     samples = [[round(i * dt, 10), float(cars[i, 0])] for i in range(T)]  # state before step i
     exit_times = [round((i + 1) * dt, 10) for i in range(T) for _ in range(int(exits[i + 1, 0] - exits[i, 0]))]
     ends = [t for t, *_ in py]
@@ -46,7 +46,8 @@ const W = require({json.dumps(str(JS / "fdwindow.js"))});
 const out = {{ consts: [W.WARMUP_S, W.WINDOW_S, W.firstAt()], at: PAYLOAD.ends.map((t) => W.point(PAYLOAD.samples, PAYLOAD.exits, t)),
   early: [89.9, 60, 0].map((t) => W.point(PAYLOAD.samples, PAYLOAD.exits, t)) }};
 console.log(JSON.stringify(out));""", tmp_path, {"samples": samples, "exits": exit_times, "ends": ends})
-    assert js["consts"] == [deadlock.WARMUP, deadlock.CLOUD_WINDOW_S, deadlock.WARMUP + deadlock.CLOUD_WINDOW_S]
+    assert js["consts"] == [deadlock.WARMUP, fundamental_cloud.CLOUD_WINDOW_S,
+                             deadlock.WARMUP + fundamental_cloud.CLOUD_WINDOW_S]
     assert len(ends) == 7 and ends[0] == pytest.approx(90.0)
     for (t, dens, thr), p in zip(py, js["at"]):
         assert p["cars"] == pytest.approx(dens[0], abs=1e-9) and p["thr"] == pytest.approx(thr[0], abs=1e-9), t

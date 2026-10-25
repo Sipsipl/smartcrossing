@@ -1,7 +1,9 @@
 """The evaluation protocol constants (smartcrossing/protocol.py) are measurements' identity: pin the values and
 check every module uses them (no second copy)."""
 
-from smartcrossing import deadlock, evalset, protocol, select
+import inspect
+
+from smartcrossing import deadlock, evalset, fundamental_cloud, ppo, protocol, select
 
 
 def test_values_are_fixed():
@@ -19,6 +21,8 @@ def test_modules_use_the_protocol():
     kw = dict(zip(select.select.__code__.co_varnames[1:], select.select.__defaults__))
     assert (kw["demands"], kw["seeds"], kw["envs"], kw["seconds"]) == (
         protocol.SELECT_DEMANDS, protocol.SELECTION_SEEDS, protocol.ENVS, protocol.SECONDS)
-    assert deadlock.CLOUD_DEMANDS == protocol.SWEEP_DEMANDS and deadlock.CLOUD_SEED == protocol.REPORT_SEEDS[0]
-    for mod in (evalset, select, deadlock):
+    cloud = inspect.signature(fundamental_cloud.cloud).parameters
+    assert cloud["demands"].default == protocol.SWEEP_DEMANDS and cloud["seed"].default == protocol.REPORT_SEEDS[0]
+    assert (ppo.EVAL_ENVS, ppo.EVAL_SECONDS, ppo.EVAL_SEED) == (protocol.ENVS, protocol.SECONDS, protocol.SELECTION_SEEDS[0])
+    for mod in (evalset, select, deadlock, fundamental_cloud):
         assert not hasattr(mod, "SEEDS") and not hasattr(mod, "DEMANDS")

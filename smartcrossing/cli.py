@@ -126,10 +126,11 @@ def main(argv=None):
                       copy_to=a.copy_to, cfg_d=cfg_d, envs=envs, seconds=seconds,
                       demands=_csv(a.demands, protocol.SELECT_DEMANDS), seeds=_csv(a.seeds, protocol.SELECTION_SEEDS, int))
     elif a.cmd == "cloud":
-        from . import deadlock
+        from .deadlock import label
+        from .fundamental_cloud import cloud
 
-        specs = dict(d.split("=", 1) if "=" in d else (deadlock.label(d), d) for d in drivers)
-        res = deadlock.cloud(specs, _csv(a.demands, deadlock.CLOUD_DEMANDS), workers=a.workers, cfg_d=cfg_d)
+        specs = dict(d.split("=", 1) if "=" in d else (label(d), d) for d in drivers)
+        res = cloud(specs, _csv(a.demands, protocol.SWEEP_DEMANDS), workers=a.workers, cfg_d=cfg_d)
         Path(a.out).write_text(json.dumps(res, separators=(",", ":")), encoding="utf-8", newline="\n")
     elif a.cmd == "deadlock":
         from . import deadlock
@@ -143,14 +144,14 @@ def main(argv=None):
             raise SystemExit("deadlock-summarize: give the sweep JSONL files")
         deadlock.summarize_files(a.files, _names(a.name), a.fundamental, a.json)
     elif a.cmd == "incentives":
-        from . import deadlock
+        from .incentives import incentives
 
         train = {}
         if a.driver and (driver.startswith("policy:") or driver.endswith(".npz")):
             from .policy import load_npz
 
             train = load_npz(driver.removeprefix("policy:"))[2]
-        print(json.dumps(deadlock.incentives({**train, **(cfg_d or {})}), indent=1))
+        print(json.dumps(incentives({**train, **(cfg_d or {})}), indent=1))
     elif a.cmd == "evalset":
         from . import evalset
 

@@ -1,15 +1,13 @@
 """Deadlock study (PLAN (G), measurement only): demand sweeps with per-step recording, an operational
 deadlock detector, its constellation / ending / lamp analysis, action-noise and lamp interventions, and the
-fundamental-diagram data (throughput vs density and vs demand).
+fundamental-diagram data (throughput vs density and vs demand). The scatter cloud of the fundamental diagram
+(``cli cloud``) is fundamental_cloud.py, the reward accounting of a stuck car (``cli incentives``) incentives.py.
 
-    poetry run python -m smartcrossing.cli deadlock --driver policy:results/round4_best.npz \
-        --demands 0.3,0.5 --seeds 1000,2000,3000 --envs 8 --seconds 180 --out runs/deadlock/x.jsonl \
-        [--noise policy|0.1] [--lamp zero|shuffle] [--workers 4]
+    poetry run python -m smartcrossing.cli deadlock --driver policy:results/round7_best.npz --driver light \
+        --driver reservation --seeds 4000,5000,6000 --seconds 180 --out runs/deadlock/x.jsonl \
+        [--demands 0.3,0.5] [--noise policy|0.1] [--lamp zero|shuffle] [--workers 4]
     poetry run python -m smartcrossing.cli deadlock-summarize runs/deadlock/*.jsonl \
-        [--fundamental results/deadlock_fundamental.json --name round5_best=brain] [--json rows.json]
-    poetry run python -m smartcrossing.cli cloud --driver brain=policy:results/round5_best.npz --driver light \
-        --driver reservation --out results/fundamental_cloud.json --workers 4
-    poetry run python -m smartcrossing.cli incentives [--driver policy:results/round5_best.npz] [--cfg JSON]
+        [--fundamental results/deadlock_fundamental.json --name round7_best=brain] [--json rows.json]
 
 Deadlock (operational definition, ``detect``): the zone Z is the box incl. the curb rounding, Chebyshev
 distance max(|x|, |y|) <= W + Rc (16 m in the default world); the conflict area proper is max(|x|, |y|) <=
@@ -35,7 +33,7 @@ import numpy as np
 from .drivers import make_driver
 from .jobs import append_jsonl, pool_map
 from .metrics import summarize
-from .protocol import ENVS, REPORT_SEEDS, SELECTION_SEEDS, SWEEP_DEMANDS, SWEEP_SECONDS
+from .protocol import ENVS, SELECTION_SEEDS, SWEEP_DEMANDS, SWEEP_SECONDS
 from .sim import DONE_CRASH, DONE_OFFROAD, DONE_TIMEOUT, Sim, SimConfig
 
 SLOW_V = 0.3  # m/s: below this a car counts as standing (jam metric)
@@ -45,8 +43,8 @@ N_INNER = 2  # ... of which this many inside the conflict area proper
 T_MIN = 5.0  # s window of the displacement test
 MERGE_GAP = 1.0  # s: deadlock intervals closer than this are one episode
 WARMUP = 30.0  # s from the empty start before density / steady throughput are measured
-BLOCK_RANGE = 10.0  # m: a car within this distance in the +-BLOCK_CONE ahead blocks a car
-BLOCK_CONE = np.radians(45.0)
+BLOCKER_RANGE = 10.0  # m: a car within this distance in the +-BLOCKER_CONE ahead blocks a car
+BLOCKER_CONE = np.radians(45.0)
 INNER_PAD = 2.0  # a car is "inner" (in the conflict area proper) when max(|x|, |y|) <= W + INNER_PAD
 LEAD_S, LAST_S = 5.0, 3.0  # lamp windows: before the deadlock began / before it ended
 MAN_NAMES = {1: "right", 2: "straight", 3: "left"}
@@ -84,11 +82,11 @@ def record_run(spec: str, cfg: SimConfig, seed: int, envs: int = ENVS, seconds: 
 
 # ------------------------------------------------------------------ detection
 def _blocker(x, y, th, cand, i):
-    """Index of the nearest candidate within BLOCK_RANGE in the +-BLOCK_CONE ahead of car i (-1 = none)."""
+    """Index of the nearest candidate within BLOCKER_RANGE in the +-BLOCKER_CONE ahead of car i (-1 = none)."""
     dx, dy = x - x[i], y - y[i]
     d = np.hypot(dx, dy)
     ang = np.abs((np.arctan2(dy, dx) - th[i] + np.pi) % (2 * np.pi) - np.pi)
-    ok = cand & (d < BLOCK_RANGE) & (ang < BLOCK_CONE)
+    ok = cand & (d < BLOCKER_RANGE) & (ang < BLOCKER_CONE)
     ok[i] = False
     return int(np.argmin(np.where(ok, d, np.inf))) if ok.any() else -1
 
@@ -105,7 +103,7 @@ def constellation(rec, cfg, i, b, slots) -> dict:
     x, y, th = rec["x"][i, b].astype(float), rec["y"][i, b].astype(float), rec["th"][i, b].astype(float)
     alive, wreck = rec["alive"][i, b], rec["wreck"][i, b]
     cheb = np.maximum(np.abs(x), np.abs(y))
-    cand = (alive | wreck) & (cheb < cfg.W + cfg.Rc + BLOCK_RANGE)
+    cand = (alive | wreck) & (cheb < cfg.W + cfg.Rc + BLOCKER_RANGE)
     nxt = {int(n): _blocker(x, y, th, cand, int(n)) for n in slots}
     involved = set(int(n) for n in slots)
     cycles, heads = [], []
@@ -352,8 +350,10 @@ MEAN_KEYS = ("demand_per_min", "throughput_per_min", "throughput_steady_per_min"
              "jam_time_frac", "timeouts_in_zone_frac")
 
 
-def aggregate(lines) -> list[dict]:
-    """Seed-averaged rows per (driver, noise, lamp, demand) incl. pooled deadlock statistics."""
+def aggregate(lines, cfg: SimConfig | None = None) -> list[dict]:
+    """Seed-averaged rows per (driver, noise, lamp, demand) incl. pooled deadlock statistics (cfg: the world of the
+    runs, for its step dt; default world)."""
+    dt = (cfg or SimConfig()).dt
     groups = {}
     for ln in lines:
         groups.setdefault((ln["driver"], ln["noise"], ln["lamp"], ln["demand"]), []).append(ln)
@@ -365,7 +365,7 @@ def aggregate(lines) -> list[dict]:
             row[k] = round(float(np.mean(vals)), 3) if vals else None
         row["seed_spread_thr"] = [ln["throughput_per_min"] for ln in ls]
         eps = [e for ln in ls for e in ln["episodes"]]
-        row.update(episode_stats(eps))
+        row.update(episode_stats(eps, dt))
         sens = {}
         for ln in ls:
             for k, v in ln.get("sensitivity", {}).items():
@@ -376,7 +376,8 @@ def aggregate(lines) -> list[dict]:
     return rows
 
 
-def episode_stats(eps) -> dict:
+def episode_stats(eps, dt: float) -> dict:
+    """Pooled statistics of deadlock episodes (detect) of runs with step dt."""
     if not eps:
         return {"n_episodes": 0}
     dur = np.array([e["dur_s"] for e in eps])
@@ -395,12 +396,12 @@ def episode_stats(eps) -> dict:
                 spells.append(cur)
             cur = [e["start"], e["end"]]
     spells.append(cur)
-    sd = np.array([(hi - lo) * 0.1 for lo, hi in spells])
+    sd = np.array([(hi - lo) * dt for lo, hi in spells])
     out.update(n_spells=len(spells), spell_dur_median_s=round(float(np.median(sd)), 1),
                spell_dur_p90_s=round(float(np.percentile(sd, 90)), 1), spell_dur_max_s=round(float(sd.max()), 1))
     out["no_zone_exit_frac"] = round(float(np.mean([e["zone_exits"] == 0 for e in eps])), 3)
     out["zone_exits_per_min_during"] = round(float(sum(e["zone_exits"] for e in eps) / max(
-        sum(e["end"] - e["onset"] for e in eps) / 600, 1e-9)), 2)
+        sum(e["end"] - e["onset"] for e in eps) / (60 / dt), 1e-9)), 2)
     out["timeouts_of_involved"] = int(sum(e["n_timeouts"] for e in eps))
     out["crashed_of_involved"] = int(sum(e["n_crashed"] for e in eps))
     out["cars_involved"] = int(sum(e["n_cars"] for e in eps))
@@ -481,106 +482,9 @@ def table(rows) -> str:
     return "\n".join(lines)
 
 
-# ------------------------------------------------------------------ incentives
-def incentives(cfg_d: dict, gamma: float = 0.99, ages=(20.0, 40.0), go_s: float = 4.0, crash_v=(2.0, 5.0, 10.0)) -> dict:
-    """Reward accounting for ONE car stuck in the box (training reward of cfg_d, per-step discount gamma as in
-    ppo.py): (a) keep waiting until the max_age removal (from age 20 / 40 s), (b) go now and get out after go_s
-    seconds, (c) go now and crash at an impact speed of 2 / 5 / 10 m/s. Undiscounted and discounted values
-    (what the critic / advantage sees). Progress shaping (r_progress per metre) is left out: the same few
-    hundredths for every option up to the crash / exit point. break_even_p_crash: the crash probability below
-    which going now beats waiting to the timeout (discounted, crash at 5 m/s)."""
-    c = SimConfig(**{k: v for k, v in cfg_d.items() if k in SimConfig.__dataclass_fields__})
-    g = lambda s: gamma ** (s / c.dt)  # noqa: E731  discount of a reward s seconds ahead
-
-    def time_cost(s, disc):
-        n = int(round(s / c.dt))
-        return -c.r_time * c.dt * (sum(gamma ** k for k in range(n)) if disc else n)
-
-    opt = {}
-    for disc in (False, True):
-        sfx = "_disc" if disc else ""
-        for age in ages:
-            left = c.max_age - age
-            opt[f"wait_to_timeout_age{age:g}{sfx}"] = round(time_cost(left, disc) + c.r_timeout * (g(left) if disc else 1), 3)
-        opt[f"go_exit_{go_s:g}s{sfx}"] = round(time_cost(go_s, disc) + c.r_exit * (g(go_s) if disc else 1), 3)
-        for v in crash_v:
-            opt[f"go_crash_{v:g}mps{sfx}"] = round(c.r_crash - c.r_crash_speed * v, 3)
-    w, e, k = opt[f"wait_to_timeout_age{ages[0]:g}_disc"], opt[f"go_exit_{go_s:g}s_disc"], opt["go_crash_5mps_disc"]
-    return {"gamma": gamma, "horizon_s": round(c.dt / (1 - gamma), 1), "r_time_per_s": c.r_time,
-            "r_timeout": c.r_timeout, "max_age_s": c.max_age, "r_exit": c.r_exit, "r_crash": c.r_crash,
-            "r_crash_speed": c.r_crash_speed, "options": opt,
-            "break_even_p_crash": round((e - w) / (e - k), 3)}
-
-
-# ------------------------------------------------------------------ scatter cloud
-CLOUD_DEMANDS = SWEEP_DEMANDS
-CLOUD_WINDOW_S, CLOUD_STRIDE_S, CLOUD_SECONDS, CLOUD_ENVS, CLOUD_SEED = 60.0, 10.0, 270.0, 6, REPORT_SEEDS[0]  # held-out: seeds 4000..4006
-CLOUD_PER_DEMAND = 60  # points kept per (driver, demand) after thinning
-
-
-def cloud_windows(cars: np.ndarray, exits: np.ndarray, dt: float, stride_s: float = CLOUD_STRIDE_S):
-    """The cloud's window definition (the start page's live dot uses the same, js/pages.js fdWindow): cars (T, B) =
-    driving cars on the map before step i, exits (T + 1, B) = cumulative exits after i steps. A CLOUD_WINDOW_S
-    window ending every stride_s, only windows lying entirely after the WARMUP from the empty start (so the first
-    one ends at WARMUP + CLOUD_WINDOW_S). Returns [(end time s, density (B,), throughput per min (B,)), ...]:
-    density = mean cars over the window, throughput = exits in the window per minute."""
-    T = len(cars)
-    w, stride = int(round(CLOUD_WINDOW_S / dt)), int(round(stride_s / dt))
-    first = int(round(WARMUP / dt)) + w
-    return [(end * dt, cars[end - w:end].mean(0), (exits[end] - exits[end - w]) * (60.0 / CLOUD_WINDOW_S))
-            for end in range(first, T + 1, stride)]
-
-
-def cloud_job(job) -> list[list[float]]:
-    """One cloud cell (spec, cfg_d, demand, seed, envs, seconds) -> [[density, throughput, demand], ...] per env
-    and window (cloud_windows)."""
-    spec, cfg_d, demand, seed, envs, seconds = job
-    cfg = SimConfig(**{**(cfg_d or {}), "demand": demand})
-    sim = Sim(cfg, envs, seed=seed)
-    drv = make_driver(spec, sim)
-    T = int(round(seconds / cfg.dt))
-    cars = np.zeros((T, envs))
-    exits = np.zeros((T + 1, envs))
-    for i in range(T):
-        cars[i] = sim.alive.sum(1)
-        sim.step(drv.act())
-        exits[i + 1] = sim.stats.exits
-    out = []
-    for _, dens, thr in cloud_windows(cars, exits, cfg.dt):
-        out += [[round(float(d), 1), round(float(t), 1), demand] for d, t in zip(dens, thr)]
-    return out
-
-
-def cloud(drivers: dict, demands=CLOUD_DEMANDS, envs=CLOUD_ENVS, seconds=CLOUD_SECONDS, seed=CLOUD_SEED,
-          per_demand=CLOUD_PER_DEMAND, cfg_d=None, workers=1, log=print) -> dict:
-    """Fundamental-diagram scatter cloud: {key: spec} -> {"meta", "drivers": {key: {"points": [[density,
-    throughput, demand], ...]}}}; each cell thinned evenly to ``per_demand`` points."""
-    jobs = [(spec, cfg_d, dm, seed + k, envs, seconds) for spec in drivers.values() for k, dm in enumerate(demands)]
-    t0 = time.time()
-    cells = pool_map(cloud_job, jobs, workers)
-    out = {"meta": {
-        "density": "mean number of driving cars on the map over the window (as the live dot on the start page)",
-        "throughput": f"exits in the window per minute ({CLOUD_WINDOW_S:g}-s sliding window, one every "
-                      f"{CLOUD_STRIDE_S:g} s, windows entirely after the {WARMUP:g} s warm-up)",
-        "points": "[density, throughput, demand]; per driver and demand evenly thinned",
-        "protocol": f"{envs} envs x {seconds:g} s per demand {list(demands)}, default world, traffic seed "
-                    f"{seed} + k for the k-th demand ({seed}..{seed + len(demands) - 1})"},
-        "drivers": {}}
-    for ki, key in enumerate(drivers):
-        pts = []
-        for cell in cells[ki * len(demands):(ki + 1) * len(demands)]:
-            if len(cell) > per_demand:
-                cell = [cell[j] for j in np.linspace(0, len(cell) - 1, per_demand).round().astype(int)]
-            pts += cell
-        out["drivers"][key] = {"spec": drivers[key], "points": pts}
-        log(f"cloud {key}: {len(pts)} points")
-    log(f"cloud: {len(jobs)} cells in {time.time() - t0:.0f} s")
-    return out
-
-
 def summarize_files(files, names=None, fundamental_out=None, json_out=None, log=print) -> list[dict]:
     """``cli deadlock-summarize``: aggregate sweep JSONL files and print the table; optionally write the rows
-    (json_out) and the fundamental-diagram JSON (names: {spec label: display key}, e.g. {"round5_best": "brain"})."""
+    (json_out) and the fundamental-diagram JSON (names: {spec label: display key}, e.g. {"round7_best": "brain"})."""
     lines = [json.loads(s) for f in files for s in Path(f).read_text(encoding="utf-8").splitlines() if s.strip()]
     rows = aggregate(lines)
     log(table(rows))
