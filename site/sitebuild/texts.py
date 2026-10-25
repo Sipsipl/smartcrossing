@@ -482,17 +482,15 @@ RUN_INFO = {
     "r7_DOB_s1": {
         "short": "R7",
         "de": ("Runde 7: sehr dichter Verkehr + Straßensperren",
-               "Das aktuelle Gehirn: das Gehirn aus Runde 6 hat weitertrainiert, zusätzlich mit Straßensperren – "
-               "drei Hindernisse nebeneinander über die ganze Straßenbreite, an denen nur Anhalten hilft. Gewählt "
-               "ist ein Zwischenstand (Schritt 1050). Vor einer Sperre hält es in {block} % der Fälle an. Vor "
-               "einem einzelnen Hindernis kommt es zu {safe} % unfallfrei vorbei, hält aber nur in rund {stop} % "
-               "davor an – meist fährt es herum."),
+               "Das Hauptgehirn bis Runde 8: das Gehirn aus Runde 6 hat weitertrainiert, zusätzlich mit "
+               "Straßensperren – drei Hindernisse nebeneinander über die ganze Straßenbreite, an denen nur Anhalten "
+               "hilft. Gewählt ist ein Zwischenstand (Schritt 1050). Vor einer Sperre hielt es an; vor einem "
+               "einzelnen Hindernis fuhr es meist herum."),
         "en": ("Round 7: very dense traffic + road blockades",
-               "The current brain: the round 6 brain trained on, additionally with road blockades – three "
-               "obstacles side by side across the full width of the road, where only stopping helps. An "
-               "intermediate step (step 1050) is chosen. In front of a blockade it stops in {block}% of cases. "
-               "In front of a single obstacle it gets past without a crash in {safe}% of cases, but stops in "
-               "front of it in only about {stop}% – mostly it drives around."),
+               "The main brain up to round 8: the round 6 brain trained on, additionally with road blockades – "
+               "three obstacles side by side across the full width of the road, where only stopping helps. An "
+               "intermediate step (step 1050) is chosen. In front of a blockade it stopped; in front of a single "
+               "obstacle it mostly drove around."),
     },
     "r7_DOB_s2": {
         "short": "R7'",
@@ -511,6 +509,43 @@ RUN_INFO = {
         "en": ("Round 7, control: without road blockades",
                "The same number of learning steps, but without blockades in training: stopping in front of "
                "blockades is lost, the obstacle test fails at several intermediate steps."),
+    },
+    "r8_M_s1": {
+        "short": "R8",
+        "de": ("Runde 8: Gedächtnis",
+               "Das aktuelle Gehirn: das Gehirn aus Runde 7 mit einem Gedächtnis aus 16 Zahlen pro Auto, das von "
+               "Augenblick zu Augenblick weitergegeben wird. Am Anfang ist es leer und ändert nichts am Fahren; "
+               "in 300 Lernschritten mit dem Rezept aus Runde 7 hat das Gehirn gelernt, es zu nutzen. Gewählt ist "
+               "der letzte Stand (Schritt 1398). Vor einer Sperre hält es in {block} % der Fälle an. Vor einem "
+               "einzelnen Hindernis kommt es zu {safe} % unfallfrei vorbei und hält in rund {stop} % davor an."),
+        "en": ("Round 8: memory",
+               "The current brain: the round 7 brain with a memory of 16 numbers per car, passed on from moment "
+               "to moment. At first it is empty and changes nothing about the driving; in 300 learning steps with "
+               "the round 7 recipe the brain learned to use it. The last step (step 1398) is chosen. In front of a "
+               "blockade it stops in {block}% of cases. In front of a single obstacle it gets past without a crash "
+               "in {safe}% of cases and stops in front of it in about {stop}%."),
+    },
+    "r8_M_s2": {
+        "short": "R8'",
+        "de": ("Runde 8: Gedächtnis, zweiter Lauf",
+               "Anderer Zufallsstart: nutzt das Gedächtnis ebenfalls. Bei sehr dichtem Verkehr kommen mehr Autos "
+               "durch als mit dem Gehirn aus Runde 7, etwas weniger als beim gewählten Lauf; sein letzter Stand hat "
+               "dabei weniger Unfälle."),
+        "en": ("Round 8: memory, second run",
+               "Different random start: also uses the memory. In very dense traffic more cars get through than "
+               "with the round 7 brain, slightly fewer than in the chosen run; its last step has fewer crashes "
+               "there."),
+    },
+    "r8_C_s1": {
+        "short": "R8k",
+        "de": ("Runde 8, Kontrolle: ohne Gedächtnis",
+               "Gleich viele Lernschritte mit demselben Rezept, aber ohne Gedächtnis: ebenfalls besser als Runde 7, "
+               "doch bei sehr dichtem Verkehr kommen weniger Autos durch als mit Gedächtnis, und die Autos stehen "
+               "fast doppelt so lange verkeilt."),
+        "en": ("Round 8, control: without memory",
+               "The same number of learning steps with the same recipe, but without memory: also better than "
+               "round 7, yet in very dense traffic fewer cars get through than with memory, and the cars stand "
+               "wedged almost twice as long."),
     },
 }
 
@@ -614,13 +649,19 @@ STEP_INFO = {
     },
     "r7_DOB_s1": {
         "de": ("Dazu Straßensperren im Training (drei Hindernisse über die ganze Breite, nur Anhalten hilft), "
-               "ein Zwischenstand → bei sehr dichtem Verkehr noch mehr Autos durch und weniger Unfälle; vor"
-               " einer Sperre hält es in {block} % der Fälle an, vor einem einzelnen Hindernis in "
-               "etwa {stop} %"),
+               "ein Zwischenstand → bei sehr dichtem Verkehr noch mehr Autos durch und weniger Unfälle; vor einer "
+               "Sperre hält es an; das Hauptgehirn bis Runde 8"),
         "en": ("Plus road blockades in training (three obstacles across the full width, only stopping helps), "
-               "an intermediate step → even more cars through in very dense traffic and fewer crashes; in front"
-               " of a blockade it stops in {block}% of cases, in front of a single "
-               "obstacle in about {stop}%"),
+               "an intermediate step → even more cars through in very dense traffic and fewer crashes; it stops "
+               "in front of a blockade; the main brain up to round 8"),
+    },
+    "r8_M_s1": {
+        "de": ("Gedächtnis dazu: 16 Zahlen pro Auto, die von Augenblick zu Augenblick weitergehen → bei sehr "
+               "dichtem Verkehr mehr Autos durch und nur noch halb so lange verkeilt; vor einer Sperre hält es "
+               "in {block} % der Fälle an, vor einem einzelnen Hindernis in etwa {stop} %"),
+        "en": ("Memory added: 16 numbers per car, carried from moment to moment → in very dense traffic more "
+               "cars through and wedged for only half as long; it stops in front of a blockade in {block}% "
+               "of cases, in front of a single obstacle in about {stop}%"),
     },
 }
 

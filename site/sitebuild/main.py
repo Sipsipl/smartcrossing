@@ -16,8 +16,8 @@ from .pages import write_site
 # shown before it (narrow crossing); override with --main / --history
 # Checkpoints are named <run>/<file stem> (found in runs/ or in the snapshot); a path to an
 # .npz anywhere (e.g. results/wide_s1ft2_ckpt2650.npz) works too if its weights match one.
-DEFAULT_MAIN = ["r7_DOB_s1/ckpt_1050"]  # = results/round7_best.npz (round 7: the round 6 brain trained on with road blockades, picked by stop-gate selection; not the run's last checkpoint)
-DEFAULT_PREVIOUS = "r6_DO_s2/ckpt_0750"  # = results/round6_best.npz, the main brain before round 7
+DEFAULT_MAIN = ["r8_M_s1/ckpt_1398"]  # = results/round8_best.npz (round 8: the round 7 brain with a GRU memory of 16 numbers per car, trained on with the round 7 recipe, picked by stop-gate selection; the run's last checkpoint)
+DEFAULT_PREVIOUS = "r7_DOB_s1/ckpt_1050"  # = results/round7_best.npz, the main brain before round 8
 DEFAULT_HISTORY = "ppo17/ckpt_5250"
 
 

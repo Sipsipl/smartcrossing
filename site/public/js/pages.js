@@ -317,8 +317,9 @@
     const much = tx(a > 0 && b < 0.5 * a ? "note.much" : b < a ? "note.fewer" : "note.notfewer");
     const vm = crashVerdict("0.15"), vd = crashVerdict("0.3");
     // bench values are means over several traffic seeds (held-out reporting seeds), but still a rounded comparison
+    const Hm = isSetEntry(m) && m.policy.arch.mem ? m.policy.arch.mem.size : 0;
     return isSetEntry(m)
-      ? tx("note.set", {
+      ? tx(Hm ? "note.mem" : "note.set", { Hm,
         K: m.policy.arch.K, midw: tx(vm), mid,
         dense: dense && vd ? tx("note.dense", { dw: tx(vd), dense }) : "",
         thrw: tx("note.thr." + SCX.compare(thr, thrPrev, 2, SCX.THR_REL)), thr: num(thr, 0), thrprev: num(thrPrev, 0), dem: num(m.bench["0.5"].demand_per_min, 0),
@@ -560,10 +561,14 @@
       if (!p) return;
       const set = isSetEntry(p);
       document.querySelectorAll("[data-set-only]").forEach((e) => { e.hidden = !set; });
+      const Hm = set && p.policy.arch.mem ? p.policy.arch.mem.size : 0;  // GRU memory size (0 = stateless)
+      document.querySelectorAll("[data-mem-only]").forEach((e) => { e.hidden = !Hm; });
+      document.querySelectorAll("[data-hm]").forEach((e) => { e.textContent = Hm; });
       $("set-explain").hidden = !set;
       if (set) {
         const ar = p.policy.arch;
-        $("brain-lead").innerHTML = tx("brain.lead.set", { ego: ar.n_ego, K: ar.K, F: ar.F, hidden: ar.hidden.join(" → "), out: ar.n_out });
+        $("brain-lead").innerHTML = tx("brain.lead.set", { ego: ar.n_ego, K: ar.K, F: ar.F, hidden: ar.hidden.join(" → "), out: ar.n_out,
+          mem: Hm ? tx("brain.lead.mem", { Hm }) : "" });
         $("brain-params").textContent = SCX.group(p.policy.params.length);
         document.querySelectorAll("#set-explain [data-k]").forEach((e) => { e.textContent = ar.K; });
         document.querySelectorAll("#set-explain [data-heads]").forEach((e) => { e.textContent = ar.heads; });

@@ -6,7 +6,7 @@
 <title data-i18n="brain.das-gehirn-smart-crossing">Das Gehirn – Smart Crossing</title>
 <meta data-i18n-attr="content=brain.meta-das-neuronale-netz" name="description" content="Das neuronale Netz eines selbstfahrenden Autos, live beim Denken.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/site.css?v=57e10591">
+<link rel="stylesheet" href="css/site.css?v=46c57a95">
 </head>
 <body data-page="gehirn">
 <div class="wrap">
@@ -28,6 +28,7 @@ Links kommen die Sensorwerte rein, rechts kommen Gas, Lenkung und Lampe raus. Da
         <span class="key"><span class="lamp" style="background:var(--pos)"></span></span><span data-i18n="brain.positiv-bis">positiv (bis +1)</span>
         <span class="key"><span class="lamp" style="background:var(--neg)"></span></span><span data-i18n="brain.negativ-bis">negativ (bis −1)</span>
         <span class="key" data-set-only hidden><span class="line-key" style="border-color:var(--c4);border-top-width:4px"></span></span><span data-i18n="brain.aufmerksamkeit-dick-zaehlt-gerade" data-set-only hidden>Aufmerksamkeit: dick = zählt gerade viel (auch in der Kreuzung)</span>
+        <span class="key" data-mem-only hidden><span class="lamp" style="background:var(--pos)"></span><span class="lamp" style="background:var(--neg)"></span></span><span data-i18n="brain.legende-gedaechtnis" data-mem-only hidden>Gedächtnis: <span data-hm>16</span> Zahlen, die jedes Auto von Augenblick zu Augenblick mitnimmt</span>
         <span class="key"><span class="line-key" style="border-color:var(--muted)"></span></span><span data-i18n="brain.nur-die-staerksten-verbindungen">nur die stärksten Verbindungen</span>
       </div>
     </div>
@@ -48,6 +49,9 @@ Erst dann kommt die Mischung mit den eigenen Werten zusammen und es geht weiter 
   <li data-i18n="brain.aufmerksamkeit-heisst-hier-die"><b>Aufmerksamkeit</b> heißt hier: Die eigenen Werte stellen eine Frage („Wer ist für mich gerade wichtig?“), jeder Nachbar bringt eine Antwort mit,
     und je besser die passt, desto mehr zählt er. Eigentlich sind es <span data-heads>4</span> solche Fragen gleichzeitig; die Balken zeigen den Durchschnitt.
     In der Kreuzung siehst du dieselben Nachbarn mit Nummer – je dicker die gelbe Linie, desto mehr Aufmerksamkeit. Fahre über einen Nachbarn im Bild, um ihn zu markieren.</li>
+  <li data-i18n="brain.gedaechtnis-li" data-mem-only hidden><b>Gedächtnis.</b> Jedes Auto trägt <span data-hm>16</span> eigene Zahlen von Augenblick zu Augenblick weiter. Wenn es auftaucht, stehen sie auf 0.
+    Bei jedem Schritt liest das Gedächtnis die eigenen Werte, die Mischung der Nachbarn und seinen vorigen Stand und gibt das Ergebnis mit in die nächste Schicht.
+    Was es sich merkt, hat das Gehirn selbst gelernt. Ohne Gedächtnis stehen die Autos bei 120 Autos pro Minute mehr als doppelt so lange verkeilt.</li>
 </ul>
 </section>
 
@@ -56,7 +60,7 @@ Erst dann kommt die Mischung mit den eigenen Werten zusammen und es geht weiter 
 <ul class="plain">
   <li data-i18n="brain.jedes-neuron-rechnet-dasselbe">Jedes Neuron rechnet dasselbe: Es nimmt die Werte davor, multipliziert jeden mit einem <b>Gewicht</b>, zählt alles zusammen und
     drückt das Ergebnis auf einen Wert zwischen −1 und +1 (blau positiv, orange negativ).</li>
-  <li data-i18n="brain.insgesamt-hat-das-netz">Insgesamt hat das Netz <b id="brain-params">2 788</b> Gewichte. <b>Das ist alles, was das Auto „weiß“.</b> Am Anfang sind es Zufallszahlen;
+  <li data-i18n="brain.insgesamt-hat-das-netz">Insgesamt hat das Netz <b id="brain-params">2 788</b> Gewichte. <b>Das ist alles, was das Auto gelernt hat.</b> Am Anfang sind es Zufallszahlen;
     das Training dreht so lange an ihnen, bis das Auto vernünftig fährt.</li>
   <li data-i18n="brain.gezeichnet-sind-nur-die">Gezeichnet sind nur die stärksten Verbindungen – in Wahrheit hängt jedes Neuron an allen der vorigen Schicht.</li>
   <li data-i18n="brain.alle-autos-eines-trainingslaufs"><b>Alle Autos eines Trainingslaufs teilen dasselbe Gehirn.</b> Sie unterscheiden sich nur darin, was sie gerade sehen. Tippe verschiedene Autos an –
@@ -67,14 +71,14 @@ Erst dann kommt die Mischung mit den eigenen Werten zusammen und es geht weiter 
 <p><a data-i18n="brain.weiter-wie-lernen-die" href="lernen.html">Weiter: Wie lernen die Autos? →</a></p>
 <footer data-i18n="footer">Smart Crossing – ein Hobbyprojekt. Alles läuft direkt in deinem Browser, es werden keine Daten gesammelt. Stand: 2026-10-25. <a href="https://github.com/Sipsipl/smartcrossing">Code auf GitHub</a></footer>
 </div>
-<script src="data/site-data.js?v=57e10591"></script>
-<script src="js/i18n-de.js?v=57e10591"></script>
-<script src="js/i18n-en.js?v=57e10591"></script>
-<script src="js/i18n.js?v=57e10591"></script>
-<script src="js/sim-config.js?v=57e10591"></script>
-<script src="js/sim.js?v=57e10591"></script>
-<script src="js/crossing.js?v=57e10591"></script>
-<script src="js/brain.js?v=57e10591"></script>
-<script src="js/pages.js?v=57e10591"></script>
+<script src="data/site-data.js?v=46c57a95"></script>
+<script src="js/i18n-de.js?v=46c57a95"></script>
+<script src="js/i18n-en.js?v=46c57a95"></script>
+<script src="js/i18n.js?v=46c57a95"></script>
+<script src="js/sim-config.js?v=46c57a95"></script>
+<script src="js/sim.js?v=46c57a95"></script>
+<script src="js/crossing.js?v=46c57a95"></script>
+<script src="js/brain.js?v=46c57a95"></script>
+<script src="js/pages.js?v=46c57a95"></script>
 </body>
 </html>

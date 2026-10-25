@@ -650,7 +650,7 @@
         return SCX.t("brain.d.phi", { what, v: v !== null ? SCX.t("brain.d.phi.v", { v: sgn(v), n: f + 1 }) : "" });
       }
       if (kind === "mix") return SCX.t("brain.d.mix", { n: +a + 1, val: tr ? ` = ${sgn(tr.pooled[+a])}` : "" });
-      if (kind === "mem") return SCX.t("brain.d.mem", { n: +a + 1, val: tr && tr.mem ? ` = ${sgn(tr.mem[+a])}` : "" });
+      if (kind === "mem") return SCX.t("brain.d.mem", { n: +a + 1, m: this.Hm, val: tr && tr.mem ? ` = ${sgn(tr.mem[+a])}` : "" });
       if (kind === "tr") return SCX.t("brain.d.layerneuron", { layer: +a + 1, n: +b + 1 }) + (tr ? ` = ${sgn(tr.trunk[+a][+b])}` : "");
       if (kind === "out") return SCX.t("brain.d.output", { name: this.layout.actions[+a], val: tr ? ` = ${sgn(tr.out[+a])}` : "" });
       return "";
