@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 
 from . import evalset
+from .gates import GATE_RATES
 from .jobs import append_jsonl
 from .protocol import ENVS, SECONDS, SELECT_DEMANDS, SELECTION_SEEDS
 
@@ -55,8 +56,7 @@ def aggregate(lines: list[dict], specs: list[str]) -> list[dict]:
 
         rows.append({"kind": "row", "ckpt": spec.removeprefix("policy:"),
                      "iter": int(m.group(1)) if (m := re.search(r"ckpt_(\d+)", spec)) else None,
-                     "safe_rate_feasible": g["safe_rate_feasible"], "stop_rate_feasible": g["stop_rate_feasible"],
-                     "block_stop_rate_feasible": g.get("block_stop_rate_feasible"),
+                     **{k: g.get(k) for k in GATE_RATES.values()},  # (older gate lines: no block cases)
                      "thr": {str(d): mean("throughput_per_min", d) for d in ds},
                      "crash": {str(d): mean("crash_cars_per_1000", d) for d in ds}})
     return rows

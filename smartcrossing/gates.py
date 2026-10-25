@@ -1,8 +1,8 @@
-"""Stop gate (measurement only, docs/PLAN.md Roadmap E): one car alone drives straight towards a
+"""Stop gate (measurement only, docs/PLAN.md Roadmap (E)): one car alone drives straight towards a
 standing obstacle on its path. Does it stop (or pass around it) without crashing?
 
 Cases (one env each, all in one batched Sim): start speed (SPEEDS) x gap (GAPS: centre-to-centre
-distance along the road, as runs/diag_rearend/solo_wreck.py; bumper gap = gap - CAR_LENGTH) x
+distance along the road; bumper gap = gap - CAR_LENGTH) x
 position of the obstacle (POSITIONS: on the arm, at the box mouth, in the box) x obstacle type
 (wreck / parked; since 2026-10-24 both show hazard lights = not a participant, so the two kinds only differ
 in the drawing; earlier gate numbers had parked cases without hazard) x distractors (0 or N_DISTRACT wrecks on the
@@ -13,7 +13,7 @@ to a standstill before the obstacle, no crash afterwards), passed (got past it w
 without crash), other (none of these, e.g. still creeping). A case is `feasible` when full braking
 from the first step stops the car in front of the obstacle.
 
-Block cases (round 8, reported separately as block_*; the cases above and their rates are unchanged): the same
+Block cases (blockade scenarios, round 7; reported separately as block_*; the cases above and their rates are unchanged): the same
 car in front of a blockade (sim.block_pose: BLOCK_BODIES bodies crosswise across the full road width, both
 directions) at BLOCK_POS, speeds x gaps x types x the car's lateral start (BLOCK_LATS: middle of the right half,
 next to the centre line). Nothing can be passed: the only safe outcome is stopping.
@@ -52,6 +52,10 @@ STOP_V = 0.1  # m/s: standstill
 OUTCOMES = ("stopped", "passed", "crash", "offroad", "other")
 BLOCK_POS = -19.0  # blockade line (canonical y; on the straight arm: |y| >= W + Rc + BLOCK_CURB_MARGIN)
 BLOCK_LATS = (0.5, 0.2)  # car's lateral start as a fraction of W (3.5 m / 1.4 m right of the centre line)
+# the headline rates of the gate (site short name -> summary key; select rows, site gate numbers)
+GATE_RATES = {"safe": "safe_rate_feasible", "stop": "stop_rate_feasible", "block": "block_stop_rate_feasible"}
+# the summary fields a training eval line keeps (ppo.eval_job, eval.jsonl "gate")
+GATE_KEYS = ("stop_rate_feasible", "safe_rate_feasible", "stop_rate", "crash", "offroad", "block_stop_rate_feasible")
 
 
 def cases():
@@ -64,6 +68,15 @@ def cases():
 def block_cases():
     return [dict(v0=v0, gap=gap, pos="block", kind=kind, distract=0, lat=lat)
             for v0, gap, kind, lat in itertools.product(SPEEDS, GAPS, TYPES, BLOCK_LATS)]
+
+
+def block_u(cfg: SimConfig, dist: float) -> np.ndarray:
+    """Uniforms u (8,) for sim.block_pose that put the blockade line on arm 0 at ``dist`` m from the centre (the
+    inverse of block_pose's u5 mapping; u3 = 0: arm 0, u6 = 0: canonical heading pi)."""
+    r0 = cfg.W + cfg.Rc + BLOCK_CURB_MARGIN
+    u = np.zeros(8)
+    u[5] = (dist - r0) / (cfg.L - OBSTACLE_ARM_END - r0)
+    return u
 
 
 def braking_distance(cfg: SimConfig, v0: float) -> float:
@@ -95,10 +108,8 @@ def setup(sim: Sim, cs: list[dict]):
         sim.x[b, 0], sim.y[b, 0], sim.th[b, 0], sim.v[b, 0] = lat, y0, np.pi / 2, c["v0"]
         sim.arm[b, 0], sim.man[b, 0], sim.uid[b, 0] = 0, STRAIGHT, b
         parked = c["kind"] == "parked"
-        if c["pos"] == "block":  # sim.block_pose on arm 0 at distance -BLOCK_POS (u3 = 0: arm 0)
-            u = np.zeros(8)
-            u[5] = (-BLOCK_POS - (cfg.W + cfg.Rc + BLOCK_CURB_MARGIN)) / (cfg.L - OBSTACLE_ARM_END - (cfg.W + cfg.Rc + BLOCK_CURB_MARGIN))
-            bx, by, bth = block_pose(cfg, u)
+        if c["pos"] == "block":  # sim.block_pose on arm 0 at distance -BLOCK_POS
+            bx, by, bth = block_pose(cfg, block_u(cfg, -BLOCK_POS))
             slots = [(1 + j, bx[j], by[j], bth[j], parked) for j in range(BLOCK_BODIES)]
         else:
             slots = [(1, lat, yo, OBST_HEADING[c["pos"]], parked)]

@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 
 from smartcrossing import gates
-from smartcrossing.sim import act_dim
+from smartcrossing.sim import BLOCK_BODIES, SimConfig, act_dim, block_pose
 
 ROOT = Path(__file__).resolve().parents[1]
 ROUND1 = ROOT / "results" / "round1_x3.npz"
@@ -88,3 +88,13 @@ def test_cli_gate_writes_cases_json(tmp_path, monkeypatch, capsys):
     assert summary["cases"] == 108 and len(rows) == 108 + 36 and summary["stop_rate_feasible"] == 1.0
     cli.main(["gate", "--driver", "brake"])  # without --out: no file, still the summary
     assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["cases"] == 108
+
+
+def test_block_u_round_trips_through_block_pose():
+    """gates.block_u inverts block_pose's distance mapping: the blockade line lies at the asked distance on arm 0
+    (canonical frame: south arm, y = -dist), bodies crosswise and spread over the full road width."""
+    for cfg in (SimConfig(), SimConfig(W=3.5)):
+        for dist in (-gates.BLOCK_POS, 25.0):
+            x, y, th = block_pose(cfg, gates.block_u(cfg, dist))
+            assert np.allclose(y, -dist) and len(x) == BLOCK_BODIES
+            assert np.allclose(np.abs(np.cos(th)), 1.0) and np.isclose(x.sum(), 0.0) and x.max() < cfg.W

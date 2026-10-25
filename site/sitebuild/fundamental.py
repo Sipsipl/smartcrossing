@@ -4,7 +4,7 @@ fundamental diagram + scatter cloud (read from the deadlock study's committed re
 import json
 import re
 
-from smartcrossing.gates import stop_gate
+from smartcrossing.gates import GATE_RATES, stop_gate
 
 from .bench import policy_driver
 from .context import Context
@@ -30,14 +30,13 @@ def gate_of(ctx: Context, cid: str | None) -> dict | None:
         else:
             payload = Brain(c["policy"]).payload()
             summary, _ = stop_gate(cid, c["physics"], driver=lambda sim: policy_driver(sim, payload))
-        ctx.gates[cid] = {"safe": summary["safe_rate_feasible"], "stop": summary["stop_rate_feasible"],
-                          "block": summary["block_stop_rate_feasible"], "cases": summary["feasible"]}
+        ctx.gates[cid] = {**{k: summary[key] for k, key in GATE_RATES.items()}, "cases": summary["feasible"]}
     return ctx.gates[cid]
 
 
 def gate_text(ctx: Context, text: str | None, cid: str | None) -> str | None:
     """Fill {safe} / {stop} / {block} (whole percent of the stop gate of checkpoint cid) in a run text."""
-    keys = ("safe", "stop", "block")
+    keys = tuple(GATE_RATES)
     if text is None or not any("{" + k + "}" in text for k in keys):
         return text
     g = gate_of(ctx, cid)
