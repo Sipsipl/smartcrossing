@@ -434,7 +434,7 @@ def test_exiting_car_needs_only_the_static_spawn_clearance(exit_static):
     """spawn_exit_static (default): a car leaving the map along the arm, outside the spawn corridor, ~10 m from
     the spawn line no longer blocks the spawn (the old rule charged it the new car's speed: 7 + 1.5 * 8 m)."""
     cfg = dataclasses.replace(SimConfig(), spawn_exit_static=exit_static)
-    assert SimConfig().spawn_exit_static
+    assert SimConfig().spawn_exit_static and SimConfig().n_slots == 40
     sim = exit_spawn_scene(cfg)
     sim.step(zeros(sim))
     assert sim.queue[0, 0] == (0 if exit_static else 1)

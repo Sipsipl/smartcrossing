@@ -121,7 +121,7 @@ class SimConfig:
     # crashes too (impact speed = its own speed) and becomes a wreck. 0 = crashed cars vanish at
     # once (the old behaviour). Off-road cars always vanish.
     wreck_time: float = 10.0
-    n_slots: int = 32
+    n_slots: int = 40  # 32 until 2026-10-28 (training has used 40 since round 7): one world for training and reports
     n_signal: int = 1  # dimensions of the free "light" signal (old checkpoints: 2)
     demand: float = 0.15  # arrivals per second per arm
     # if set (lo, hi): every traffic stream draws its own demand uniformly at reset

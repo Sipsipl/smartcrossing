@@ -11,7 +11,9 @@ Seeds by purpose:
 SELECTION_SEEDS = (1000, 2000, 3000)
 REPORT_SEEDS = (4000, 5000, 6000)
 
-# one bench run: envs x seconds in the default world (cli bench, evalset, select, site bench)
+# one bench run: envs x seconds in the default world (cli bench, evalset, select, site bench). The default world is
+# SimConfig() (n_slots 40 like the training runs since round 7, spawn_exit_static): every measurement builds its
+# config as SimConfig(**{**physics_or_cfg, "demand": d}), so it does not set world values itself.
 ENVS, SECONDS = 8, 120.0
 
 EVAL_DEMANDS = (0.05, 0.15, 0.3, 0.5)  # cli evalset (the standard eval)
