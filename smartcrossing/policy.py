@@ -174,7 +174,7 @@ class PolicyDriver:
         # sensors, the action interface and the world (geometry, grip) are part of what a policy
         # learned: run it with the values it was trained with (older checkpoints: the legacy
         # values, see policy_compat); all policies of one sim must share them. Traffic settings
-        # (spawn_right, wreck_time, demand) stay those of the given sim.
+        # (spawn_right, spawn_exit_static, wreck_time, n_slots, demand) stay those of the given sim.
         ifaces = []
         for p in paths:
             tc = load_npz(p)[2]

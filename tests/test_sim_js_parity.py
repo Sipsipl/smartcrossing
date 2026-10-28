@@ -24,6 +24,7 @@ from smartcrossing import policy_set
 from smartcrossing.policy import PolicyDriver, default_in_scale, export_json, init_params, layer_sizes, save_npz
 from smartcrossing import sim as simmod
 from smartcrossing.sim import LEFT, NARROW, RIGHT, STRAIGHT, Sim, SimConfig, act_dim, js_constants
+from conftest import exit_spawn_scene
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "tests" / "sim_js_parity_runner.js"
@@ -218,6 +219,10 @@ def edge_cases(cfg, tag=""):
             d = 20.0 + 0.37 * i  # distinct distances (no neighbour-order ties)
             place(full, n, c * lat + s_ * d, s_ * lat - c * d, hp + k * hp, 0.0, arm=k)
         cases.append(make_case(f"{tag}spawn_slots{'_right' if sr else ''}", full, a))
+    # spawn_exit_static: a car leaving along arm 0 outside the spawn corridor (blocks only under the old rule,
+    # i.e. in the legacy_ cases), and the same car standing heading in (blocks under both rules)
+    for sign, v in ((-1.0, 8.0), (1.0, 0.0)):
+        cases.append(make_case(f"{tag}spawn_exiting{'_in' if sign > 0 else ''}", exit_spawn_scene(cfg, sign, v), a))
     # grip limit: fast cars steering hard (curvature clipped to a_lat_max / v^2), a slow one
     # (kappa_max wins), and a head-on crash pair at speed (impact-speed penalty)
     gp = Sim(dataclasses.replace(cfg, demand=0.0), 1, seed=2)
@@ -297,7 +302,7 @@ def parity(tmp_path_factory):
     # short wrecks (many appear and vanish within the trajectory)
     cases += trajectory_cases(7, dataclasses.replace(cfg, demand=0.5, wreck_time=0.8), n_steps=120)
     # the old checkpoints' interface and world: two lamps, acceleration feature, full-width spawning, no wrecks
-    legacy = dict(n_signal=2, brake_light=False, spawn_right=False, wreck_time=0.0)
+    legacy = dict(n_signal=2, brake_light=False, spawn_right=False, wreck_time=0.0, spawn_exit_static=False)
     cases += trajectory_cases(8, dataclasses.replace(cfg, demand=0.4, **legacy), n_steps=80)
     # more neighbour slots (set-encoder interface)
     cfg8 = dataclasses.replace(cfg, demand=0.6, n_neighbours=8)
@@ -424,7 +429,7 @@ def test_generated_config(parity):
         assert ex[k] == getattr(simmod, k), k
     assert ex["DONE"] == {name: i for i, name in enumerate(simmod.DONE_NAMES)}
     for k in ("SPAWN_LAT_MARGIN", "SPAWN_BACK", "SPAWN_CURB_GAP", "SPAWN_RIGHT_MIN", "SPAWN_LAT_STEP",
-              "SPAWN_MAX_PER_STEP", "SPEED_TAU", "N_RAYS",
+              "SPAWN_MAX_PER_STEP", "SPEED_TAU", "N_RAYS", "EXIT_COS",
               "LANE_WIDTH", "OBS_RAYS"):
         assert cfg[k] == getattr(simmod, k), k
 
@@ -447,6 +452,10 @@ def test_case_coverage(parity):
     lit = np.concatenate([np.asarray(c["expect"]["obs"])[:, simmod.OBS_DIM + 7::simmod.NB_FEATURES + 1].ravel() for c in brake])
     haz = np.concatenate([np.asarray(c["expect"]["obs"])[:, simmod.OBS_DIM + 8::simmod.NB_FEATURES + 1].ravel() for c in brake])
     assert (lit == 1).any() and (haz == 1).any()
+    # spawn_exit_static: the exiting car blocks the spawn only under the old rule (legacy_ cases)
+    spawned = {c["name"]: c["expect"]["state"]["stats"]["spawned"] - c["state"]["stats"]["spawned"] for c in parity["cases"]}
+    assert spawned["spawn_exiting"] == 1 and spawned["legacy_spawn_exiting"] == 0
+    assert spawned["spawn_exiting_in"] == spawned["legacy_spawn_exiting_in"] == 0
 
 
 def test_observe_parity(parity):

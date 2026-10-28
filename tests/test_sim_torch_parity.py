@@ -11,7 +11,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from conftest import CUDA, DEVICES  # noqa: E402
+from conftest import CUDA, DEVICES, exit_spawn_scene  # noqa: E402
 from smartcrossing.sim import BLOCK_BODIES, STAT_NAMES, Sim, SimConfig, act_dim  # noqa: E402
 from smartcrossing.sim_torch import TorchSim  # noqa: E402
 
@@ -44,10 +44,11 @@ def _close(name, t, ref, mask=None, tol=TOL):
     dict(n_slots=16, demand=0.5, wreck_time=1.0, n_scenarios=2),
     # the legacy interface / world of the old checkpoints
     dict(n_slots=12, demand=0.4, v_reverse=0.0, max_age=12.0, n_scenarios=3, n_signal=2, brake_light=False,
-         spawn_right=False, wreck_time=0.0),
+         spawn_right=False, wreck_time=0.0, spawn_exit_static=False),
     # round 2: crash cost by own impact speed + obstacle scenarios (wrecks and parked cars) in half the envs
+    # (obstacle_time 5: with 3 s the run had no obstacle hit any more after the spawn exit rule)
     dict(n_slots=24, r_time=0.02, demand_range=(0.2, 0.5), crash_cost_speed="own", obstacle_envs=0.5,
-         obstacle_rate=2.0, obstacle_time=3.0, obstacle_max=3,
+         obstacle_rate=2.0, obstacle_time=5.0, obstacle_max=3,
          wreck_time=5.0),  # (long wrecks block the traffic so much that no obstacle gets hit in the short run)
     # blockade scenarios (round 7): blockades (full road width, several bodies at once) in half of the placements
     dict(n_slots=32, r_time=0.02, demand_range=(0.2, 0.5), obstacle_envs=0.5, obstacle_rate=2.0, obstacle_time=3.0,
@@ -197,3 +198,24 @@ def test_every_obstacle_shows_hazard_in_torch_obs():
     for k in range(2):
         f = o_t[OBS_DIM + k * blk: OBS_DIM + (k + 1) * blk]
         assert f[5] == 1 and f[8] == 1 and f[7] == 0 and f[NB_FEATURES:].sum() == 0
+
+
+@pytest.mark.parametrize("exit_static", [True, False])
+def test_exiting_car_spawn_rule_matches_numpy(exit_static):
+    """cfg.spawn_exit_static: an exiting car outside the corridor blocks the spawn only under the old rule
+    (same state copied into TorchSim; one step; same spawns)."""
+    cfg = SimConfig(spawn_exit_static=exit_static)
+    ref = exit_spawn_scene(cfg)
+    ts = TorchSim(ref.cfg, 1, seed=0, rng="numpy")
+    for name in ("alive", "x", "y", "th", "v", "arm", "man", "uid", "_prev_dist", "queue", "_qbuf", "_qhead"):
+        cur = getattr(ts, name)
+        setattr(ts, name, torch.tensor(np.asarray(getattr(ref, name)), dtype=cur.dtype))  # a copy
+    ts.next_uid = ref.next_uid
+    act = np.zeros((1, cfg.n_slots, act_dim(cfg)))
+    ref.step(act)
+    ts.step(torch.as_tensor(act))
+    assert int(ref.queue[0, 0]) == (0 if exit_static else 1)
+    for name in ("queue", "alive", "uid", "arm"):
+        assert np.array_equal(getattr(ts, name).numpy(), getattr(ref, name)), name
+    for name in ("x", "y", "th", "v"):
+        np.testing.assert_allclose(getattr(ts, name).numpy(), getattr(ref, name), rtol=0, atol=TOL)

@@ -1,6 +1,9 @@
+import dataclasses
+
 import numpy as np
 import pytest
 
+from conftest import exit_spawn_scene
 from smartcrossing.baselines import LaneDriver
 from smartcrossing.sim import (
     DONE_CRASH,
@@ -424,6 +427,21 @@ def test_spawn_falls_back_to_a_clear_spot():
     assert new.sum() == 1 and sim.queue[0, 0] == 0
     x = sim.x[0][new][0]
     assert x < lats[-1] - 5.0  # entered at the rightmost clear spot instead of waiting
+
+
+@pytest.mark.parametrize("exit_static", [True, False])
+def test_exiting_car_needs_only_the_static_spawn_clearance(exit_static):
+    """spawn_exit_static (default): a car leaving the map along the arm, outside the spawn corridor, ~10 m from
+    the spawn line no longer blocks the spawn (the old rule charged it the new car's speed: 7 + 1.5 * 8 m)."""
+    cfg = dataclasses.replace(SimConfig(), spawn_exit_static=exit_static)
+    assert SimConfig().spawn_exit_static
+    sim = exit_spawn_scene(cfg)
+    sim.step(zeros(sim))
+    assert sim.queue[0, 0] == (0 if exit_static else 1)
+    # a car standing in the arm, heading in (queued in the lane being joined), still blocks under both rules
+    sim = exit_spawn_scene(cfg, heading_sign=1.0, v=0.0)
+    sim.step(zeros(sim))
+    assert sim.queue[0, 0] == 1
 
 
 def test_arrival_fifo_growth_keeps_the_queue_order():

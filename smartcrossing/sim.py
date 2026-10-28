@@ -40,6 +40,8 @@ SPAWN_CURB_GAP = 1.2  # lateral spawn offsets keep this distance to the road edg
 SPAWN_RIGHT_MIN = 1.0  # spawn_right: smallest offset right of the centre line
 SPAWN_LAT_STEP = 0.2  # spacing (m) of the candidate lateral spawn offsets
 SPAWN_MAX_PER_STEP = 3  # at most this many cars enter per arm and step (side by side)
+EXIT_HEADING = np.pi / 4  # cfg.spawn_exit_static: heading at most this far off an arm's outward direction = exiting
+EXIT_COS = float(np.cos(EXIT_HEADING))
 SPEED_TAU = 0.5  # s, time constant of the legacy speed_control interface
 OBSTACLE_ARM_END = 20.0  # arm obstacles stay at least this far inside the arm end (room after spawning)
 OBSTACLE_BOX_MARGIN = 1.0  # box obstacles: centre within |x|, |y| <= W - margin
@@ -108,6 +110,11 @@ class SimConfig:
     # existing one in its lateral corridor (no spawns head-on into exiting cars or
     # into the back of a queue)
     spawn_headway: float = 1.5
+    # exiting cars (owner 2026-10-28): a car outside the new car's lateral corridor that drives out of the map
+    # along this arm (heading within EXIT_HEADING of the arm's outward direction, not a wreck) needs only the
+    # static spawn_clearance; any other car outside the corridor is charged the new car's own speed (it may be
+    # queued in the lane being joined). False = the old rule (exiting cars blocked the spawn ~2 s each).
+    spawn_exit_static: bool = True
     max_age: float = 60.0  # cars older than this are removed (counted as timeout)
     # wrecks: cars of a car-car crash stay this long (s) as standing obstacles (speed 0, no control,
     # no reward, hazard lights on; their episode ends at the crash). A moving car that hits a wreck
@@ -200,6 +207,7 @@ def js_constants() -> dict:
         "DISC_OFFSETS": DISC_OFFSETS.tolist(), "DISC_R": DISC_R, "SPAWN_LAT_MARGIN": SPAWN_LAT_MARGIN,
         "SPAWN_BACK": SPAWN_BACK, "SPAWN_CURB_GAP": SPAWN_CURB_GAP, "SPAWN_RIGHT_MIN": SPAWN_RIGHT_MIN,
         "SPAWN_LAT_STEP": SPAWN_LAT_STEP, "SPAWN_MAX_PER_STEP": SPAWN_MAX_PER_STEP, "SPEED_TAU": SPEED_TAU,
+        "EXIT_COS": EXIT_COS,
         "CAR_LENGTH": CAR_LENGTH, "CAR_WIDTH": CAR_WIDTH, "HAZARD_PERIOD": HAZARD_PERIOD,
         "N_RAYS": N_RAYS, "RAY_ANGLES": RAY_ANGLES.tolist(), "RAY_RANGE": RAY_RANGE,
         "K_NEIGHBOURS": K_NEIGHBOURS, "NEIGHBOUR_RANGE": NEIGHBOUR_RANGE, "POS_SCALE": POS_SCALE,
@@ -408,6 +416,13 @@ def spawn_lats(cfg: SimConfig) -> np.ndarray:
     hi = cfg.W - SPAWN_CURB_GAP
     m = max(int(round((hi - lo) / SPAWN_LAT_STEP)), 1)
     return lo + (hi - lo) * np.arange(m + 1) / m
+
+
+def exiting_mask(h, alive, th):
+    """Driving cars (alive, not wrecks) heading within EXIT_HEADING of the outward direction of the arm whose
+    incoming heading is h: they are leaving the map along that arm (cfg.spawn_exit_static). sim_torch and
+    sim.js use the same formula."""
+    return alive & (-(np.cos(h) * np.cos(th) + np.sin(h) * np.sin(th)) > EXIT_COS)
 
 
 def spawn_points(cfg: SimConfig) -> list:
@@ -810,9 +825,10 @@ class Sim:
             self.stats.obstacles[b] += 1
 
     # ------------------------------------------------------------------ spawning
-    def _spawn_clear(self, sx, sy, h, x, y, vx, vy, alive):
+    def _spawn_clear(self, sx, sy, h, x, y, vx, vy, alive, exiting=None):
         """(b, M) whether candidate spawn points (sx, sy) (M,) with heading h keep the spawn
-        clearance (+ closing-speed headway) to every car (x, y, vx, vy, alive: (b, N))."""
+        clearance (+ closing-speed headway) to every car (x, y, vx, vy, alive: (b, N)); exiting (b, N):
+        cars leaving along this arm (exiting_mask), static clearance only outside the corridor."""
         cfg = self.cfg
         dx, dy = x[:, None, :] - sx[:, None], y[:, None, :] - sy[:, None]
         dist = np.hypot(dx, dy)
@@ -824,6 +840,8 @@ class Sim:
         # outside the new car's lateral corridor only its own speed counts (the other
         # car is treated as standing: it may be queued in the lane the new car joins)
         own = np.maximum(cfg.spawn_speed * (ch * dx + sh * dy) / dd, 0.0)
+        if exiting is not None:  # cfg.spawn_exit_static: a car leaving the map is not queued in the lane
+            own = np.where(exiting[:, None, :], 0.0, own)
         lat_off = np.abs(-sh * dx + ch * dy)
         closing = np.where(lat_off < 2 * DISC_R + SPAWN_LAT_MARGIN, closing, own)
         return ((dist > cfg.spawn_clearance + cfg.spawn_headway * closing) | ~alive[:, None, :]).all(-1)
@@ -859,6 +877,7 @@ class Sim:
         lats = spawn_lats(cfg)
         for k, (px, py, h, hn) in enumerate(spawn_points(cfg)):
             mx, my, half = px.mean(), py.mean(), 0.5 * (lats[-1] - lats[0])
+            exiting = exiting_mask(h, self.alive, self.th) if cfg.spawn_exit_static else None
             for _ in range(SPAWN_MAX_PER_STEP):
                 b = np.nonzero((self.queue[:, k] > 0) & (~occ).any(1))[0]
                 if len(b) == 0:
@@ -873,7 +892,8 @@ class Sim:
                 else:
                     idx = np.argsort(~near, axis=1, kind="stable")[:, :K]
                     g = lambda a: np.take_along_axis(a, idx, 1)  # noqa: E731
-                    clear = self._spawn_clear(px, py, h, g(self.x[b]), g(self.y[b]), g(vx[b]), g(vy[b]), g(near))
+                    clear = self._spawn_clear(px, py, h, g(self.x[b]), g(self.y[b]), g(vx[b]), g(vy[b]), g(near),
+                                              None if exiting is None else g(exiting[b]))
                 cnt = clear.sum(1)
                 ok = cnt > 0
                 if not ok.any():

@@ -47,7 +47,9 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
   Kinematic unicycle with curvature, steering-rate and grip limits, dt=0.1 s. Cars spawn at a
   random lateral offset on the right half of the road in driving direction (`spawn_right`, default
   for baselines and learners; own spot if clear, else uniform among the clear spots; up to 3 per arm
-  and step, side by side), must exit through target arm. Crashed cars stay 10 s as wrecks (was 5 s until round 7) (hazard
+  and step, side by side; spawn clearance 7 m + 1.5 s x closing speed, a car outside the new car's
+  corridor counts as standing unless it is leaving along that arm: then 7 m only, `spawn_exit_static`
+  since 2026-10-28, before that exiting cars blocked the spawn ~2 s each), must exit through target arm. Crashed cars stay 10 s as wrecks (was 5 s until round 7) (hazard
   lights, driving into one = crash). Car-car collision via
   3 discs per car, off-road via rounded-corner distance. Removal on crash/offroad/exit/timeout.
   Observations are mirror-neutral: own state in a canonical frame (entry arm = south; position

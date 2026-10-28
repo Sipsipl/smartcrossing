@@ -187,7 +187,8 @@ def test_wreck_time_zero_reproduces_the_old_behaviour():
     interface and the baselines, wreck_time = 0, full-width spawning."""
     ref = json.loads((ROOT / "tests" / "data" / "legacy_behaviour.json").read_text(encoding="utf-8"))
     for name, r in ref.items():
-        legacy = {"wreck_time": 0.0, "n_signal": r["n_signal"]}
+        # the world of 27a54b2: also 32 slots and the old spawn rule for exiting cars
+        legacy = {"wreck_time": 0.0, "n_signal": r["n_signal"], "n_slots": 32, "spawn_exit_static": False}
         if name == "brain":
             legacy["spawn_right"] = False
         sim = Sim(SimConfig(demand=r["demand"], **legacy), r["B"], seed=r["seed"])
