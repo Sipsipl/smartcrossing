@@ -76,7 +76,7 @@ def test_build_texts_have_english():
     for run, e in STEP_INFO.items():
         assert set(e) == {"de", "en"} and e["de"] and e["en"] and ph(e["de"]) == ph(e["en"]), run
     assert all(run_info(r)["note_en"] and run_info(r)["label_en"] for r in RUN_INFO)
-    info = run_info("r8_M_s1", lambda s: s and s.replace("{stop}", "70").replace("{safe}", "99").replace("{block}", "100"))
+    info = run_info("r9_E_s1", lambda s: s and s.replace("{stop}", "70").replace("{safe}", "99").replace("{block}", "100"))
     assert "70 %" in info["step"] and "70%" in info["step_en"] and "{" not in info["note"] + info["note_en"]
     assert run_info("unknown_run") == {"short": "unknown_run", "label": "unknown_run", "label_en": "unknown_run",
                                        "note": None, "note_en": None, "step": None, "step_en": None}

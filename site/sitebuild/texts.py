@@ -513,17 +513,14 @@ RUN_INFO = {
     "r8_M_s1": {
         "short": "R8",
         "de": ("Runde 8: Gedächtnis",
-               "Das aktuelle Gehirn: das Gehirn aus Runde 7 mit einem Gedächtnis aus 16 Zahlen pro Auto, das von "
-               "Augenblick zu Augenblick weitergegeben wird. Am Anfang ist es leer und ändert nichts am Fahren; "
-               "in 300 Lernschritten mit dem Rezept aus Runde 7 hat das Gehirn gelernt, es zu nutzen. Gewählt ist "
-               "der letzte Stand (Schritt 1398). Vor einer Sperre hält es in {block} % der Fälle an. Vor einem "
-               "einzelnen Hindernis kommt es zu {safe} % unfallfrei vorbei und hält in rund {stop} % davor an."),
+               "Das Hauptgehirn bis Runde 9: das Gehirn aus Runde 7 mit einem Gedächtnis aus 16 Zahlen pro Auto, "
+               "das von Augenblick zu Augenblick weitergegeben wird. Am Anfang ist es leer und ändert nichts am "
+               "Fahren; in 300 Lernschritten mit dem Rezept aus Runde 7 hat das Gehirn gelernt, es zu nutzen. "
+               "Gewählt ist der letzte Stand (Schritt 1398)."),
         "en": ("Round 8: memory",
-               "The current brain: the round 7 brain with a memory of 16 numbers per car, passed on from moment "
-               "to moment. At first it is empty and changes nothing about the driving; in 300 learning steps with "
-               "the round 7 recipe the brain learned to use it. The last step (step 1398) is chosen. In front of a "
-               "blockade it stops in {block}% of cases. In front of a single obstacle it gets past without a crash "
-               "in {safe}% of cases and stops in front of it in about {stop}%."),
+               "The main brain up to round 9: the round 7 brain with a memory of 16 numbers per car, passed on "
+               "from moment to moment. At first it is empty and changes nothing about the driving; in 300 learning "
+               "steps with the round 7 recipe the brain learned to use it. The last step (step 1398) is chosen."),
     },
     "r8_M_s2": {
         "short": "R8'",
@@ -546,6 +543,32 @@ RUN_INFO = {
                "The same number of learning steps with the same recipe, but without memory: also better than "
                "round 7, yet in very dense traffic fewer cars get through than with memory, and the cars stand "
                "wedged almost twice as long."),
+    },
+    "r9_E_s1": {
+        "short": "R9",
+        "de": ("Runde 9: mehr Platz an den Rändern",
+               "Das aktuelle Gehirn: das Gehirn aus Runde 8 hat in einer verbesserten Welt weitertrainiert. Vorher "
+               "hielten Autos, die die Karte verlassen, neue Autos oft vom Auftauchen ab, obwohl die Straße frei "
+               "genug war; jetzt brauchen ausfahrende Autos nur noch den festen Mindestabstand, und bis zu 40 statt "
+               "32 Autos passen auf die Karte. Gewählt ist ein Zwischenstand (Schritt 1550). Vor einer Sperre hält "
+               "es in {block} % der Fälle an. Vor einem einzelnen Hindernis kommt es zu {safe} % unfallfrei vorbei "
+               "und hält in rund {stop} % davor an."),
+        "en": ("Round 9: more room at the edges",
+               "The current brain: the round 8 brain trained on in an improved world. Before, cars leaving the map "
+               "often kept new cars from appearing although the road was clear enough; now exiting cars need only "
+               "the fixed minimum gap, and up to 40 instead of 32 cars fit on the map. An intermediate step "
+               "(step 1550) is chosen. In front of a blockade it stops in {block}% of cases. In front of a single "
+               "obstacle it gets past without a crash in {safe}% of cases and stops in front of it in about "
+               "{stop}%."),
+    },
+    "r9_E_s2": {
+        "short": "R9'",
+        "de": ("Runde 9: zweiter Lauf",
+               "Anderer Zufallsstart, dieselbe verbesserte Welt: ebenfalls weniger Unfälle bei sehr "
+               "dichtem Verkehr als das Gehirn aus Runde 8, etwas weniger Durchsatz als der gewählte Lauf."),
+        "en": ("Round 9: second run",
+               "Different random start, the same improved world: also fewer crashes in very dense traffic than "
+               "the round 8 brain, slightly less throughput than the chosen run."),
     },
 }
 
@@ -657,11 +680,17 @@ STEP_INFO = {
     },
     "r8_M_s1": {
         "de": ("Gedächtnis dazu: 16 Zahlen pro Auto, die von Augenblick zu Augenblick weitergehen → bei sehr "
-               "dichtem Verkehr mehr Autos durch und nur noch halb so lange verkeilt; vor einer Sperre hält es "
-               "in {block} % der Fälle an, vor einem einzelnen Hindernis in etwa {stop} %"),
+               "dichtem Verkehr mehr Autos durch und nur noch halb so lange verkeilt; das Hauptgehirn bis Runde 9"),
         "en": ("Memory added: 16 numbers per car, carried from moment to moment → in very dense traffic more "
-               "cars through and wedged for only half as long; it stops in front of a blockade in {block}% "
-               "of cases, in front of a single obstacle in about {stop}%"),
+               "cars through and wedged for only half as long; the main brain up to round 9"),
+    },
+    "r9_E_s1": {
+        "de": ("Ausfahrende Autos blockieren das Auftauchen neuer Autos nicht mehr, bis zu 40 Autos auf der "
+               "Karte; weitertrainiert, ein Zwischenstand → bei sehr dichtem Verkehr deutlich weniger Unfälle; "
+               "vor einer Sperre hält es in {block} % der Fälle an, vor einem einzelnen Hindernis in etwa {stop} %"),
+        "en": ("Exiting cars no longer block new cars from appearing, up to 40 cars on the map; trained on, an "
+               "intermediate step → far fewer crashes in very dense traffic; it stops in front of a blockade in "
+               "{block}% of cases, in front of a single obstacle in about {stop}%"),
     },
 }
 

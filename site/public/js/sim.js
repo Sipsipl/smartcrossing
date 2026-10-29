@@ -25,7 +25,7 @@
   "use strict";
   if (!C) throw new Error("SC_SIM_CONFIG missing: load js/sim-config.js before sim.js");
 
-  const { RIGHT, STRAIGHT, LEFT, DISC_OFFSETS, DISC_R, SPAWN_LAT_MARGIN, SPAWN_BACK, SPAWN_CURB_GAP, SPAWN_RIGHT_MIN, SPAWN_LAT_STEP, SPAWN_MAX_PER_STEP } = C;
+  const { RIGHT, STRAIGHT, LEFT, DISC_OFFSETS, DISC_R, SPAWN_LAT_MARGIN, SPAWN_BACK, SPAWN_CURB_GAP, SPAWN_RIGHT_MIN, SPAWN_LAT_STEP, SPAWN_MAX_PER_STEP, EXIT_COS } = C;
   const { SPEED_TAU, N_RAYS, RAY_ANGLES, RAY_RANGE, CAR_LENGTH, CAR_WIDTH, HAZARD_PERIOD } = C;
   const { K_NEIGHBOURS, NEIGHBOUR_RANGE, POS_SCALE, GOAL_SCALE, NB_FEATURES, NB_FEATURES_LEGACY, BRAKE_ACC, LANE_WIDTH, OBS_DIM, OBS_RAYS, ARM_U } = C;
   // why a slot was cleared in the last step (sim.doneKind): { none: 0, exit: 1, ... }
@@ -545,7 +545,9 @@
               const dd = Math.max(dist, 1e-6);
               const rvx = cfg.spawn_speed * ch - vx[j], rvy = cfg.spawn_speed * sh - vy[j];
               let closing = Math.max((rvx * dx + rvy * dy) / dd, 0.0);
-              const own = Math.max((cfg.spawn_speed * (ch * dx + sh * dy)) / dd, 0.0);
+              let own = Math.max((cfg.spawn_speed * (ch * dx + sh * dy)) / dd, 0.0);
+              // spawn_exit_static: a driving car leaving the map along this arm needs only the static clearance
+              if (cfg.spawn_exit_static && this.alive[j] && -(ch * Math.cos(this.th[j]) + sh * Math.sin(this.th[j])) > EXIT_COS) own = 0.0;
               const latOff = Math.abs(-sh * dx + ch * dy);
               if (!(latOff < 2 * DISC_R + SPAWN_LAT_MARGIN)) closing = own;
               if (!(dist > cfg.spawn_clearance + cfg.spawn_headway * closing)) { ok = 0; break; }

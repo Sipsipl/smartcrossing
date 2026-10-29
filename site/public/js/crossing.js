@@ -76,7 +76,6 @@
     // ---------------------------------------------------------------- setup
     newSim() {
       const cfg = SC.defaultConfig();
-      cfg.n_slots = 32;
       Object.assign(cfg, this._iface());
       this.sim = new SC.Sim(cfg, this.seed);
       this.crashMarks = [];
