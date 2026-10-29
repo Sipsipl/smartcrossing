@@ -323,7 +323,7 @@
       ? tx(prevHm ? "note.world" : Hm ? "note.mem" : "note.set", { Hm,
         K: m.policy.arch.K, midw: tx(vm), mid,
         dense: dense && vd ? tx("note.dense", { dw: tx(vd), dense }) : "",
-        thrw: tx("note.thr." + SCX.compare(thr, thrPrev, 2, SCX.THR_REL)), thr: num(thr, 0), thrprev: num(thrPrev, 0), dem: num(m.bench["0.5"].demand_per_min, 0),
+        thrw: tx("note.thr." + SCX.compare(thr, thrPrev, 2, SCX.THR_REL)), thr: num(thr, 0), thrprev: num(thrPrev, 0), crash5: crashPair("0.5"), dem: num(m.bench["0.5"].demand_per_min, 0),
         block: D.gate && D.gate.main ? pct(D.gate.main.block) : "?",
       })
       : tx("note.mlp", { much, mid });
