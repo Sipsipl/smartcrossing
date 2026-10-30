@@ -6,7 +6,7 @@
 <title data-i18n="learn.wie-lernen-die-autos">Wie lernen die Autos? – Smart Crossing</title>
 <meta data-i18n-attr="content=learn.meta-belohnung-strafe-wiederholung" name="description" content="Belohnung, Strafe, Wiederholung: wie selbstfahrende Autos durch Evolution und PPO lernen – mit Zeitreise durchs Training.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="css/site.css?v=64aab1b3">
+<link rel="stylesheet" href="css/site.css?v=12961b06">
 </head>
 <body data-page="lernen">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><marker id="ah" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker></defs></svg>
@@ -74,6 +74,13 @@ und bekommen Punkte für das Ergebnis: Ankommen gibt Plus, Unfall und Warten kos
 <ol id="chain-legend" class="phases small"></ol>
 <p data-i18n="learn.gemessen-beim-training-selbst" class="muted small">Gemessen beim Training selbst: Dort wird die Verkehrsmenge langsam gesteigert, sobald es gut läuft. Zwischen den Läufen haben sich auch Belohnung und Simulation geändert –
   die Kurve ist also eher ein Tagebuch als eine saubere Messung. Saubere Messungen stehen unter der Zeitreise.</p>
+<div id="capacity-part">
+<h3 data-i18n="learn.cap-h">Wie viele Autos kommen durch?</h3>
+<p data-i18n="learn.cap-text">Gespeicherte Zwischenstände, heute nachgemessen unter gleichen Bedingungen: Jeder Punkt ist ein Zwischenstand des Gehirns. Oben: wie viele Autos pro Minute durchkommen, wenn mehr ankommen, als die Kreuzung schafft (<span data-cap-thr>144</span> pro Minute). Unten: wie viele Sekunden ein Auto bei mittlerem Verkehr (<span data-cap-delay>72</span> pro Minute) länger braucht als auf freier Straße. Gestrichelt: Ampel und Verkehrsrechner.</p>
+<div id="capacity"></div>
+<div id="delay"></div>
+<p data-i18n="learn.cap-note" class="muted small">Gemessen ab der breiten Kreuzung, in der heutigen Welt: Ältere Zwischenstände fahren dabei mit Regeln, die sie nie trainiert haben (Wracks, Warnblinker, die neue Regel für ausfahrende Autos). Die Punkte zeigen also, wie sie die heutige Prüfung bestehen, nicht, wie gut sie damals waren. Je Punkt 8 Simulationen × 2 Minuten, Mittel über 3 Verkehrsläufe.</p>
+</div>
 
 <h2 data-i18n="learn.zeitreise">Zeitreise</h2>
 <p class="sub" data-i18n="learn.zeit-sub">Das Gehirn in verschiedenen Trainingsstufen</p>
@@ -98,16 +105,16 @@ und bekommen Punkte für das Ergebnis: Ankommen gibt Plus, Unfall und Warten kos
   </aside>
 </div>
 <p><a data-i18n="learn.weiter-wie-gut-sind" href="vergleich.html">Weiter: Wie gut sind sie im Vergleich? →</a></p>
-<footer data-i18n="footer">Smart Crossing – ein Hobbyprojekt. Alles läuft direkt in deinem Browser, es werden keine Daten gesammelt. Stand: 2026-10-29. <a href="https://github.com/Sipsipl/smartcrossing">Code auf GitHub</a></footer>
+<footer data-i18n="footer">Smart Crossing – ein Hobbyprojekt. Alles läuft direkt in deinem Browser, es werden keine Daten gesammelt. Stand: 2026-10-30. <a href="https://github.com/Sipsipl/smartcrossing">Code auf GitHub</a></footer>
 </div>
-<script src="data/site-data.js?v=64aab1b3"></script>
-<script src="js/i18n-de.js?v=64aab1b3"></script>
-<script src="js/i18n-en.js?v=64aab1b3"></script>
-<script src="js/i18n.js?v=64aab1b3"></script>
-<script src="js/sim-config.js?v=64aab1b3"></script>
-<script src="js/sim.js?v=64aab1b3"></script>
-<script src="js/crossing.js?v=64aab1b3"></script>
-<script src="js/charts.js?v=64aab1b3"></script>
-<script src="js/pages.js?v=64aab1b3"></script>
+<script src="data/site-data.js?v=12961b06"></script>
+<script src="js/i18n-de.js?v=12961b06"></script>
+<script src="js/i18n-en.js?v=12961b06"></script>
+<script src="js/i18n.js?v=12961b06"></script>
+<script src="js/sim-config.js?v=12961b06"></script>
+<script src="js/sim.js?v=12961b06"></script>
+<script src="js/crossing.js?v=12961b06"></script>
+<script src="js/charts.js?v=12961b06"></script>
+<script src="js/pages.js?v=12961b06"></script>
 </body>
 </html>

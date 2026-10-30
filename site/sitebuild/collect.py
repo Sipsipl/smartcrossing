@@ -2,6 +2,8 @@
 Zeitreise timelines, warm-start chains, learning curves and side notes, and the bench of all of them plus the
 rule-based drivers."""
 
+import numpy as np
+
 from smartcrossing.policy import default_in_scale, init_params, layer_sizes, unpack
 from smartcrossing.policy_compat import interface_cfg, physics_of
 from smartcrossing.protocol import SITE_DEMANDS
@@ -15,6 +17,9 @@ from .fundamental import gate_text
 from .texts import run_info as _run_info
 
 TIMELINE_DEMANDS = [0.05, 0.15]
+# throughput / delay along the learning curve (/lernen): checkpoints of the main brain's chain re-measured today
+CAPACITY_DEMANDS = {"thr": 0.6, "delay": 0.3}  # overload (144 cars/min): throughput; medium (72/min): delay per car
+CAPACITY_POINTS = 30
 GEOMETRY_KEYS = ("L", "W", "Rc", "a_lat_max", "v_reverse")  # the "world": same for all drivers compared
 REWARD_KEYS = ("r_exit", "r_wrong_exit", "r_crash", "r_crash_speed", "r_offroad", "r_offroad_speed", "r_timeout",
                "r_progress", "r_time", "r_queue", "crash_cost_speed", "L", "v_max", "spawn_speed", "max_age")
@@ -46,6 +51,36 @@ def choose(ctx: Context, main: list[str], quick: dict) -> dict:
         cid = resolve(ctx, spec)
         picked[ctx.found[cid]["method"]] = cid
     return picked
+
+
+def capacity_points(ctx: Context, chain: list, main_id: str, n_max: int = CAPACITY_POINTS) -> list[dict]:
+    """Checkpoints along the warm-start chain (run, offset) of the main brain in its world (older crossings
+    are left out: their brains cannot be measured fairly on today's), up to the main brain itself; a run's
+    checkpoints stop where the next run of the chain starts. At most n_max, evenly spaced; the main brain stays."""
+    found = ctx.found
+    main = found[main_id]
+    world = world_of(main["physics"])
+    off = dict(chain)
+    by_run = {}
+    for cid, c in found.items():
+        if c["run"] in off and c["gen"] is not None and world_of(c["physics"]) == world and "/abl_" not in cid:
+            by_run.setdefault(c["run"], []).append((off[c["run"]] + c["gen"], cid))
+    end = off[main["run"]] + main["gen"]
+    pts = []
+    runs = [r for r, _ in chain if r in by_run]
+    for i, run in enumerate(runs):
+        nxt = min(x for x, _ in by_run[runs[i + 1]]) if i + 1 < len(runs) else end + 1
+        pts += [(x, cid) for x, cid in by_run[run] if x < nxt and x <= end]
+    by_x = {}
+    for x, cid in sorted(pts):
+        if x not in by_x or cid == main_id:
+            by_x[x] = cid
+    pts = sorted(by_x.items())
+    if len(pts) > n_max:  # evenly spaced along the x axis (runs with many checkpoints would crowd it otherwise)
+        xs = np.array([x for x, _ in pts], dtype=float)
+        idx = {int(np.abs(xs - t).argmin()) for t in np.linspace(xs[0], xs[-1], n_max)}
+        pts = [pts[i] for i in sorted(idx)]
+    return [{"x": x, "id": cid} for x, cid in pts]
 
 
 def random_policy(physics: dict | None = None) -> dict:
@@ -92,7 +127,7 @@ def collect(ctx: Context, a) -> dict:
             }
         bench_entries.append((*pol_entry(c), demands))
 
-    timelines, curves, chains = {}, {}, {}
+    timelines, curves, chains, capacity = {}, {}, {}, []
     for method, cid in picked.items():
         use(cid, SITE_DEMANDS)
         parts = [cid]
@@ -115,6 +150,10 @@ def collect(ctx: Context, a) -> dict:
             curves.setdefault(method, {}).update(crv)
             shift = 1 + max([row["x"] for rows in crv.values() for row in rows] + [p["gen"] for p in pts_all] + [0])
         chains[method] = [{"run": r, "offset": off, "world": run_world(ctx, r), **run_info(ctx, r)} for r, off in chain_all]
+        if cid == main_id:
+            capacity = capacity_points(ctx, chain_all, main_id)
+            for p in capacity:
+                bench_entries.append((*pol_entry(found[p["id"]]), sorted(CAPACITY_DEMANDS.values())))
         for p in pts_all:
             use(p["id"], TIMELINE_DEMANDS)
         timelines[method] = pts_all
@@ -141,7 +180,7 @@ def collect(ctx: Context, a) -> dict:
         use(prev_id, SITE_DEMANDS)
     return {"picked": picked, "main_id": main_id, "hist_id": hist_id, "prev_id": prev_id,
             "policies": policies, "bench_entries": bench_entries, "timelines": timelines, "curves": curves,
-            "chains": chains, "others": others}
+            "chains": chains, "others": others, "capacity": capacity}
 
 
 def bench_all(ctx: Context, sel: dict, cfg: SimConfig, a) -> dict:
@@ -170,4 +209,8 @@ def bench_all(ctx: Context, sel: dict, cfg: SimConfig, a) -> dict:
         key = f"pol:{found[cid]['hash']}" if cid in found else "pol:random7"
         p["bench"] = res[key]
     by_world = {w: {drv: res[base_key(drv, w)] for drv in ("light", "reservation")} for w in base_worlds}
+    for p in sel["capacity"]:  # learning-curve points: throughput at overload, delay at medium traffic
+        r = res[f"pol:{found[p['id']]['hash']}"]
+        p["thr"] = r[str(CAPACITY_DEMANDS["thr"])]["throughput_per_min"]
+        p["delay"] = r[str(CAPACITY_DEMANDS["delay"])]["delay_mean_s"]
     return {"baselines_by_world": by_world, "main_world": main_world, "base_phys": base_worlds[main_world]}

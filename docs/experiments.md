@@ -1125,3 +1125,15 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
   retraining is the largest crash reduction at 120/min so far (35 -> 7 per 1000 on report seeds) and the deadlock time
   is near the curriculum rule's 5 % threshold (PLAN 4c: next, raise the demand ceiling). Open: single-obstacle stop rate
   drifts down with dense training; one seed per arm picked.
+
+## Demand 0.6 (144 cars/min) on the site + re-measured learning curve (2026-10-30, branch coordinator/demand)
+- protocol: SWEEP_DEMANDS and SITE_DEMANDS get 0.6; start page slider max 0.5 -> 0.6. Owner: raise the maximum on the
+  site and in training (curriculum rule 4c: round9_best is stuck 5.6 % of the time at the old ceiling 0.5).
+- Report seeds, 180 s sweep (runs/deadlock/r9_sweep_all.jsonl), thr/min / crash+off per 1000 / queue end per env /
+  time in deadlock at 0.5 -> 0.6: round9_best 108.8 / 7 / 6.7 / 5.6 % -> 103.2 / 27 / 73.8 / 29.5 %; round8_best
+  102.8 / 35 / 12.2 / 14.1 % -> 99.9 / 77 / 69.7 / 36.7 %; reservation 94.8 / 0 / 51 -> 98.2 / 0 / 114; light 30.7 ->
+  30.4. Above its capacity the brain's throughput drops and deadlocks are 5x as frequent: the overload regime is untrained.
+- /lernen: throughput at 0.6 and mean delay at 0.3 of up to 30 checkpoints along the main chain (wide crossing only,
+  evenly spaced in x, measured in today's world; site build `capacity_points`, snapshot keeps them). Throughput at
+  144/min: wide_s1@0 1 -> wide_s1ft 23 -> r1_x3 30 -> r2_B_s1 30-35 (delay at 72/min rises 3 -> 14 s: obstacle training
+  made it cautious) -> r5_K 53 -> r6_DO 75 -> r8_M 93-105 -> round9_best 104/min (delay 0.9 s); light 30, reservation 95.
