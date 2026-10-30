@@ -13,7 +13,7 @@ from smartcrossing.protocol import SITE_DEMANDS
 from smartcrossing.sim import SimConfig, js_constants
 
 from .bench import BENCH_ENVS, BENCH_SECONDS, BENCH_SEEDS, pol_entry, record_replays
-from .collect import reward_of
+from .collect import CAPACITY_DEMANDS, reward_of
 from .context import Context
 from .discover import run_rollout_envs, world_of, write_snapshot
 from .fundamental import fundamental_data, gate_of
@@ -117,6 +117,7 @@ def write_site(ctx: Context, sel: dict, bres: dict, cfg: SimConfig, a):
         "timelines": sel["timelines"],
         "chains": sel["chains"],
         "curves": sel["curves"],
+        "capacity": {"points": sel["capacity"], "demands": CAPACITY_DEMANDS},  # /lernen: re-measured checkpoints
         "others": sel["others"],
         "baselines": bres["baselines_by_world"][bres["main_world"]],  # in the main brain's world
         "baselines_by_world": bres["baselines_by_world"],  # world ("wide" / "narrow") -> {light, reservation}
@@ -143,7 +144,8 @@ def write_site(ctx: Context, sel: dict, bres: dict, cfg: SimConfig, a):
         replays["world"] = {k: base_phys[k] for k in ("L", "W", "Rc") if k in base_phys}
     data["replay_world"] = world_of(base_phys)
     if ctx.kind in ("runs", "merge"):
-        write_snapshot(ctx, [cid for cid in policies if cid in found], [r["run"] for ch in sel["chains"].values() for r in ch])
+        used = [cid for cid in policies if cid in found] + [p["id"] for p in sel["capacity"] if p["id"] not in policies]
+        write_snapshot(ctx, used, [r["run"] for ch in sel["chains"].values() for r in ch])
     src_hash = hashlib.sha1(b"".join(f.read_bytes() for f in sorted(ctx.src.rglob("*")) if f.is_file())
                             + sim_config_js().encode()).hexdigest()
     version = hashlib.sha1((json.dumps([data, replays], sort_keys=True) + src_hash).encode()).hexdigest()[:8]

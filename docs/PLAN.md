@@ -198,6 +198,7 @@ crashes in the box; lamp unused so far.
    (~96/min) more demand mostly means longer queues, more training crashes, slower runs and the n_slots
    limit. Today (ceiling 0.5 /s/arm = 120/min) the round-9 brain is stuck 5.6 % of the time there on report
    seeds (round 8: 11-14 %, round 7: 20-23 %): at the threshold, so the next round may raise the ceiling.
+   At 0.6 (144/min) round9_best is stuck 29.5 % of the time (thr 109 -> 103): round 10 trains with ceiling 0.6.
    Practice obstacles stay part of the normal training world (no separate obstacle training): deadlocks
    do not replace them (slow roll-in inside the box, they get rarer as the brain improves; the round-7
    control with dense traffic but no blockades lost block stop 1.00 -> 0.75). Open check (optional):

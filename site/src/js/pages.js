@@ -769,6 +769,34 @@
         xTipFmt: (x) => `${tx(method === "ppo" ? "gen.step.short" : "gen.generation")} ${Math.round(x)}`,
         markers, phases, bands, directLabels: true, height: 300, aria: tx("curve.aria"),
       });
+      drawCapacity(method, starts[0], lastX, phases, markers);
+    }
+    /** Re-measured checkpoints of the main chain (site build "capacity"): throughput at overload and delay
+     * at medium traffic, on the learning curve's x axis, with the rule-based drivers as dashed lines. */
+    function drawCapacity(m, x0, x1, phases, markers) {
+      const C = D.capacity, part = $("capacity-part");
+      if (!part) return;
+      const pts = C && m === mainMethod ? C.points.filter((p) => p.thr !== undefined) : [];
+      part.hidden = pts.length < 2;
+      if (part.hidden) return;
+      const dem = (d) => num(D.policies[MAIN_ID].bench[String(d)] ? D.policies[MAIN_ID].bench[String(d)].demand_per_min : d * 240, 0);
+      document.querySelectorAll("[data-cap-thr]").forEach((e) => { e.textContent = dem(C.demands.thr); });
+      document.querySelectorAll("[data-cap-delay]").forEach((e) => { e.textContent = dem(C.demands.delay); });
+      const xa = Math.min(x0, pts[0].x), xb = Math.max(x1, pts[pts.length - 1].x);
+      const flat = (v) => [[xa, v], [xb, v]];
+      const base = (drv, d, key) => (D.baselines[drv][String(d)] || {})[key];
+      const chart = (host, key, d, bkey, label, fmt) => SCX.lineChart(host, {
+        series: [
+          { name: tx("drv.policy"), color: SCX.cssVar("--c1"), points: pts.map((p) => [p.x, p[key]]), dots: true },
+          { name: tx("drv.reservation"), color: SCX.cssVar("--c4"), points: flat(base("reservation", d, bkey)), dash: true },
+          { name: tx("drv.light"), color: SCX.cssVar("--c3"), points: flat(base("light", d, bkey)), dash: true },
+        ],
+        xMin: xa, xMax: xb, yMin: 0, yFmt: fmt, yLabel: label, xLabel: tx("gen.step"),
+        xTipFmt: (x) => `${tx("gen.step.short")} ${Math.round(x)}`,
+        markers, directLabels: true, height: 220, aria: label,
+      });
+      chart($("capacity"), "thr", C.demands.thr, "throughput_per_min", tx("cap.thr", { n: dem(C.demands.thr) }), (v) => tx("cap.permin", { v: num(v, 0) }));
+      chart($("delay"), "delay", C.demands.delay, "delay_mean_s", tx("cap.delay", { n: dem(C.demands.delay) }), (v) => tx("cap.s", { v: num(v, 1) }));
     }
     setupSlider();
     show();

@@ -12,8 +12,8 @@ def test_values_are_fixed():
     assert (protocol.ENVS, protocol.SECONDS, protocol.SWEEP_SECONDS) == (8, 120.0, 180.0)
     assert protocol.EVAL_DEMANDS == (0.05, 0.15, 0.3, 0.5)
     assert protocol.SELECT_DEMANDS == (0.15, 0.3, 0.5)
-    assert protocol.SWEEP_DEMANDS == (0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5)
-    assert protocol.SITE_DEMANDS == (0.05, 0.1, 0.15, 0.2, 0.3, 0.5)
+    assert protocol.SWEEP_DEMANDS == (0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6)
+    assert protocol.SITE_DEMANDS == (0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 0.6)
 
 
 def test_modules_use_the_protocol():

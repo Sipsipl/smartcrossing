@@ -18,6 +18,6 @@ ENVS, SECONDS = 8, 120.0
 
 EVAL_DEMANDS = (0.05, 0.15, 0.3, 0.5)  # cli evalset (the standard eval)
 SELECT_DEMANDS = (0.15, 0.3, 0.5)  # cli select (needs 0.3 for the crash limit and 0.5 for the score)
-SWEEP_DEMANDS = (0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5)  # cli deadlock (fundamental diagram) and cli cloud
+SWEEP_DEMANDS = (0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6)  # cli deadlock (fundamental diagram) and cli cloud
 SWEEP_SECONDS = 180.0  # cli deadlock: longer runs than a bench (deadlocks need time to form and end)
-SITE_DEMANDS = (0.05, 0.1, 0.15, 0.2, 0.3, 0.5)  # site bench, up to the start page slider maximum (120 cars/min)
+SITE_DEMANDS = (0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 0.6)  # site bench, up to the start page slider maximum (144 cars/min)
