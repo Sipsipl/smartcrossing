@@ -65,7 +65,7 @@
       this.selUid = -1;
       this.fate = null; // {uid, kind, t}
       this.listeners = [];
-      this.controls = { demand: 0.15, turn: [1, 1, 1], signal: true, noise: 0 };
+      this.controls = { demand: this.opts.demand ?? 0.15, turn: [1, 1, 1], signal: true, noise: 0 };
       this.newSim();
       if (this.opts.select) this._bindClicks();
       new ResizeObserver(() => this.resize()).observe(canvas);
@@ -410,7 +410,11 @@
         const d = o[r.i] * r.scale, a = th + (r.deg * Math.PI) / 180;
         return [x + Math.cos(a) * d, y + Math.sin(a) * d, d >= r.scale - 1e-6];
       };
-      const nbPos = (nb) => ego(o[nb.fwd.i] * nb.fwd.scale, o[nb.left.i] * nb.left.scale);
+      // a seen neighbour is drawn where its car is drawn (interpolated like the cars, as on the brain page), so
+      // badges glide with the cars instead of jumping at every sim step; its observed position is the fallback
+      const slots = this.neighbourSlots(n, m.nbs.length);
+      const nbPos = (nb, k) => (slots[k] >= 0 ? [ip.x[slots[k]], ip.y[slots[k]]]
+        : ego(o[nb.fwd.i] * nb.fwd.scale, o[nb.left.i] * nb.left.scale));
       const lw = 1.6 / (this.px || 4) * (window.devicePixelRatio || 1);
       if (under) {
         // perception range (neighbours further away are not seen)
@@ -429,11 +433,11 @@
         }
         // neighbour lines
         ctx.strokeStyle = OVL.nb; ctx.lineWidth = lw;
-        for (const nb of m.nbs) {
-          if (o[nb.present.i] < 0.5) continue;
-          const [nx, ny] = nbPos(nb);
+        m.nbs.forEach((nb, k) => {
+          if (o[nb.present.i] < 0.5) return;
+          const [nx, ny] = nbPos(nb, k);
           ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(nx, ny); ctx.stroke();
-        }
+        });
         return;
       }
       // ray end points: hit (red dot) or nothing within range (open circle)
@@ -446,7 +450,7 @@
       // neighbours: numbered badge filled with the lamp colour the car *receives*
       m.nbs.forEach((nb, k) => {
         if (o[nb.present.i] < 0.5) return;
-        const [nx, ny] = nbPos(nb);
+        const [nx, ny] = nbPos(nb, k);
         const s0 = nb.lamps.length > 0 ? o[nb.lamps[0].i] : 0, s1 = nb.lamps.length > 1 ? o[nb.lamps[1].i] : 0;
         ctx.beginPath(); ctx.arc(nx, ny, 1.55, 0, 2 * Math.PI);
         ctx.fillStyle = cfg.signal_enabled ? SCX.lampCSS(nb.lamps.length, s0, s1) : "rgb(90,90,96)";

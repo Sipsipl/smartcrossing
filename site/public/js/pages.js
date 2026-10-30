@@ -406,6 +406,7 @@
     layoutWarning($("panel"));
     const cx = makeCrossing($("stage"), {
       overlay: "sensors", autoSelect: true, speed: 0.5, speeds: [0.25, 0.5, 1, 2], follow: true,
+      demand: 0.3, // 72 cars/min: several neighbours around the followed car, still flowing (deadlock time ~0 %)
       hint: tx("hint.tap"),
       onRefresh: (c) => { SCX.renderSelHead(c, $("selhead")); renderObsPanel(c, $("obs")); },
     });
