@@ -65,7 +65,7 @@
       this.selUid = -1;
       this.fate = null; // {uid, kind, t}
       this.listeners = [];
-      this.controls = { demand: 0.15, turn: [1, 1, 1], signal: true, noise: 0 };
+      this.controls = { demand: this.opts.demand ?? 0.15, turn: [1, 1, 1], signal: true, noise: 0 };
       this.newSim();
       if (this.opts.select) this._bindClicks();
       new ResizeObserver(() => this.resize()).observe(canvas);
