@@ -1059,3 +1059,69 @@ Behaviour (`analyze`, @0.15, 16 envs, ckpt_2650 / s0ft 2850):
   drive just as well" was wrong since round 6 / 7 and is replaced).
 - Decision: r8_M_s1@1398 -> results/round8_best.npz, new site main brain (previous r7_DOB_s1@1050). Open: a second control
   seed, longer runs, deadlocks at 120/min still ~7-11 % of the time (curriculum rule 4c: raise the ceiling below ~5 %).
+
+## World change: exiting cars no longer block the spawn; n_slots 40 everywhere (owner, 2026-10-28, branch coordinator/edges)
+- Edge study (runs/edges/summary.txt): for round8_best 42-58 % of the queued arm-steps were blocked only by cars LEAVING
+  the map along the arm. Cause: in the spawn clearance a car outside the new car's corridor was charged the new car's own
+  speed (7 + 1.5 x 8 = 19 m), a rule meant for a car queued in the lane being joined. New rule `spawn_exit_static`
+  (default on; False = old rule, bit-identical): a driving car heading within 45 deg of the arm's outward direction needs
+  only the static 7 m. numpy / torch / JS parity-tested. Old brains run in the new world (world rule, like wreck_time).
+- `SimConfig.n_slots` 32 -> 40 (training has used 40 since round 7; the site bench / evalset / sweeps ran 32).
+- Quick re-measure, round8_best, report seeds 4000/5000/6000 x 8 envs x 180 s (steady 30-180 s; edges.py "current";
+  runs/edges/edges_world_*.jsonl, edges_newworld.jsonl). thr/min / crash+off per 1000 / queue at end per env / deadlock time:
+
+  | world | 0.4 | 0.5 |
+  |---|---|---|
+  | old rule, 32 slots (= summary "current") | 92.2 / 13.3 / 5.5 / 5.4 % | 108.5 / 26.2 / 19.9 / 13.5 % |
+  | old rule, 40 slots | 93.3 / 8.8 / 4.1 / 4.9 % | 110.1 / 27.8 / 13.7 / 11.7 % |
+  | new rule, 32 slots (= summary "oppfix") | 93.2 / 13.3 / 1.0 / 2.4 % | 109.3 / 32.7 / 12.6 / 15.9 % |
+  | new rule, 40 slots (new default) | 90.7 / 18.7 / 4.9 / 8.9 % | 107.7 / 37.8 / 12.2 / 16.6 % |
+
+  The brain was trained with the old rule; in the new world more cars reach the box and it crashes / deadlocks more.
+  Small sample (3 seeds): differences of a few thr/min are noise. Next: train in the new world (training picks it up by
+  default: --cfg from an older args.json has no spawn_exit_static key), then re-bench the site (sim.py hash changed).
+
+## Memory probe: what the round-8 GRU keeps (2026-10-27, scratchpad memprobe/)
+- Recorded h (16 units) of round8_best on report seeds and regressed it on present and past features. h mostly mirrors
+  the present (progress, manoeuvre, own lamp); the part not explained by the present covers ~1-2 s: own recent braking /
+  steering, whether the car ahead has just started, lamps ahead. No waiting clock (time since stopping is not decodable
+  beyond ~2 s). Units 10 / 11 (steering / manoeuvre) matter most when zeroed one at a time. Site wording: "merkt sich
+  die letzten 1-2 Sekunden: eigenes Bremsen und Lenken, und ob der Vordermann losgefahren ist".
+
+## Round 9: training in the corrected world (2026-10-28/29, branch coordinator/edges)
+- Arms: continued runs/r8_M_s1/state.npz (iter 1398, actor = round8_best) for 500 iterations in the new default world
+  (spawn_exit_static, n_slots 40), round-8 recipe (horizon 64, 1024 envs, memory 16, dense curriculum ceiling 0.5 / lo 0.1,
+  obstacle + blockade scenarios, critic warm-up 10). Runs r9_E_s1 (seed 1), r9_E_s2 (seed 2), GPU duty 0.8, ~7 s/iter,
+  ~1 h each. Training stats stable (kl ~0.007, train crash ~0.002-0.003 per car, queued per env ~0.4-1.0).
+- Selection (results/round9_select.jsonl, selection seeds, ref round8_best; all evaluated in the new world): the rule picked
+  E_s1@1850 (thr@0.5 109.2) but its block stop is 0.94; candidates with gate >= 0.95 and block 1.00 were E_s1@1550
+  (106.8 / crash 6.4 at 0.5), E_s2@1650 (107.6 / 9.5), E_s2@1850 (106.1 / 5.6). Later checkpoints of E_s1 fall below the
+  gate (0.84-0.93): stopping before single obstacles erodes with more dense-traffic training.
+- FRESH seeds 15000-18000 (never used for any choice; results/round9_deadlock_fresh.jsonl, 180 s), thr/min / crash+off
+  per 1000 / queue at end per env / time in deadlock:
+
+  | brain | 0.3 | 0.4 | 0.5 |
+  |---|---|---|---|
+  | round8_best | 68.6 / 3 / 0.1 / 0.8 % | 89.6 / 11 / 1.1 / 1.4 % | 103.8 / 31 / 13.0 / 12.4 % |
+  | E_s1@1550 | 68.8 / 2 / 0.1 / 0.0 % | 90.1 / 3 / 0.7 / 0.6 % | 106.2 / 11 / 11.8 / 10.9 % |
+  | E_s1@1850 | 68.8 / 4 / 0.1 / 0.2 % | 88.5 / 14 / 1.7 / 3.5 % | 107.0 / 25 / 9.4 / 8.7 % |
+  | E_s2@1650 | 68.8 / 2 / 0.2 / 0.3 % | 88.3 / 6 / 3.2 / 4.4 % | 104.4 / 13 / 14.1 / 12.8 % |
+  | E_s2@1850 | 68.9 / 1 / 0.2 / 0.6 % | 88.9 / 4 / 2.6 / 3.1 % | 106.2 / 10 / 14.4 / 9.6 % |
+
+  E_s1@1550 is best or equal at every demand (crashes 0.35x at 0.5, more throughput, shorter queue, less deadlock time).
+- REPORTING seeds 4000/5000/6000 (results/round9_heldout.jsonl = evalset 8 envs x 120 s; runs/deadlock/r9_sweep.jsonl =
+  site sweep 8 envs x 180 s -> results/deadlock_fundamental.json; cloud -> results/fundamental_cloud.json; all new world):
+
+  | | 0.3 | 0.4 | 0.5 |
+  |---|---|---|---|
+  | round9_best (E_s1@1550) | 68.1 / 1 / 0.3 % | 90.5 / 1 / 0 % | 108.8 / 7 / 5.6 % |
+  | round8_best | 68.1 / 2 / 0 % | 86.7 / 18 / 7.4 % | 102.8 / 35 / 14.1 % |
+  | reservation | 67.2 / 0 / 0 | 86.5 / 0 / 0 | 94.8 / 0 / 0 |
+  | light | 29.4 / 0 / 0 | 30.8 / 0 / 0 | 30.7 / 0 / 0 |
+
+  Queue at end per env at 0.5: round9 6.7, round8 12.2, reservation 51.1. Gate (evalset): round9 stop 0.41 / block 1.00,
+  round8 0.57 / 1.00: the new brain passes single obstacles more often instead of stopping (both pass safely).
+- Decision: r9_E_s1@1550 -> results/round9_best.npz, new site main brain (previous r8_M_s1@1398). The world fix plus
+  retraining is the largest crash reduction at 120/min so far (35 -> 7 per 1000 on report seeds) and the deadlock time
+  is near the curriculum rule's 5 % threshold (PLAN 4c: next, raise the demand ceiling). Open: single-obstacle stop rate
+  drifts down with dense training; one seed per arm picked.

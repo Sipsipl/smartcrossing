@@ -37,6 +37,7 @@ from .sim import (
     DONE_OFFROAD,
     DONE_TIMEOUT,
     DONE_WRONG,
+    EXIT_COS,
     GOAL_SCALE,
     LEFT,
     NEIGHBOUR_RANGE,
@@ -550,8 +551,9 @@ class TorchSim:
             self.stats.obstacles += okj
 
     # ------------------------------------------------------------------ spawning
-    def _spawn_clear(self, sx, sy, h, x, y, vx, vy, alive):
-        """(B, M) whether candidate spawn points (sx, sy) (M,) keep the clearance to every alive car."""
+    def _spawn_clear(self, sx, sy, h, x, y, vx, vy, alive, exiting=None):
+        """(B, M) whether candidate spawn points (sx, sy) (M,) keep the clearance to every alive car
+        (exiting: cars leaving along this arm, cfg.spawn_exit_static; as sim.Sim._spawn_clear)."""
         cfg = self.cfg
         dx, dy = x[:, None, :] - sx[:, None], y[:, None, :] - sy[:, None]
         dist = torch.hypot(dx, dy)
@@ -560,6 +562,8 @@ class TorchSim:
         rvx, rvy = cfg.spawn_speed * ch - vx[:, None, :], cfg.spawn_speed * sh - vy[:, None, :]
         closing = torch.clamp((rvx * dx + rvy * dy) / dd, min=0.0)
         own = torch.clamp(cfg.spawn_speed * (ch * dx + sh * dy) / dd, min=0.0)
+        if exiting is not None:
+            own = torch.where(exiting[:, None, :], 0.0, own)
         lat_off = (-sh * dx + ch * dy).abs()
         closing = torch.where(lat_off < 2 * DISC_R + SPAWN_LAT_MARGIN, closing, own)
         return ((dist > cfg.spawn_clearance + cfg.spawn_headway * closing) | ~alive[:, None, :]).all(-1)
@@ -615,7 +619,12 @@ class TorchSim:
             chn, shn = float(np.cos(hn)), float(np.sin(hn))
             # cars do not move during the arrivals: check the clearance to all cars once per arm,
             # then only against the car spawned in the previous pass (same result as rechecking all)
-            clear = self._spawn_clear(px, py, h, self.x, self.y, vx, vy, occ)
+            # cfg.spawn_exit_static: cars leaving along this arm (sim.exiting_mask; spawned cars never are)
+            exiting = None
+            if cfg.spawn_exit_static:
+                ch, sh = float(np.cos(h)), float(np.sin(h))
+                exiting = self.alive & (-(ch * torch.cos(self.th) + sh * torch.sin(self.th)) > EXIT_COS)
+            clear = self._spawn_clear(px, py, h, self.x, self.y, vx, vy, occ, exiting)
             for p in range(SPAWN_MAX_PER_STEP):
                 cand = (self.queue[:, k] > 0) & (~occ).any(1)
                 cnt = clear.sum(1)

@@ -246,7 +246,7 @@ def _state_hash(**kw):
     """Hash of a sim state after 200 steps of straight driving in traffic (obstacles on / off)."""
     import hashlib
 
-    cfg = SimConfig(**{**dict(n_slots=24, demand=0.3), **kw})
+    cfg = SimConfig(**{**dict(n_slots=24, demand=0.3, spawn_exit_static=False), **kw})  # the world of 2ac972f
     sim = Sim(cfg, 6, seed=11)
     act = np.zeros((6, cfg.n_slots, act_dim(cfg)))
     act[..., 0] = 0.3

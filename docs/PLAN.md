@@ -47,7 +47,9 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
   Kinematic unicycle with curvature, steering-rate and grip limits, dt=0.1 s. Cars spawn at a
   random lateral offset on the right half of the road in driving direction (`spawn_right`, default
   for baselines and learners; own spot if clear, else uniform among the clear spots; up to 3 per arm
-  and step, side by side), must exit through target arm. Crashed cars stay 10 s as wrecks (was 5 s until round 7) (hazard
+  and step, side by side; spawn clearance 7 m + 1.5 s x closing speed, a car outside the new car's
+  corridor counts as standing unless it is leaving along that arm: then 7 m only, `spawn_exit_static`
+  since 2026-10-28, before that exiting cars blocked the spawn ~2 s each), must exit through target arm. Crashed cars stay 10 s as wrecks (was 5 s until round 7) (hazard
   lights, driving into one = crash). Car-car collision via
   3 discs per car, off-road via rounded-corner distance. Removal on crash/offroad/exit/timeout.
   Observations are mirror-neutral: own state in a canonical frame (entry arm = south; position
@@ -143,15 +145,15 @@ trained agent types share the road (ncase.me "Evolution of Trust" style).
 - Subagents look at images themselves and report numbers; orchestrator keeps context small.
 - Emergence claims require ablations: signal zeroed/shuffled, no-comm training, MI(signal; intent).
 
-## Status (2026-10-25)
+## Status (2026-10-29)
 Done: simulator + baselines + metrics + tests; PPO training (numpy and GPU); emergence analysis
 tooling; website (site/, German + English) incl. sliders, agent mixing, side-by-side comparison, reward visual,
 set-brain view, fundamental diagram; wide crossing, grip limit, reverse gear, impact-speed crash cost, wrecks /
-brake light / hazard / one lamp / right-half spawning; rounds 1-8 (crash cost x3, obstacle scenarios,
-set/attention encoder, dense traffic, blockade scenarios, GRU memory); stop gate incl. block cases; deadlock study;
+brake light / hazard / one lamp / right-half spawning; rounds 1-9 (crash cost x3, obstacle scenarios,
+set/attention encoder, dense traffic, blockade scenarios, GRU memory, exit-spawn world fix + n_slots 40); stop gate incl. block cases; deadlock study;
 multi-seed site bench on held-out report seeds; run tracking; refactoring steps (latest: refactor 4, 2026-10-25).
-Main brain: round-8 brain results/round8_best.npz (site main `r8_M_s1@1398`, set encoder + GRU memory of 16; previous
-r7_DOB_s1@1050).
+Main brain: round-9 brain results/round9_best.npz (site main `r9_E_s1@1550`, set encoder + GRU memory of 16, trained
+in the corrected world; previous r8_M_s1@1398).
 Crash rule: equal cost for all involved (relative impact speed); own-speed variant C was worse (round 3).
 Open: deadlocks / near-gridlock in the box at high demand (cars removed after max_age 60 s); remaining
 crashes in the box; lamp unused so far.
@@ -194,8 +196,8 @@ crashes in the box; lamp unused so far.
    brain is stuck (deadlock) less than ~5 % of the time at the current ceiling (`cli deadlock`, report
    seeds), raise the ceiling in the next round (keep sampling low demands). Not before: above capacity
    (~96/min) more demand mostly means longer queues, more training crashes, slower runs and the n_slots
-   limit. Today (ceiling 0.5 /s/arm = 120/min) the round-8 brain is still stuck ~7-11 % of the time there
-   (round 7: 20-23 %).
+   limit. Today (ceiling 0.5 /s/arm = 120/min) the round-9 brain is stuck 5.6 % of the time there on report
+   seeds (round 8: 11-14 %, round 7: 20-23 %): at the threshold, so the next round may raise the ceiling.
    Practice obstacles stay part of the normal training world (no separate obstacle training): deadlocks
    do not replace them (slow roll-in inside the box, they get rarer as the brain improves; the round-7
    control with dense traffic but no blockades lost block stop 1.00 -> 0.75). Open check (optional):

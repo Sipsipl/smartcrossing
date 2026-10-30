@@ -318,11 +318,12 @@
     const vm = crashVerdict("0.15"), vd = crashVerdict("0.3");
     // bench values are means over several traffic seeds (held-out reporting seeds), but still a rounded comparison
     const Hm = isSetEntry(m) && m.policy.arch.mem ? m.policy.arch.mem.size : 0;
+    const p = D.previous && pol(D.previous), prevHm = isSetEntry(p) && p.policy.arch.mem ? p.policy.arch.mem.size : 0;
     return isSetEntry(m)
-      ? tx(Hm ? "note.mem" : "note.set", { Hm,
+      ? tx(prevHm ? "note.world" : Hm ? "note.mem" : "note.set", { Hm,
         K: m.policy.arch.K, midw: tx(vm), mid,
         dense: dense && vd ? tx("note.dense", { dw: tx(vd), dense }) : "",
-        thrw: tx("note.thr." + SCX.compare(thr, thrPrev, 2, SCX.THR_REL)), thr: num(thr, 0), thrprev: num(thrPrev, 0), dem: num(m.bench["0.5"].demand_per_min, 0),
+        thrw: tx("note.thr." + SCX.compare(thr, thrPrev, 2, SCX.THR_REL)), thr: num(thr, 0), thrprev: num(thrPrev, 0), crash5: crashPair("0.5"), dem: num(m.bench["0.5"].demand_per_min, 0),
         block: D.gate && D.gate.main ? pct(D.gate.main.block) : "?",
       })
       : tx("note.mlp", { much, mid });

@@ -119,7 +119,8 @@ def load_adapted_policy(path: str | Path) -> dict:
 # and without reverse gear)
 # n_signal (lamp count) and brake_light (neighbour block layout) are interface values too: checkpoints
 # from before 2026-10-11 have 2 lamps and see the neighbours' acceleration. Traffic / world settings
-# that are not part of the interface (spawn_right, wreck_time, demand) are NOT taken from a checkpoint.
+# that are not part of the interface (spawn_right, spawn_exit_static, wreck_time, n_slots, demand) are NOT taken
+# from a checkpoint: old brains run in the current world (like wreck_time 10 s, the spawn exit rule of 2026-10-28).
 LEGACY_INTERFACE = {"neighbour_vis": 30.0, "speed_control": False, "n_signal": 2, "brake_light": False,
                     "n_neighbours": simmod.K_NEIGHBOURS, "L": 50.0, "W": 3.5, "Rc": 6.0, "a_lat_max": 0.0, "v_reverse": 0.0}
 INTERFACE_KEYS = ("n_signal", "brake_light", "n_neighbours")  # what changes the observation / action sizes
